@@ -22,7 +22,7 @@ implementation
 procedure SIRegister_ComObj(cl: TPSPascalCompiler);
 begin
 {$IFDEF FPC}
-    {$IFDEF PS_FPC_HAS_COM}
+    {$IF Defined(PS_FPC_HAS_COM) or Defined(PS_INNO_WINDOWS_TARGET)}
     cl.AddTypeS('HResult', 'LongInt');
     cl.AddTypeS('TGUID', 'record D1: LongWord; D2: Word; D3: Word; D4: array[0..7] of Byte; end;');
     cl.AddTypeS('TCLSID', 'TGUID');

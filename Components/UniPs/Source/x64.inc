@@ -190,6 +190,12 @@ end;
 
 {$ELSE} // ! OLD asm-win-x64 version ! GPF on exception !
 
+{$IFDEF FPC}
+{$PUSH}
+{ This nostackframe routine creates and owns its frame, including negative offsets }
+{$WARN 7104 OFF}
+{$ENDIF}
+
 procedure x64call(
   Address: Pointer;
   out _RAX: IPointer;
@@ -293,16 +299,18 @@ asm
 
   mov rax, [rbp-32] //registers
 
-  bt [rax+72], 8                 // if atype.basetype  <> btSingle
+  bt dword ptr [rax+72], 8                 // if atype.basetype  <> btSingle
   jnc @g5                        //
   cvtss2sd xmm1,xmm0             // convert single to double  into xmm1
   mov rdx,[rbp-24]               // @_xmm0  ;rbp -24
-  movsd qword ptr [rdx], xmm1    // save  xmm1 to param _xmm0
+  movq rax, xmm1
+  mov [rdx], rax                // save xmm1 to param _xmm0
   jmp @g5e                       // exit if atype.basetype  = btSingle
 
   @g5:                           //else "if atype.basetype  = btSingle"
     mov rdx,[rbp-24]             // @_xmm0  ;rbp -24
-    movsd qword ptr [rdx], xmm0  // save  xmm1 to param _xmm0
+    movq rax, xmm0
+    mov [rdx], rax              // save xmm0 to param _xmm0
 
   @g5e:
 
@@ -310,6 +318,7 @@ asm
   leave
   ret
 end;
+{$IFDEF FPC}{$POP}{$ENDIF}
 {$ENDIF}
 
 {$ELSE} //not MSWINDOWS

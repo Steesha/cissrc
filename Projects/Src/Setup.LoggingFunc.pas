@@ -58,8 +58,9 @@ end;
 procedure LogLogOpened;
 var
   PlusOrMinus: Char;
+  Offset: Int64;
 begin
-  var Offset := LocalTimeBias;
+  Offset := LocalTimeBias;
   if Offset >= 0 then
     PlusOrMinus := '+'
   else begin

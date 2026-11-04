@@ -37,13 +37,15 @@ uses
 
 procedure GenerateEncryptionKey(const Password: String; const Salt: TSetupKDFSalt;
   const Iterations: Integer; out Key: TSetupEncryptionKey);
+var
+  SaltBytes, KeyBytes: TBytes;
+  SaltSize, KeyLength: Integer;
 begin
-  var SaltBytes: TBytes;
-  var SaltSize := SizeOf(Salt);
+  SaltSize := SizeOf(Salt);
   SetLength(SaltBytes, SaltSize);
   Move(Salt[0], SaltBytes[0], SaltSize);
-  var KeyLength := SizeOf(Key);
-  var KeyBytes := PBKDF2SHA256(Password, SaltBytes, Iterations, KeyLength);
+  KeyLength := SizeOf(Key);
+  KeyBytes := PBKDF2SHA256(Password, SaltBytes, Iterations, KeyLength);
   try
     Move(KeyBytes[0], Key[0], KeyLength);
   finally
@@ -55,9 +57,11 @@ end;
 procedure InitCryptContext(const CryptKey: TSetupEncryptionKey;
   const EncryptionBaseNonce: TSetupEncryptionNonce; const StartOffset: Int64; const FirstSlice: Int32;
   out CryptContext: TChaCha20Context);
+var
+  Nonce: TSetupEncryptionNonce;
 begin
   { Create the unique nonce from the base nonce }
-  var Nonce := EncryptionBaseNonce;
+  Nonce := EncryptionBaseNonce;
   Nonce.RandomXorStartOffset := Nonce.RandomXorStartOffset xor StartOffset;
   Nonce.RandomXorFirstSlice := Nonce.RandomXorFirstSlice xor FirstSlice;
 
@@ -67,16 +71,19 @@ end;
 procedure InitCryptContext(const CryptKey: TSetupEncryptionKey;
   const EncryptionBaseNonce: TSetupEncryptionNonce; const Typ: TSpecialCryptContextType;
   out CryptContext: TChaCha20Context); overload;
+var
+  SpecialFirstSlice: Integer;
 begin
-  const SpecialFirstSlice = -1-(Ord(Typ)-Ord(Low(Typ)));
+  SpecialFirstSlice := -1-(Ord(Typ)-Ord(Low(Typ)));
   InitCryptContext(CryptKey, EncryptionBaseNonce, 0, SpecialFirstSlice, CryptContext);
 end;
 
 { This function assumes CryptKey is based on the password }
 procedure GeneratePasswordTest(const CryptKey: TSetupEncryptionKey;
   const EncryptionBaseNonce: TSetupEncryptionNonce; out PasswordTest: Integer);
+var
+  Context: TChaCha20Context;
 begin
-  var Context: TChaCha20Context;
   InitCryptContext(CryptKey, EncryptionBaseNonce, sccPasswordTest, Context);
 
   { Encrypt a value of 0 so Setup can do same and compare the results to test the password }
@@ -86,8 +93,9 @@ end;
 
 function TestPassword(const CryptKey: TSetupEncryptionKey;
   const EncryptionBaseNonce: TSetupEncryptionNonce; const ExpectedPasswordTest: Integer): Boolean;
+var
+  ActualPasswordTest: Integer;
 begin
-  var ActualPasswordTest: Integer;
   GeneratePasswordTest(CryptKey, EncryptionBaseNonce, ActualPasswordTest);
   Result := ActualPasswordTest = ExpectedPasswordTest;
 end;

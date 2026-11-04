@@ -36,12 +36,14 @@ procedure SetDebugServerWnd(Wnd: HWND; WantCodeText: Boolean);
 implementation
 
 uses
-  Forms, Classes, Shared.CommonFunc, Shared.Struct, Setup.InstFunc, Setup.MainFunc;
+  Forms, Classes, {$IFDEF FPC}LCLIntf, LMessages,{$ENDIF} Shared.CommonFunc, Shared.Struct, Setup.InstFunc, Setup.MainFunc;
 
 type
+  TDebugWindowMessage = {$IFDEF FPC}TLMessage{$ELSE}TMessage{$ENDIF};
+
   TDummyClass = class
   private
-    class procedure DebugClientWndProc(var Message: TMessage);
+    class procedure DebugClientWndProc(var Message: TDebugWindowMessage);
   end;
 
 var
@@ -53,20 +55,21 @@ var
 procedure SetDebugServerWnd(Wnd: HWND; WantCodeText: Boolean);
 var
   I: Integer;
+  DebuggerVersion: LRESULT;
 begin
   { First, verify that the debugger/IDE is the same version as Setup.
     A mismatch is possible when debugging an uninstaller if the uninstaller
     EXE was created by an installer built with a later version of IS. We can't
     continue in such a case because the debugger would send over updated
     "compiled code text" that is incompatible with this version of Setup. }
-  const DebuggerVersion = SendMessage(Wnd, WM_Debugger_QueryVersion, 0, 0);
+  DebuggerVersion := SendMessageW(Wnd, WM_Debugger_QueryVersion, 0, 0);
   if DebuggerVersion <> SetupBinVersion then
     raise Exception.CreateFmt('Cannot debug. Debugger version ($%.8x) does ' +
       'not match Setup version ($%.8x)', [DebuggerVersion, SetupBinVersion]);
 
   Debugging := True;
   DebugServerWnd := Wnd;
-  DebugClientWnd := AllocateHWnd(TDummyClass.DebugClientWndProc);
+  DebugClientWnd := {$IFDEF FPC}LCLIntf.{$ENDIF}AllocateHWnd(TDummyClass.DebugClientWndProc);
   if DebugClientWnd = 0 then
     InternalError('Failed to create DebugClientWnd');
 
@@ -86,7 +89,7 @@ begin
     DebugServerWnd := 0;
   end;
   if DebugClientWnd <> 0 then begin
-    DeallocateHWnd(DebugClientWnd);
+    {$IFDEF FPC}LCLIntf.{$ENDIF}DeallocateHWnd(DebugClientWnd);
     DebugClientWnd := 0;
   end;
 end;
@@ -98,7 +101,7 @@ function InternalDebugNotify(DebuggerMsg: UINT; Kind: TDebugEntryKind;
   if the debugger paused and the user resumed via Step Over, False otherwise. }
 var
   SaveAppTitle, CallStack: String;
-  WindowList: Pointer;
+  WindowList: {$IFDEF FPC}TList{$ELSE}Pointer{$ENDIF};
   Msg: TMsg;
   TopWindow: HWND;
   CallStackCount: Cardinal;
@@ -126,11 +129,11 @@ begin
 
   { Wait until we get clearance to continue }
   SaveAppTitle := Application.Title;
-  WindowList := DisableTaskWindows(0);
+  WindowList := {$IFDEF FPC}Screen.DisableForms(nil){$ELSE}DisableTaskWindows(0){$ENDIF};
   try
     Application.Title := '[Paused] ' + SaveAppTitle;
     while not DebugContinue do begin
-      case Integer(GetMessage(Msg, 0, 0, 0)) of
+      case Integer(GetMessageW(Msg, 0, 0, 0)) of
         -1: Break; { if GetMessage failed }
         0: begin
              { Repost WM_QUIT messages }
@@ -139,11 +142,11 @@ begin
            end;
       end;
       TranslateMessage(Msg);
-      DispatchMessage(Msg);
+      DispatchMessageW(Msg);
     end;
     ADebugContinueStepOver := DebugContinueStepOver;
   finally
-    EnableTaskWindows(WindowList);
+    {$IFDEF FPC}Screen.EnableForms(WindowList){$ELSE}EnableTaskWindows(WindowList){$ENDIF};
     Application.Title := SaveAppTitle;
   end;
 
@@ -206,8 +209,9 @@ begin
   SendCopyDataMessageStr(DebugServerWnd, DebugClientWnd, CD_Debugger_LogMessageW, Msg);
 end;
 
-class procedure TDummyClass.DebugClientWndProc(var Message: TMessage);
+class procedure TDummyClass.DebugClientWndProc(var Message: TDebugWindowMessage);
 var
+  CopyData: PCopyDataStruct;
   VariableDebugEntry: TVariableDebugEntry;
   EvaluateExp, EvaluateResult: String;
 begin
@@ -232,12 +236,16 @@ begin
           SetForegroundWindow(HWND(Message.WParam));
         end;
       WM_COPYDATA: begin
-          const CopyDataMsg = DWORD(TWMCopyData(Message).CopyDataStruct.dwData);
-          case CopyDataMsg of
+          CopyData := PCopyDataStruct(Message.LParam);
+          if (CopyData = nil) or ((CopyData^.cbData <> 0) and (CopyData^.lpData = nil)) then
+            Exit;
+          case DWORD(CopyData^.dwData) of
             CD_DebugClient_EvaluateConstantW: begin
                 try
-                  SetString(EvaluateExp, PChar(TWMCopyData(Message).CopyDataStruct.lpData),
-                    TWMCopyData(Message).CopyDataStruct.cbData div SizeOf(Char));
+                  if CopyData^.cbData mod SizeOf(WideChar) <> 0 then
+                    Exit;
+                  SetString(EvaluateExp, PWideChar(CopyData^.lpData),
+                    CopyData^.cbData div SizeOf(WideChar));
                   try
                     Inc(DisableCodeConsts);
                     try
@@ -258,7 +266,9 @@ begin
               end;
             CD_DebugClient_EvaluateVariableEntry: begin
                 try
-                  Move(TWMCopyData(Message).CopyDataStruct.lpData^, VariableDebugEntry, SizeOf(VariableDebugEntry));
+                  if CopyData^.cbData <> SizeOf(VariableDebugEntry) then
+                    Exit;
+                  Move(CopyData^.lpData^, VariableDebugEntry, SizeOf(VariableDebugEntry));
                   try
                     if CodeRunner = nil then
                       raise Exception.Create('Cannot evaluate variable because [Code] isn''t running yet');
@@ -278,8 +288,8 @@ begin
             CD_DebugClient_CompiledCodeTextA: begin
                 try
                   DebugClientCompiledCodeText := '';
-                  SetString(DebugClientCompiledCodeText, PAnsiChar(TWMCopyData(Message).CopyDataStruct.lpData),
-                    TWMCopyData(Message).CopyDataStruct.cbData div SizeOf(AnsiChar));
+                  SetString(DebugClientCompiledCodeText, PAnsiChar(CopyData^.lpData),
+                    CopyData^.cbData div SizeOf(AnsiChar));
                   Message.Result := 1;
                 except
                   { don't propagate exceptions }
@@ -288,8 +298,8 @@ begin
             CD_DebugClient_CompiledCodeDebugInfoA: begin
                 try
                   DebugClientCompiledCodeDebugInfo := '';
-                  SetString(DebugClientCompiledCodeDebugInfo, PAnsiChar(TWMCopyData(Message).CopyDataStruct.lpData),
-                    TWMCopyData(Message).CopyDataStruct.cbData div SizeOf(AnsiChar));
+                  SetString(DebugClientCompiledCodeDebugInfo, PAnsiChar(CopyData^.lpData),
+                    CopyData^.cbData div SizeOf(AnsiChar));
                   Message.Result := 1;
                 except
                   { don't propagate exceptions }
@@ -299,7 +309,7 @@ begin
         end;
     else
       with Message do
-        Result := DefWindowProc(DebugClientWnd, Msg, WParam, LParam);
+        Result := DefWindowProcW(DebugClientWnd, Msg, WParam, LParam);
     end;
   except
     Application.HandleException(nil);

@@ -9,6 +9,8 @@ unit Setup.DownloadFileFunc;
   Installation procedures: downloading files
 }
 
+{$IFDEF FPC}{$MODESWITCH NESTEDPROCVARS}{$ENDIF}
+
 interface
 
 uses
@@ -21,16 +23,16 @@ type
   TOnSimpleDownloadNoProgress = procedure;
 
 function DownloadFile(const Url, CustomUserName, CustomPassword: String;
-  const DestF: TFile; [ref] const Verification: TSetupFileVerification; const ISSigSourceFilename: String;
+  const DestF: TFile; {$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} Verification: TSetupFileVerification; const ISSigSourceFilename: String;
   const OnSimpleDownloadProgress: TOnSimpleDownloadProgress;
   const OnSimpleDownloadProgressParam: Int64;
   const OnSimpleDownloadNoProgress: TOnSimpleDownloadNoProgress): Int64;
 
 function DownloadTemporaryFile(const Url, BaseName: String;
-  [ref] const Verification: TSetupFileVerification; const OnDownloadProgress: TOnDownloadProgress;
+  {$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} Verification: TSetupFileVerification; const OnDownloadProgress: TOnDownloadProgress;
   const OnDownloadNoProgress: TOnDownloadNoProgress): Int64; overload;
 function DownloadTemporaryFile(const Url, BaseName: String;
-  [ref] const Verification: TSetupFileVerification; const OnDownloadProgress: TOnDownloadProgress;
+  {$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} Verification: TSetupFileVerification; const OnDownloadProgress: TOnDownloadProgress;
   const OnDownloadNoProgress: TOnDownloadNoProgress; out DestFile: String): Int64; overload;
 function DownloadTemporaryFileSize(const Url: String): Int64;
 function DownloadTemporaryFileDate(const Url: String): String;
@@ -41,7 +43,8 @@ function GetISSigUrl(const Url, ISSigUrl: String): String;
 implementation
 
 uses
-  Windows, Classes, Forms, SysUtils, Net.HttpClient, Net.URLClient, NetEncoding,
+  Windows, Classes, Forms, SysUtils, SyncObjs,
+  {$IFDEF FPC}URIParser, Setup.WinHttp,{$ELSE}Net.HttpClient, Net.URLClient, NetEncoding,{$ENDIF}
   ISSigFunc, PathFunc, SHA256,
   Shared.CommonFunc, Shared.SetupMessageIDs, Shared.SetupTypes,
   SetupLdrAndSetup.InstFunc, SetupLdrAndSetup.Messages,
@@ -67,7 +70,7 @@ type
       FOnSimpleDownloadProgress: TOnSimpleDownloadProgress;
       FOnSimpleDownloadProgressParam: Int64;
       FOnSimpleDownloadNoProgress: TOnSimpleDownloadNoProgress;
-      FLock: TObject;
+      FLock: TCriticalSection;
       FProgress, FProgressMax: Int64;
       FProgressSet: Boolean;
       FLastReportedProgress: Int64;
@@ -93,8 +96,47 @@ type
     function Download(const UseSetupMessagesForErrors: Boolean): Int64;
   end;
 
-function GetCredentialsAndCleanUrl(const Url, CustomUser, CustomPass: String; var User, Pass, CleanUrl: String) : Boolean;
+{$IFDEF FPC}
+procedure FindUrlCredentials(const Url: String; out StartIndex, AtIndex: Integer);
+var
+  I: Integer;
 begin
+  StartIndex := Pos('://', Url);
+  AtIndex := 0;
+  if StartIndex = 0 then
+    Exit;
+  Inc(StartIndex, 3);
+  for I := StartIndex to Length(Url) do begin
+    if CharInSet(Url[I], ['/', '?', '#']) then
+      Break;
+    if Url[I] = '@' then
+      AtIndex := I;
+  end;
+end;
+{$ENDIF}
+
+function GetCredentialsAndCleanUrl(const Url, CustomUser, CustomPass: String; var User, Pass, CleanUrl: String) : Boolean;
+{$IFDEF FPC}
+var
+  Uri: TURI;
+  StartIndex, AtIndex: Integer;
+{$ENDIF}
+begin
+  {$IFDEF FPC}
+  FindUrlCredentials(Url, StartIndex, AtIndex);
+  CleanUrl := Url;
+  if AtIndex <> 0 then
+    Delete(CleanUrl, StartIndex, AtIndex - StartIndex + 1);
+  Uri := ParseURI(UTF8Encode(Url));
+  if CustomUser = '' then
+    User := UTF8Decode(Uri.Username)
+  else
+    User := CustomUser;
+  if CustomPass = '' then
+    Pass := UTF8Decode(Uri.Password)
+  else
+    Pass := CustomPass;
+  {$ELSE}
   const Uri = TUri.Create(Url); { This is a record so no need to free }
   if CustomUser = '' then
     User := TNetEncoding.URL.Decode(Uri.Username, [])
@@ -107,6 +149,7 @@ begin
   Uri.Username := '';
   Uri.Password := '';
   CleanUrl := Uri.ToString;
+  {$ENDIF}
   Result := (User <> '') or (Pass <> '');
   if Result then
     LogFmt('Download is using basic authentication: %s, ***', [User])
@@ -114,11 +157,14 @@ begin
     Log('Download is not using basic authentication');
 end;
 
+{$IFNDEF FPC}
 procedure SetUserAgentAndSecureProtocols(const AHTTPClient: THTTPClient);
 begin
   AHTTPClient.UserAgent := SetupTitle + ' ' + SetupVersion;
   AHTTPClient.SecureProtocols := [THTTPSecureProtocol.TLS12, THTTPSecureProtocol.TLS13];
 end;
+
+{$ENDIF}
 
 { THTTPDataReceiver }
 
@@ -127,7 +173,7 @@ begin
   inherited Create;
   FDestFile := DestFile;
   FHasCredentials := GetCredentialsAndCleanUrl(Url, CustomUser, CustomPass, FUser, FPass, FCleanUrl);
-  FLock := TObject.Create;
+  FLock := TCriticalSection.Create;
 end;
 
 destructor THTTPDataReceiver.Destroy;
@@ -142,18 +188,35 @@ begin
   if FAbort then
     Abort := True;
 
-  System.TMonitor.Enter(FLock);
+  FLock.Acquire;
   try
     FProgress := AReadCount;
     FProgressMax := AContentLength;
     FProgressSet := True;
   finally
-    System.TMonitor.Exit(FLock);
+    FLock.Release;
   end;
 end;
 
 procedure THTTPDataReceiver.DoDownload;
+{$IFDEF FPC}
+var
+  HandleStream: THandleStream;
+  Response: TWinHttpResponse;
+{$ENDIF}
 begin
+  {$IFDEF FPC}
+  HandleStream := THandleStream.Create(FDestFile.Handle);
+  try
+    Response := RequestWinHttp(FCleanUrl, SetupTitle + ' ' + SetupVersion,
+      FUser, FPass, HandleStream, OnReceiveData);
+    FResult.HTTPStatusCode := Response.StatusCode;
+    FResult.HTTPStatusText := Response.StatusText;
+    FResult.FileSize := HandleStream.Size;
+  finally
+    HandleStream.Free;
+  end;
+  {$ELSE}
   const HTTPClient = THTTPClient.Create; { http://docwiki.embarcadero.com/RADStudio/Rio/en/Using_an_HTTP_Client }
   try
     SetUserAgentAndSecureProtocols(HTTPClient);
@@ -181,20 +244,22 @@ begin
   finally
     HTTPClient.Free;
   end;
+  {$ENDIF}
 end;
 
 procedure THTTPDataReceiver.HandleProgress;
+var
+  Progress, ProgressMax: Int64;
+  ProgressSet: Boolean;
 begin
-  var Progress, ProgressMax: Int64;
-  var ProgressSet: Boolean;
 
-  System.TMonitor.Enter(FLock);
+  FLock.Acquire;
   try
     Progress := FProgress;
     ProgressMax := FProgressMax;
     ProgressSet := FProgressSet;
   finally
-    System.TMonitor.Exit(FLock);
+    FLock.Release;
   end;
 
   try
@@ -228,9 +293,10 @@ begin
 end;
 
 procedure THTTPDataReceiver.HandleResult(const UseSetupMessagesForErrors: Boolean);
+var
+  Msg: String;
 begin
   if Assigned(FResult.SavedFatalException) then begin
-    var Msg: String;
     if FResult.SavedFatalException is Exception then
       Msg := (FResult.SavedFatalException as Exception).Message
     else
@@ -251,24 +317,26 @@ begin
   end;
 end;
 
-function DownloadThreadFunc(Parameter: Pointer): Integer;
+function DownloadThreadFunc(Parameter: Pointer): {$IFDEF FPC}PtrInt{$ELSE}Integer{$ENDIF};
+var
+  D: THTTPDataReceiver;
 begin
-  const D = THTTPDataReceiver(Parameter);
+  D := THTTPDataReceiver(Parameter);
   try
     D.DoDownload;
   except
-    const Ex = AcquireExceptionObject;
-    MemoryBarrier;
-    D.FResult.SavedFatalException := Ex;
+    D.FResult.SavedFatalException := TObject(AcquireExceptionObject);
   end;
-  MemoryBarrier;
+  {$IFDEF FPC}ReadWriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
   Result := 0;
 end;
 
 function THTTPDataReceiver.Download(const UseSetupMessagesForErrors: Boolean): Int64;
+var
+  ThreadID: TThreadID;
+  ThreadHandle: THandle;
 begin
-  var ThreadID: TThreadID;
-  const ThreadHandle = BeginThread(nil, 0, DownloadThreadFunc, Self, 0, ThreadID);
+  ThreadHandle := BeginThread(nil, 0, DownloadThreadFunc, Self, 0, ThreadID);
   if ThreadHandle = 0 then
     raise Exception.Create('Failed to create download thread: ' + SysErrorMessage(GetLastError));
 
@@ -303,14 +371,30 @@ end;
 
 function MaskPasswordInUrl(const Url: String): String;
 var
+  {$IFDEF FPC}
+  StartIndex, AtIndex, ColonIndex: Integer;
+  {$ELSE}
   Uri: TUri;
+  {$ENDIF}
 begin
+  {$IFDEF FPC}
+  Result := Url;
+  FindUrlCredentials(Url, StartIndex, AtIndex);
+  if AtIndex <> 0 then begin
+    ColonIndex := Pos(':', Url, StartIndex);
+    if (ColonIndex > 0) and (ColonIndex < AtIndex - 1) then begin
+      Delete(Result, ColonIndex + 1, AtIndex - ColonIndex - 1);
+      Insert('***', Result, ColonIndex + 1);
+    end;
+  end;
+  {$ELSE}
   Uri := TUri.Create(Url);
   if Uri.Password <> '' then begin
     Uri.Password := '***';
     Result := Uri.ToString;
   end else
     Result := URL;
+  {$ENDIF}
 end;
 
 var
@@ -323,23 +407,40 @@ begin
 end;
 
 function GetISSigUrl(const Url, ISSigUrl: String): String;
+{$IFDEF FPC}
+var
+  I: Integer;
+{$ENDIF}
 begin
   if ISSigUrl <> '' then
     Result := ISSigUrl
   else begin
+    {$IFDEF FPC}
+    Result := Url;
+    I := Pos('://', Result);
+    if I > 0 then
+      Inc(I, 3)
+    else
+      I := 1;
+    while (I <= Length(Result)) and not CharInSet(Result[I], ['?', '#']) do
+      Inc(I);
+    Insert(ISSigExt, Result, I);
+    {$ELSE}
     const Uri = TUri.Create(Url); { This is a record so no need to free }
     Uri.Path := Uri.Path + ISSigExt;
     Result := Uri.ToString;
+    {$ENDIF}
   end;
 end;
 
 function DownloadFile(const Url, CustomUserName, CustomPassword: String;
-  const DestF: TFile; [ref] const Verification: TSetupFileVerification; const ISSigSourceFilename: String;
+  const DestF: TFile; {$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} Verification: TSetupFileVerification; const ISSigSourceFilename: String;
   const OnSimpleDownloadProgress: TOnSimpleDownloadProgress;
   const OnSimpleDownloadProgressParam: Int64;
   const OnSimpleDownloadNoProgress: TOnSimpleDownloadNoProgress): Int64;
 var
   HTTPDataReceiver: THTTPDataReceiver;
+  ExpectedFileHash, FileHash: TSHA256Digest;
 begin
   if Url = '' then
     InternalError('DownloadFile: Invalid Url value');
@@ -357,12 +458,11 @@ begin
     
     { Check verification if specified, otherwise check everything else we can check }
     if Verification.Typ <> fvNone then begin
-      var ExpectedFileHash: TSHA256Digest;
       if Verification.Typ = fvHash then
         ExpectedFileHash := Verification.Hash
       else
         DoISSigVerify(DestF, nil, ISSigSourceFilename, False, Verification.ISSigAllowedKeys, ExpectedFileHash);
-      const FileHash = GetSHA256OfFile(DestF);
+      FileHash := GetSHA256OfFile(DestF);
       if not SHA256DigestsEqual(FileHash, ExpectedFileHash) then
         VerificationError(veFileHashIncorrect);
       Log(VerificationSuccessfulLogMessage);
@@ -380,13 +480,40 @@ begin
 end;
 
 function DownloadTemporaryFile(const Url, BaseName: String;
-  [ref] const Verification: TSetupFileVerification; const OnDownloadProgress: TOnDownloadProgress;
+  {$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} Verification: TSetupFileVerification; const OnDownloadProgress: TOnDownloadProgress;
   const OnDownloadNoProgress: TOnDownloadNoProgress; out DestFile: String): Int64;
 var
-  TempFile: String;
+  TempFile, ExistingFileName, CapturableDestFile: String;
+  ExistingFileSize: Int64;
+  ExistingFileHash: TSHA256Digest;
+  DestF: TFile;
+  DidJustDeleteDestFile: Boolean;
   TempF: TFile;
   TempFileLeftOver: Boolean;
   HTTPDataReceiver: THTTPDataReceiver;
+  ExpectedFileHash, FileHash: TSHA256Digest;
+
+  {$IFDEF FPC}
+  function MoveTemporaryFile(out LastError: Cardinal): Boolean;
+  begin
+    Result := MoveFileW(PWideChar(TempFile), PWideChar(CapturableDestFile));
+    if not Result then
+      LastError := GetLastError;
+  end;
+
+  procedure RetryMove(const LastError: Cardinal);
+  begin
+    LogFmt('  The existing file appears to be in use (%d). Retrying.', [LastError]);
+    Sleep(1000);
+  end;
+
+  procedure MoveFailed(const LastError: Cardinal; var TryOnceMore: Boolean);
+  begin
+    SetLastError(LastError);
+    Win32ErrorMsg('MoveFile');
+  end;
+  {$ENDIF}
+
 begin
   if Url = '' then
     InternalError('DownloadTemporaryFile: Invalid Url value');
@@ -400,7 +527,7 @@ begin
   { Does not disable FS redirection, like everything else working on the temp dir }
 
   { Prepare directory }
-  var DidJustDeleteDestFile := False;
+  DidJustDeleteDestFile := False;
   if NewFileExists(DestFile) then begin
     if Verification.Typ = fvHash then begin
       if SHA256DigestsEqual(GetSHA256OfFile(DestFile), Verification.Hash) then begin
@@ -409,12 +536,9 @@ begin
         Exit;
       end;
     end else if Verification.Typ = fvISSig then begin
-      var ExistingFileName: String;
-      var ExistingFileSize: Int64;
-      var ExistingFileHash: TSHA256Digest;
       if ISSigVerifySignature(DestFile, GetISSigAllowedKeys(ISSigAvailableKeys, Verification.ISSigAllowedKeys),
            ExistingFileName, ExistingFileSize, ExistingFileHash, nil, nil, nil) then begin
-        const DestF = TFile.Create(DestFile, fdOpenExisting, faRead, fsReadWrite);
+        DestF := TFile.Create(DestFile, fdOpenExisting, faRead, fsReadWrite);
         try
           { Not checking ExistingFileName because we can't be sure what the original filename was }
           if (DestF.Size = ExistingFileSize) and
@@ -429,7 +553,7 @@ begin
       end;
     end;
 
-    SetFileAttributes(PChar(DestFile), GetFileAttributes(PChar(DestFile)) and not FILE_ATTRIBUTE_READONLY);
+    SetFileAttributesW(PWideChar(DestFile), GetFileAttributesW(PWideChar(DestFile)) and not FILE_ATTRIBUTE_READONLY);
     DelayDeleteFile(DestFile, 13, 50, 250);
     DidJustDeleteDestFile := True;
   end else
@@ -461,13 +585,12 @@ begin
 
     { Check verification if specified, otherwise check everything else we can check }
     if Verification.Typ <> fvNone then begin
-      var ExpectedFileHash: TSHA256Digest;
       if Verification.Typ = fvHash then
         ExpectedFileHash := Verification.Hash
       else
         DoISSigVerify(TempF, nil, DestFile, False, Verification.ISSigAllowedKeys, ExpectedFileHash);
       FreeAndNil(TempF);
-      const FileHash = GetSHA256OfFile(TempFile);
+      FileHash := GetSHA256OfFile(TempFile);
       if not SHA256DigestsEqual(FileHash, ExpectedFileHash) then
         VerificationError(veFileHashIncorrect);
       Log(VerificationSuccessfulLogMessage);
@@ -482,7 +605,11 @@ begin
     end;
 
     { Rename the temporary file to the new name now, with retries if needed }
-    const CapturableDestFile = DestFile;
+    CapturableDestFile := DestFile;
+    {$IFDEF FPC}
+    PerformFileOperationWithRetries(4, DidJustDeleteDestFile,
+      MoveTemporaryFile, RetryMove, MoveFailed);
+    {$ELSE}
     PerformFileOperationWithRetries(4, DidJustDeleteDestFile,
       function(out LastError: Cardinal): Boolean
       begin
@@ -500,31 +627,48 @@ begin
       begin
         Win32ErrorMsg('MoveFile'); { Throws an exception }
       end);
+    {$ENDIF}
     TempFileLeftOver := False;
   finally
     TempF.Free;
     HTTPDataReceiver.Free;
     if TempFileLeftOver then
-      DeleteFile(TempFile);
+      DeleteFileW(PWideChar(TempFile));
   end;
 end;
 
 function DownloadTemporaryFile(const Url, BaseName: String;
-  [ref] const Verification: TSetupFileVerification; const OnDownloadProgress: TOnDownloadProgress;
+  {$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} Verification: TSetupFileVerification; const OnDownloadProgress: TOnDownloadProgress;
   const OnDownloadNoProgress: TOnDownloadNoProgress): Int64;
+var
+  DestFile: String;
 begin
-  var DestFile: String;
   Result := DownloadTemporaryFile(Url, BaseName, Verification, OnDownloadProgress, OnDownloadNoProgress, DestFile);
 end;
 
 procedure DownloadTemporaryFileSizeAndDate(const Url: String; var FileSize: Int64; var FileDate: String);
 var
+  {$IFDEF FPC}
+  HTTPResponse: TWinHttpResponse;
+  User, Pass, CleanUrl: String;
+  {$ELSE}
   HTTPClient: THTTPClient;
   HTTPResponse: IHTTPResponse;
   User, Pass, CleanUrl: string;
   HasCredentials : Boolean;
   Base64: TBase64Encoding;
+  {$ENDIF}
 begin
+  {$IFDEF FPC}
+  GetCredentialsAndCleanUrl(Url, DownloadTemporaryFileUser, DownloadTemporaryFilePass,
+    User, Pass, CleanUrl);
+  HTTPResponse := RequestWinHttp(CleanUrl, SetupTitle + ' ' + SetupVersion, User, Pass, nil, nil);
+  if (HTTPResponse.StatusCode < 200) or (HTTPResponse.StatusCode > 299) then
+    raise Exception.Create(FmtSetupMessage(msgErrorDownloadSizeFailed,
+      [IntToStr(HTTPResponse.StatusCode), HTTPResponse.StatusText]));
+  FileSize := HTTPResponse.ContentLength;
+  FileDate := HTTPResponse.LastModified;
+  {$ELSE}
   HTTPClient := THTTPClient.Create;
   Base64 := nil;
   try
@@ -546,6 +690,7 @@ begin
     Base64.Free;
     HTTPClient.Free;
   end;
+  {$ENDIF}
 end;
 
 function DownloadTemporaryFileSize(const Url: String): Int64;

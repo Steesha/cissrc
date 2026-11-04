@@ -2,12 +2,14 @@ unit Setup.ISSigVerifyFunc;
 
 {
   Inno Setup
-  Copyright (C) 1997-2025 Jordan Russell
+  Copyright (C) 1997-2026 Jordan Russell
   Portions by Martijn Laan
   For conditions of distribution and use, see LICENSE.TXT.
 
   Installation procedures: DoISSigVerify
 }
+
+{$IFDEF FPC}{$MODESWITCH NESTEDPROCVARS}{$ENDIF}
 
 interface
 
@@ -63,16 +65,38 @@ procedure DoISSigVerify(const SourceF: TFile; const SourceFS: TFileStream;
   out ExpectedFileHash: TSHA256Digest);
 { Does not disable FS redirection. Either SourceF or SourceFS must be set, which
   may be opened for writing instead of reading.  }
+var
+  ExpectedFileName: String;
+  ExpectedFileSize, FileSize: Int64;
+{$IFDEF FPC}
+  procedure SignatureMissing(const Filename, SigFilename: String);
+  begin
+    VerificationError(veSignatureMissing, SigFilename);
+  end;
+
+  procedure SignatureInvalid(const Filename, SigFilename: String;
+    const VerifyResult: TISSigVerifySignatureResult);
+  begin
+    case VerifyResult of
+      vsrMalformed: VerificationError(veSignatureMalformed, SigFilename);
+      vsrBad: VerificationError(veSignatureBad, SigFilename);
+      vsrKeyNotFound: VerificationError(veKeyNotFound, SigFilename);
+    else
+      InternalError('Unknown ISSigVerifySignature result');
+    end;
+  end;
+{$ENDIF}
 begin
   if ((SourceF = nil) and (SourceFS = nil)) or ((SourceF <> nil) and (SourceFS <> nil)) then
     InternalError('DoISSigVerify: Invalid SourceF / SourceFS combination');
 
-  var ExpectedFileName: String;
-  var ExpectedFileSize: Int64;
   if not ISSigVerifySignature(SourceFilename,
     GetISSigAllowedKeys(ISSigAvailableKeys, ISSigAllowedKeys),
     ExpectedFileName, ExpectedFileSize, ExpectedFileHash,
     nil,
+    {$IFDEF FPC}
+    SignatureMissing, SignatureInvalid
+    {$ELSE}
     procedure(const Filename, SigFilename: String)
     begin
       VerificationError(veSignatureMissing, SigFilename);
@@ -87,11 +111,11 @@ begin
         InternalError('Unknown ISSigVerifySignature result');
       end;
     end
+    {$ENDIF}
   ) then
     InternalError('Unexpected ISSigVerifySignature result');
   if VerifySourceFilename and (ExpectedFileName <> '') and not PathSame(PathExtractName(SourceFilename), ExpectedFileName) then
     VerificationError(veFileNameIncorrect);
-  var FileSize: Int64;
   if SourceF <> nil then
     FileSize := SourceF.Size
   else

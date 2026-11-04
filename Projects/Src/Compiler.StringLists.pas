@@ -37,6 +37,7 @@ type
     destructor Destroy; override;
     function Add(const S: String): Integer;
     function CaseInsensitiveIndexOf(const S: String): Integer;
+    function CaseSensitiveIndexOf(const S: String): Integer;
     procedure Clear;
     function Get(Index: Integer): String;
     property Count: Integer read FCount;
@@ -70,8 +71,17 @@ type
 implementation
 
 uses
-  PathFunc, UnsignedFunc,
+  {$IFDEF MSWINDOWS} PathFunc, {$ELSE} SysUtils, {$ENDIF} UnsignedFunc,
   Compression.Base;
+
+function FoldListKey(const S: String): String;
+begin
+  {$IFDEF MSWINDOWS}
+  Result := PathLowercase(S);
+  {$ELSE}
+  Result := UnicodeLowerCase(S);
+  {$ENDIF}
+end;
 
 { THashStringList }
 
@@ -93,7 +103,7 @@ begin
   Result := FCount;
   if Result = FCapacity then
     Grow;
-  LS := PathLowercase(S);
+  LS := FoldListKey(S);
   Pointer(FList[Result].Str) := nil;  { since Grow doesn't zero init }
   FList[Result].Str := S;
   FList[Result].Hash := GetCRC32(Pointer(LS)^, ULength(LS)*SizeOf(LS[1]));
@@ -137,13 +147,27 @@ var
   Hash: Longint;
   I: Integer;
 begin
-  LS := PathLowercase(S);
+  LS := FoldListKey(S);
   Hash := GetCRC32(Pointer(LS)^, ULength(LS)*SizeOf(LS[1]));
   for I := 0 to FCount-1 do
-    if (FList[I].Hash = Hash) and (PathLowercase(FList[I].Str) = LS) then begin
+    if (FList[I].Hash = Hash) and (FoldListKey(FList[I].Str) = LS) then begin
       Result := I;
       Exit;
     end;
+  Result := -1;
+end;
+
+function THashStringList.CaseSensitiveIndexOf(const S: String): Integer;
+var
+  Folded: String;
+  Hash: Longint;
+  I: Integer;
+begin
+  Folded := FoldListKey(S);
+  Hash := GetCRC32(Pointer(Folded)^, ULength(Folded)*SizeOf(Folded[1]));
+  for I := 0 to FCount-1 do
+    if (FList[I].Hash = Hash) and (FList[I].Str = S) then
+      Exit(I);
   Result := -1;
 end;
 
@@ -156,9 +180,11 @@ begin
 end;
 
 destructor TScriptFileLines.Destroy;
+var
+  I: Integer;
 begin
   if Assigned(FLines) then begin
-    for var I := FLines.Count-1 downto 0 do
+    for I := FLines.Count-1 downto 0 do
       Dispose(PScriptFileLine(FLines[I]));
     FLines.Free;
   end;
@@ -204,20 +230,20 @@ end;
 
 function TScriptFileLines.GetText: String;
 var
-  L, Size: Integer;
+  L, Size, Count, I: Integer;
   P: PChar;
   S, LB: string;
 begin
-  const Count = GetCount;
+  Count := GetCount;
   Size := 0;
-  LB := sLineBreak;
-  for var I := 0 to Count-1 do
+  LB := #13#10;
+  for I := 0 to Count-1 do
     Inc(Size, Length(Get(I).LineText) + Length(LB));
   if Count > 0 then
     Dec(Size, Length(LB));
   SetString(Result, nil, Size);
   P := Pointer(Result);
-  for var I := 0 to Count-1 do begin
+  for I := 0 to Count-1 do begin
     S := Get(I).LineText;
     L := Length(S);
     if L <> 0 then begin

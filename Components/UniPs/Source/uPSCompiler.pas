@@ -1,5 +1,8 @@
 unit uPSCompiler;
 {$I PascalScript.inc}
+{$IFDEF PS_INNO_WINDOWS_TARGET}
+  {$UNDEF PS_NOIDISPATCH}
+{$ENDIF}
 interface
 uses
   {$IFNDEF DELPHI3UP}{$IFNDEF PS_NOINTERFACES}{$IFNDEF LINUX}Windows, Ole2,{$ENDIF}
@@ -1945,7 +1948,7 @@ begin
       if ExecIs64Bit then begin
         {$IFNDEF CPU64}
         { On 64-bit Exec, Extended is an alias for Double, so write a Double instead }
-        TempDouble := tbtDouble(p^.textended);
+        TempDouble := p^.textended;
         BlockWriteData(BlockInfo, TempDouble, sizeof(tbtDouble));
         {$ELSE}
         BlockWriteData(BlockInfo, p^.textended, sizeof(tbtExtended));
@@ -10615,7 +10618,7 @@ begin
     {$endif}
     for i := 0 to FBreakOffsets.Count -1 do
     begin
-      EPos := Cardinal(FBreakOffsets[I]);
+      EPos := Cardinal(IPointer(FBreakOffsets[I]));
       {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
       unaligned(Longint((@BlockInfo.Proc.Data[EPos - 3])^)) := Length(BlockInfo.Proc.Data) - Longint(EPos);
       {$else}
@@ -10624,7 +10627,7 @@ begin
     end;
     for i := 0 to FContinueOffsets.Count -1 do
     begin
-      EPos := Cardinal(FContinueOffsets[I]);
+      EPos := Cardinal(IPointer(FContinueOffsets[I]));
       {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
       unaligned(Longint((@BlockInfo.Proc.Data[EPos - 3])^)) := Longint(SPos) - Longint(EPos);
       {$else}
@@ -10759,7 +10762,7 @@ begin
     {$endif}
     for i := 0 to FBreakOffsets.Count -1 do
     begin
-      EPos := Cardinal(FBreakOffsets[I]);
+      EPos := Cardinal(IPointer(FBreakOffsets[I]));
       {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
       unaligned(Longint((@BlockInfo.Proc.Data[EPos - 3])^)) := Length(BlockInfo. Proc.Data) - Longint(EPos);
       {$else}
@@ -10768,7 +10771,7 @@ begin
     end;
     for i := 0 to FContinueOffsets.Count -1 do
     begin
-      EPos := Cardinal(FContinueOffsets[I]);
+      EPos := Cardinal(IPointer(FContinueOffsets[I]));
       {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
       unaligned(Longint((@BlockInfo.Proc.Data[EPos - 3])^)) := Longint(CPos) - Longint(EPos);
       {$else}
@@ -11170,9 +11173,9 @@ begin
     for i := 0 to EndReloc.Count -1 do
     begin
       {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
-      unaligned(Cardinal((@BlockInfo.Proc.Data[Cardinal(EndReloc[I])- 3])^)) := Cardinal(Length(BlockInfo.Proc.Data)) - Cardinal(EndReloc[I]);
+      unaligned(Cardinal((@BlockInfo.Proc.Data[Cardinal(IPointer(EndReloc[I]))- 3])^)) := Cardinal(Length(BlockInfo.Proc.Data)) - Cardinal(IPointer(EndReloc[I]));
       {$else}
-      Cardinal((@BlockInfo.Proc.Data[Cardinal(EndReloc[I])- 3])^) := Cardinal(Length(BlockInfo.Proc.Data)) - Cardinal(EndReloc[I]);
+      Cardinal((@BlockInfo.Proc.Data[Cardinal(IPointer(EndReloc[I]))- 3])^) := Cardinal(Length(BlockInfo.Proc.Data)) - Cardinal(IPointer(EndReloc[I]));
       {$endif}
     end;
     CalcItem.Free;
@@ -11182,12 +11185,12 @@ begin
     begin
       for i := 0 to FContinueOffsets.Count -1 do
       begin
-        if Cardinal(FContinueOffsets[i]) >= SPos then
+        if Cardinal(IPointer(FContinueOffsets[i])) >= SPos then
         begin
           {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
-          unaligned(Byte((@BlockInfo.Proc.Data[Longint(FContinueOffsets[i]) - 4])^)) := Cm_P2G;
+          unaligned(Byte((@BlockInfo.Proc.Data[Longint(IPointer(FContinueOffsets[i])) - 4])^)) := Cm_P2G;
 	  {$else}
-          Byte((@BlockInfo.Proc.Data[Longint(FContinueOffsets[i]) - 4])^) := Cm_P2G;
+          Byte((@BlockInfo.Proc.Data[Longint(IPointer(FContinueOffsets[i])) - 4])^) := Cm_P2G;
 	  {$endif}
         end;
       end;
@@ -11196,12 +11199,12 @@ begin
     begin
       for i := 0 to FBreakOffsets.Count -1 do
       begin
-        if Cardinal(FBreakOffsets[i]) >= SPos then
+        if Cardinal(IPointer(FBreakOffsets[i])) >= SPos then
         begin
           {$ifdef FPC_REQUIRES_PROPER_ALIGNMENT}
-          unaligned(Byte((@BlockInfo.Proc.Data[Longint(FBreakOffsets[i]) - 4])^)) := Cm_P2G;
+          unaligned(Byte((@BlockInfo.Proc.Data[Longint(IPointer(FBreakOffsets[i])) - 4])^)) := Cm_P2G;
 	  {$else}
-          Byte((@BlockInfo.Proc.Data[Longint(FBreakOffsets[i]) - 4])^) := Cm_P2G;
+          Byte((@BlockInfo.Proc.Data[Longint(IPointer(FBreakOffsets[i])) - 4])^) := Cm_P2G;
 	  {$endif}
         end;
       end;
@@ -12005,7 +12008,7 @@ var
           if ExecIs64Bit then begin
             {$IFNDEF CPU64}
             { On 64-bit Exec, Extended is an alias for Double, so write a Double instead }
-            TempDouble := tbtDouble(p^.textended);
+            TempDouble := p^.textended;
             WriteData(TempDouble, sizeof(tbtDouble));
             {$ELSE}
             WriteData(p^.textended, sizeof(tbtExtended));
@@ -13939,7 +13942,7 @@ begin
 {$ENDIF}
   AddDelphiFunction('function Unassigned: Variant;');
   AddDelphiFunction('function VarIsEmpty(const V: Variant): Boolean;');
-{$IFDEF DELPHI7UP}
+{$IF Defined(DELPHI7UP) or Defined(FPC)}
   AddDelphiFunction('function VarIsClear(const V: Variant): Boolean;');
 {$ENDIF}
   AddDelphiFunction('function Null: Variant;');

@@ -2,7 +2,7 @@ unit NewNotebook;
 
 {
   Inno Setup
-  Copyright (C) 1997-2025 Jordan Russell
+  Copyright (C) 1997-2026 Jordan Russell
   Portions by Martijn Laan
   For conditions of distribution and use, see LICENSE.TXT.
 
@@ -12,7 +12,7 @@ unit NewNotebook;
 interface
 
 uses
-  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms;
+  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms{$IFDEF FPC}, LCLType{$ENDIF};
 
 type
   TNewNotebookPage = class;
@@ -187,9 +187,11 @@ begin
 end;
 
 destructor TNewNotebook.Destroy;
+var
+  I: Integer;
 begin
   if Assigned(FPages) then begin
-    for var I := 0 to FPages.Count-1 do
+    for I := 0 to FPages.Count-1 do
       TNewNotebookPage(FPages[I]).FNotebook := nil;
     FPages.Free;
   end;
@@ -200,7 +202,14 @@ procedure TNewNotebook.AlignControls(AControl: TControl; var Rect: TRect);
 var
   I: Integer;
   Ctl: TControl;
+  {$IFDEF FPC}
+  PageRect: TRect;
+  {$ENDIF}
 begin
+  {$IFDEF FPC}
+  { LCL consumes the remaining rectangle when it lays out the active page. }
+  PageRect := Rect;
+  {$ENDIF}
   inherited;
   { The default AlignControls implementation in Delphi 2 and 3 doesn't set
     the size of invisible controls. Pages that aren't currently visible must
@@ -208,11 +217,11 @@ begin
     Note: We loop through Controls and not FPages here because
     TNewNotebookPage.SetNotebook sets Parent (causing AlignControls to be
     called) before it calls InsertPage. }
-  if not IsRectEmpty(Rect) then begin
+  if not IsRectEmpty({$IFDEF FPC}PageRect{$ELSE}Rect{$ENDIF}) then begin
     for I := 0 to ControlCount-1 do begin
       Ctl := Controls[I];
       if (Ctl is TNewNotebookPage) and not Ctl.Visible then
-        Ctl.BoundsRect := Rect;
+        Ctl.BoundsRect := {$IFDEF FPC}PageRect{$ELSE}Rect{$ENDIF};
     end;
   end;
 end;
@@ -225,16 +234,18 @@ end;
 
 function TNewNotebook.FindNextPage(CurPage: TNewNotebookPage;
   GoForward: Boolean): TNewNotebookPage;
+var
+  StartIndex, I: Integer;
 begin
   if FPages.Count > 0 then begin
-    var StartIndex := FPages.IndexOf(CurPage);
+    StartIndex := FPages.IndexOf(CurPage);
     if StartIndex = -1 then begin
       if GoForward then
         StartIndex := FPages.Count-1
       else
         StartIndex := 0;
     end;
-    var I := StartIndex;
+    I := StartIndex;
     if GoForward then begin
       Inc(I);
       if I = FPages.Count then
@@ -250,8 +261,10 @@ begin
 end;
 
 procedure TNewNotebook.GetChildren(Proc: TGetChildProc; Root: TComponent);
+var
+  I: Integer;
 begin
-  for var I := 0 to FPages.Count-1 do
+  for I := 0 to FPages.Count-1 do
     Proc(TNewNotebookPage(FPages[I]));
 end;
 
@@ -287,11 +300,13 @@ begin
 end;
 
 procedure TNewNotebook.SetActivePage(Page: TNewNotebookPage);
+var
+  ParentForm: TCustomForm;
 begin
   if Assigned(Page) and (Page.FNotebook <> Self) then
     Exit;
   if FActivePage <> Page then begin
-    const ParentForm = GetParentForm(Self);
+    ParentForm := GetParentForm(Self);
     if Assigned(ParentForm) and Assigned(FActivePage) and
        FActivePage.ContainsControl(ParentForm.ActiveControl) then
       ParentForm.ActiveControl := FActivePage;

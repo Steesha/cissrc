@@ -7,3 +7,5 @@
 # Directories created by the RAD Studio IDE whenever files are edited
 __history/
 __recovery/
+# Native CMake build output
+/build/

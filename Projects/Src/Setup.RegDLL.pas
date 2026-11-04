@@ -51,8 +51,8 @@ end;
 procedure RegisterServerUsingRegSvr32(const AUnregister: Boolean;
   const AIs64Bit: Boolean; const Filename: String);
 var
-  SysDir, CmdLine: String;
-  StartupInfo: TStartupInfo;
+  SysDir, CmdLine, RedirFilename: String;
+  StartupInfo: Windows.TStartupInfoW;
   ProcessInfo: TProcessInformation;
   ExitCode: DWORD;
 begin
@@ -63,7 +63,7 @@ begin
   SysDir := ApplyPathRedirRules(AIs64Bit, GetSystemDir, tpNativeBit,
     [rfNormalPath]);
 
-  const RedirFilename = ApplyRedirForRegistrationOperation(AIs64Bit, Filename);
+  RedirFilename := ApplyRedirForRegistrationOperation(AIs64Bit, Filename);
 
   CmdLine := '"' + AddBackslash(SysDir) + 'regsvr32.exe"';
   if AUnregister then

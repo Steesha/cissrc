@@ -15,10 +15,10 @@ unit Setup.Install.HelperFunc;
 interface
 
 uses
-  Windows, SHA256, Shared.FileClass, Shared.Struct, Setup.UninstallLog;
+  Windows, SHA256, Shared.FileClass, Shared.Struct, Setup.UninstallLog.Actions;
 
 type
-  TSetupUninstallLog = class(TUninstallLog)
+  TSetupUninstallLog = class(TUninstallActionLog)
   protected
     procedure HandleException; override;
   end;
@@ -47,7 +47,7 @@ function AbortRetryIgnoreTaskDialogMsgBox(const Text: String;
 function FileTimeToStr(const AFileTime: TFileTime): String;
 function TryToGetSHA256OfFile(const Filename: String; var Sum: TSHA256Digest): Boolean;
 procedure CopySourceFileToDestFile(const SourceF, DestF: TFile;
-  [ref] const Verification: TSetupFileVerification; const ISSigSourceFilename: String;
+  {$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} Verification: TSetupFileVerification; const ISSigSourceFilename: String;
   const AExpectedSize: Int64);
 function ShortenFontFilename(const Filename: String): String;
 function GetLocalTimeAsStr: String;
@@ -80,7 +80,7 @@ end;
 
 procedure SetFilenameLabelText(const S: String; const CallUpdate: Boolean);
 begin
-  WizardForm.FilenameLabel.Caption := MinimizePathName(S, WizardForm.FilenameLabel.Font, WizardForm.FileNameLabel.Width);
+  WizardForm.FilenameLabel.Caption := MinimizePathName({$IFDEF FPC}UTF8Encode(S){$ELSE}S{$ENDIF}, WizardForm.FilenameLabel.Font, WizardForm.FileNameLabel.Width);
   if CallUpdate then
     WizardForm.FilenameLabel.Update;
 end;
@@ -88,8 +88,8 @@ end;
 procedure SetStatusLabelText(const S: String;
   const ClearFilenameLabelText: Boolean = True);
 begin
-  if WizardForm.StatusLabel.Caption <> S then begin
-    WizardForm.StatusLabel.Caption := S;
+  if {$IFDEF FPC}UTF8Decode(WizardForm.StatusLabel.Caption){$ELSE}WizardForm.StatusLabel.Caption{$ENDIF} <> S then begin
+    WizardForm.StatusLabel.Caption := {$IFDEF FPC}UTF8Encode(S){$ELSE}S{$ENDIF};
     WizardForm.StatusLabel.Update;
   end;
   if ClearFilenameLabelText then
@@ -122,15 +122,16 @@ procedure CalcFilesSize(const Uninstallable: Boolean;
   var InstallFilesSize, AfterInstallFilesSize: Int64);
 var
   CurFile: PSetupFileEntry;
+  N: Integer;
+  FileSize: Int64;
 begin
   InstallFilesSize := 0;
   AfterInstallFilesSize := InstallFilesSize;
-  for var N := 0 to Entries[seFile].Count-1 do begin
+  for N := 0 to Entries[seFile].Count-1 do begin
     CurFile := PSetupFileEntry(Entries[seFile][N]);
     if ((CurFile^.FileType <> ftUninstExe) or Uninstallable) and
        ShouldProcessFileEntry(WizardComponents, WizardTasks, CurFile, False) then begin
       with CurFile^ do begin
-        var FileSize: Int64;
         if LocationEntry <> -1 then  { not an "external" file }
           FileSize := PSetupFileLocationEntry(Entries[seFileLocation][
            LocationEntry])^.OriginalSize
@@ -149,9 +150,11 @@ var
   ProgressShiftCount: Cardinal;
 
 procedure InitProgressGauge(const InstallFilesSize: Int64);
+var
+  NewMaxValue: Int64;
 begin
   { Calculate the MaxValue for the progress meter }
-  var NewMaxValue: Int64 := 1000 * Entries[seIcon].Count;
+  NewMaxValue := 1000 * Entries[seIcon].Count;
   if Entries[seIni].Count <> 0 then Inc(NewMaxValue, 1000);
   if Entries[seRegistry].Count <> 0 then Inc(NewMaxValue, 1000);
   Inc(NewMaxValue, InstallFilesSize);
@@ -167,8 +170,10 @@ begin
 end;
 
 procedure UpdateProgressGauge;
+var
+  NewPosition: Integer;
 begin
-  var NewPosition := Integer(CurProgressValue shr ProgressShiftCount);
+  NewPosition := Integer(CurProgressValue shr ProgressShiftCount);
   if WizardForm.ProgressGauge.Position <> NewPosition then begin
     WizardForm.ProgressGauge.Position := NewPosition;
     WizardForm.ProgressGauge.Update;
@@ -231,8 +236,10 @@ begin
 end;
 
 procedure ExternalProgressProc64(const Bytes, MaxProgress: Int64);
+var
+  NewProgress: Int64;
 begin
-  var NewProgress := CurProgress;
+  NewProgress := CurProgress;
   Inc(NewProgress, Bytes);
   { In case the source file was larger than we thought it was, stop the
     progress bar at the maximum amount. Also see CopySourceFileToDestFile. }
@@ -267,8 +274,9 @@ end;
 
 function FileTimeToStr(const AFileTime: TFileTime): String;
 { Converts a TFileTime into a string for log purposes. The time is in UTC. }
+var
+  ST: TSystemTime;
 begin
-  var ST: TSystemTime;
   if FileTimeToSystemTime(AFileTime, ST) then
     Result := Format('%.4u-%.2u-%.2uT%.2u:%.2u:%.2u.%.3uZ',
       [ST.wYear, ST.wMonth, ST.wDay, ST.wHour, ST.wMinute, ST.wSecond,
@@ -289,15 +297,17 @@ begin
 end;
 
 procedure CopySourceFileToDestFile(const SourceF, DestF: TFile;
-  [ref] const Verification: TSetupFileVerification; const ISSigSourceFilename: String;
+  {$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} Verification: TSetupFileVerification; const ISSigSourceFilename: String;
   const AExpectedSize: Int64);
 { Copies all bytes from SourceF to DestF, incrementing process meter as it
   goes. Assumes file pointers of both are 0. }
 var
   Buf: array[0..16383] of Byte;
   Context: TSHA256Context;
+  ExpectedFileHash: TSHA256Digest;
+  MaxProgress, BytesLeft: Int64;
+  BufSize: Cardinal;
 begin
-  var ExpectedFileHash: TSHA256Digest;
   if Verification.Typ <> fvNone then begin
     if Verification.Typ = fvHash then
       ExpectedFileHash := Verification.Hash
@@ -307,9 +317,9 @@ begin
     SHA256Init(Context);
   end;
 
-  var MaxProgress := CurProgress;
+  MaxProgress := CurProgress;
   Inc(MaxProgress, AExpectedSize);
-  var BytesLeft := SourceF.Size;
+  BytesLeft := SourceF.Size;
 
   { To avoid file system fragmentation, preallocate all of the bytes in the
     destination file }
@@ -318,7 +328,7 @@ begin
   DestF.Seek(0);
 
   while BytesLeft > 0 do begin
-    var BufSize: Cardinal := SizeOf(Buf);
+    BufSize := SizeOf(Buf);
     if BytesLeft < BufSize then
       BufSize := Cardinal(BytesLeft);
 
@@ -372,13 +382,13 @@ end;
 procedure PackCustomMessagesIntoString(var S: String);
 var
   M: TMemoryStream;
-  Count, N: Integer;
+  Count, I, N: Integer;
 begin
   M := TMemoryStream.Create;
   try
     Count := 0;
     M.WriteBuffer(Count, SizeOf(Count));  { overwritten later }
-    for var I := 0 to Entries[seCustomMessage].Count-1 do begin
+    for I := 0 to Entries[seCustomMessage].Count-1 do begin
       with PSetupCustomMessageEntry(Entries[seCustomMessage][I])^ do begin
         if (LangIndex = -1) or (LangIndex = ActiveLanguage) then begin
           N := Length(Name);
@@ -473,13 +483,16 @@ begin
 end;
 
 procedure ProcessInstallDeleteEntries;
+var
+  I: Integer;
+  Path: String;
 begin
-  for var I := 0 to Entries[seInstallDelete].Count-1 do
+  for I := 0 to Entries[seInstallDelete].Count-1 do
     with PSetupDeleteEntry(Entries[seInstallDelete][I])^ do
       if ShouldProcessEntry(WizardComponents, WizardTasks, Components, Tasks, Languages, Check) then begin
         DebugNotifyEntry(seInstallDelete, I);
         NotifyBeforeInstallEntry(BeforeInstall);
-        const Path = ApplyPathRedirRules(InstallDefault64Bit, ExpandConst(Name), tpCurrent);
+        Path := ApplyPathRedirRules(InstallDefault64Bit, ExpandConst(Name), tpCurrent);
         case DeleteType of
           dfFiles, dfFilesAndOrSubdirs:
             DelTree(Path, False, True, True, DeleteType = dfFilesAndOrSubdirs, False,
@@ -511,8 +524,10 @@ begin
 end;
 
 procedure ProcessComponentEntries;
+var
+  I: Integer;
 begin
-  for var I := 0 to Entries[seComponent].Count-1 do begin
+  for I := 0 to Entries[seComponent].Count-1 do begin
     with PSetupComponentEntry(Entries[seComponent][I])^ do begin
       if ShouldProcessEntry(WizardComponents, nil, Name, '', Languages, '') and (coRestart in Options) then begin
         NeedsRestart := True;
@@ -523,8 +538,10 @@ begin
 end;
 
 procedure ProcessTasksEntries;
+var
+  I: Integer;
 begin
-  for var I := 0 to Entries[seTask].Count-1 do begin
+  for I := 0 to Entries[seTask].Count-1 do begin
     with PSetupTaskEntry(Entries[seTask][I])^ do begin
       if ShouldProcessEntry(nil, WizardTasks, '', Name, Languages, '') and (toRestart in Options) then begin
         NeedsRestart := True;

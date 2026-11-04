@@ -32,6 +32,7 @@ implementation
 
 uses
   Forms,
+  {$IFDEF FPC}Compression.LZMADecompressor,{$ENDIF}
   PathFunc, UnsignedFunc,
   Shared.SetupMessageIDs, Shared.CommonFunc, SetupLdrAndSetup.Messages,
   Setup.LoggingFunc, Setup.MainFunc, Setup.InstFunc;
@@ -48,6 +49,10 @@ type
 var
   State: TSevenZipDecodeState;
 
+{$IFDEF FPC}
+{$I Setup.SevenZipObject.inc}
+{$LINKLIB kernel32}
+{$ELSE}
 { Compiled by Visual Studio 2022 using compile.bat }
 {$IFNDEF WIN64}
 { To enable source debugging recompile using compile-bcc32c.bat and turn off the VISUALSTUDIO define below
@@ -58,17 +63,20 @@ var
 {$ENDIF}
 
 {$DEFINE VISUALSTUDIO}
+{$ENDIF}
 
-function IS_7zDec(const fileName: PChar; const fullPaths: Bool): Integer; cdecl; external name {$IFNDEF WIN64} '_IS_7zDec' {$ELSE} 'IS_7zDec' {$ENDIF};
+function IS_7zDec(const fileName: PChar; const fullPaths: Bool): Integer; cdecl; external name {$IF not Defined(WIN64) and not Defined(FPC)} '_IS_7zDec' {$ELSE} 'IS_7zDec' {$IFEND};
 
 
 function {$IFNDEF WIN64} __CreateDirectoryW {$ELSE} _CreateDirectoryW {$ENDIF}(
   lpPathName: LPCWSTR;
   lpSecurityAttributes: PSecurityAttributes): BOOL; cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'__CreateDirectoryW'{$ELSE}'_CreateDirectoryW'{$ENDIF};{$ENDIF}
+var
+  ExpandedDir: String;
 begin
-  var ExpandedDir: String;
   if ValidateAndCombinePath(State.ExpandedDestDir, lpPathName, ExpandedDir) then
-    Result := CreateDirectory(PChar(ExpandedDir), lpSecurityAttributes)
+    Result := CreateDirectoryW(PWideChar(ExpandedDir), lpSecurityAttributes)
   else begin
     Result := False;
     SetLastError(ERROR_ACCESS_DENIED);
@@ -80,6 +88,7 @@ function {$IFNDEF WIN64} __CreateFileA {$ELSE} _CreateFileA {$ENDIF}(
   lpFileName: LPCSTR; dwDesiredAccess, dwShareMode: DWORD;
   lpSecurityAttributes: PSecurityAttributes; dwCreationDisposition, dwFlagsAndAttributes: DWORD;
   hTemplateFile: THandle): THandle; cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'__CreateFileA'{$ELSE}'_CreateFileA'{$ENDIF};{$ENDIF}
 begin
   { Return an error if we do ever get called which is unwanted because it should
     use CreateFileW and not CreateFileA }
@@ -91,17 +100,19 @@ function {$IFNDEF WIN64} __CreateFileW {$ELSE} _CreateFileW {$ENDIF}(
   lpFileName: LPCWSTR; dwDesiredAccess, dwShareMode: DWORD;
   lpSecurityAttributes: PSecurityAttributes; dwCreationDisposition, dwFlagsAndAttributes: DWORD;
   hTemplateFile: THandle): THandle; cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'__CreateFileW'{$ELSE}'_CreateFileW'{$ENDIF};{$ENDIF}
+var
+  ExpandedFileName: String;
 begin
   { Filenames read from archives aren't validated at all by the SDK's 7zMain.c,
     so we have to handle that ourself. Most importantly, we need to make sure a
     malicious archive cannot create files outside of the destination directory. }
-  var ExpandedFileName: String;
   if ((dwDesiredAccess = GENERIC_READ) and
       PathConvertNormalToSuper(lpFileName, ExpandedFileName) and
       PathSame(ExpandedFileName, State.ExpandedArchiveFileName)) or
      ((dwDesiredAccess = GENERIC_WRITE) and
       ValidateAndCombinePath(State.ExpandedDestDir, lpFileName, ExpandedFileName)) then
-    Result := CreateFile(PChar(ExpandedFileName), dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+    Result := CreateFileW(PWideChar(ExpandedFileName), dwDesiredAccess, dwShareMode, lpSecurityAttributes,
       dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile)
   else begin
     Result := INVALID_HANDLE_VALUE;
@@ -131,13 +142,17 @@ begin
   Result := ReadFile(hFile, Buffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
 end;
 
+{$ENDIF}
+
 function {$IFNDEF WIN64} __GetFileAttributesW {$ELSE} _GetFileAttributesW {$ENDIF}(
   lpFileName: LPCWSTR): DWORD; cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'__GetFileAttributesW'{$ELSE}'_GetFileAttributesW'{$ENDIF};{$ENDIF}
+var
+  ExpandedFileName: String;
 begin
   { See above }
-  var ExpandedFileName: String;
   if ValidateAndCombinePath(State.ExpandedDestDir, lpFileName, ExpandedFileName) then
-    Result := GetFileAttributes(PChar(ExpandedFileName))
+    Result := GetFileAttributesW(PWideChar(ExpandedFileName))
   else begin
     Result := INVALID_FILE_ATTRIBUTES;
     SetLastError(ERROR_ACCESS_DENIED);
@@ -146,16 +161,20 @@ end;
 
 function {$IFNDEF WIN64} __SetFileAttributesW {$ELSE} _SetFileAttributesW {$ENDIF}(
   lpFileName: LPCWSTR; dwFileAttributes: DWORD): BOOL; cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'__SetFileAttributesW'{$ELSE}'_SetFileAttributesW'{$ENDIF};{$ENDIF}
+var
+  ExpandedFileName: String;
 begin
   { See above }
-  var ExpandedFileName: String;
   if ValidateAndCombinePath(State.ExpandedDestDir, lpFileName, ExpandedFileName) then
-    Result := SetFileAttributes(PChar(ExpandedFileName), dwFileAttributes)
+    Result := SetFileAttributesW(PWideChar(ExpandedFileName), dwFileAttributes)
   else begin
     Result := False;
     SetLastError(ERROR_ACCESS_DENIED);
   end;
 end;
+
+{$IFDEF VISUALSTUDIO}
 
 function {$IFNDEF WIN64} __SetFilePointer {$ELSE} _SetFilePointer {$ENDIF}(
   hFile: THandle; lDistanceToMove: Longint;
@@ -215,10 +234,13 @@ procedure __allshl; register; external 'ntdll.dll' name '_allshl';
 procedure __aullshr; register; external 'ntdll.dll' name '_aullshr';
 {$ENDIF}
 {$ELSE}
+{$IFNDEF FPC}
 procedure __aullrem; stdcall; external 'ntdll.dll' name '_aullrem';
 procedure __aulldiv; stdcall; external 'ntdll.dll' name '_aulldiv';
 {$ENDIF}
+{$ENDIF}
 
+{$IFNDEF FPC}
 function {$IFNDEF WIN64} _memcpy {$ELSE} memcpy {$ENDIF}(
   dest, src: Pointer; n: NativeUInt): Pointer; cdecl;
 begin
@@ -226,8 +248,25 @@ begin
   Result := dest;
 end;
 
+{$ENDIF}
+
+{$IF Defined(FPC) and not Defined(WIN64)}
+function DivideUInt64(const Dividend, Divisor: UInt64): UInt64; cdecl;
+  public name '___udivdi3';
+begin
+  Result := Dividend div Divisor;
+end;
+
+function ModuloUInt64(const Dividend, Divisor: UInt64): UInt64; cdecl;
+  public name '___umoddi3';
+begin
+  Result := Dividend mod Divisor;
+end;
+{$IFEND}
+
 function {$IFNDEF WIN64} _memset {$ELSE} memset {$ENDIF}(
   dest: Pointer; c: Integer; n: NativeUInt): Pointer; cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'_memset'{$ELSE}'memset'{$ENDIF};{$ENDIF}
 begin
   UFillChar(dest^, n, c);
   Result := dest;
@@ -235,6 +274,7 @@ end;
 
 function {$IFNDEF WIN64} _malloc {$ELSE} malloc {$ENDIF}(
   size: NativeUInt): Pointer; cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'_malloc'{$ELSE}'malloc'{$ENDIF};{$ENDIF}
 begin
   if size > NativeUInt(High(NativeInt)) then
     Result := nil
@@ -249,12 +289,14 @@ begin
 end;
 
 procedure {$IFNDEF WIN64} _free {$ELSE} free {$ENDIF}(address: Pointer); cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'_free'{$ELSE}'free'{$ENDIF};{$ENDIF}
 begin
   FreeMem(address);
 end;
 
 function {$IFNDEF WIN64} _wcscmp {$ELSE} wcscmp {$ENDIF}(
   string1, string2: PChar): Integer; cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'_wcscmp'{$ELSE}'wcscmp'{$ENDIF};{$ENDIF}
 begin
   Result := StrComp(string1, string2);
 end;
@@ -267,12 +309,16 @@ end;
 
 function {$IFNDEF WIN64} __fputs {$ELSE} _fputs {$ENDIF}(
   str: PAnsiChar; unused: Pointer): Integer; cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'__fputs'{$ELSE}'_fputs'{$ENDIF};{$ENDIF}
+var
+  P: Integer;
 
   function FindNewLine(const S: AnsiString): Integer;
+  var
+    I: Integer;
   begin
     { 7zMain.c always sends #10 as newline but its call to FormatMessage can cause #13#10 anyway  }
-    var N := Length(S);
-    for var I := 1 to N do
+    for I := 1 to Length(S) do
       if CharInSet(S[I], [#13, #10]) then
         Exit(I);
     Result := 0;
@@ -281,7 +327,7 @@ function {$IFNDEF WIN64} __fputs {$ELSE} _fputs {$ENDIF}(
 begin
   try
     State.LogBuffer := State.LogBuffer + str;
-    var P := FindNewLine(State.LogBuffer);
+    P := FindNewLine(State.LogBuffer);
     while P <> 0 do begin
       Log(Copy(State.LogBuffer, 1, P-1));
       if (State.LogBuffer[P] = #13) and (P < Length(State.LogBuffer)) and (State.LogBuffer[P+1] = #10) then
@@ -297,11 +343,14 @@ end;
 
 procedure {$IFNDEF WIN64} _ReportProgress {$ELSE} ReportProgress {$ENDIF}(
   const FileName: PChar; const Progress, ProgressMax: UInt64; var Abort: Bool); cdecl;
+  {$IFDEF FPC}public name {$IFNDEF WIN64}'_ReportProgress'{$ELSE}'ReportProgress'{$ENDIF};{$ENDIF}
+const
+  MaxInt64 = High(Int64);
+var
+  ReportProgress, ReportProgressMax: Int64;
 begin
   try
     if Assigned(State.OnExtractionProgress) then begin
-      const MaxInt64 = High(Int64);
-      var ReportProgress, ReportProgressMax: Int64;
       if Progress > MaxInt64 then
         ReportProgress := MaxInt64
       else
@@ -336,8 +385,10 @@ end;
 
 procedure SevenZipWin32Error(const FunctionName: String; const ErrorCode: DWORD;
   const AlsoLog: Boolean); overload;
+var
+  ExceptMessage: String;
 begin
-  const ExceptMessage = FmtSetupMessage(msgErrorFunctionFailedWithMessage,
+  ExceptMessage := FmtSetupMessage(msgErrorFunctionFailedWithMessage,
     [FunctionName, IntToStr(ErrorCode), Win32ErrorString(ErrorCode)]);
   if AlsoLog then
     SevenZipError(ExceptMessage, Format('Function %s returned error code %d', [FunctionName, ErrorCode]))
@@ -352,6 +403,8 @@ end;
 
 procedure Extract7ZipArchive(const ArchiveFileName, DestDir, Password: String; const FullPaths: Boolean;
   const OnExtractionProgress: TOnExtractionProgress);
+var
+  Res: Integer;
 
   procedure BadResultError(const Res: Integer);
   const
@@ -408,7 +461,7 @@ begin
   State.OnExtractionProgress := OnExtractionProgress;
   State.Aborted := False;
 
-  var Res := IS_7zDec(PChar(ArchiveFileName), FullPaths);
+  Res := IS_7zDec(PChar(ArchiveFileName), FullPaths);
 
   if State.LogBuffer <> '' then
     Log(State.LogBuffer);

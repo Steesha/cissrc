@@ -16,9 +16,13 @@ unit BitmapImage;
 interface
 
 uses
-  Windows, ShellAPI, Controls, Graphics, Classes, Imaging.pngimage;
+  Windows, ShellAPI, Controls, Graphics, Classes, {$IFDEF FPC}InnoPngImage{$ELSE}Imaging.pngimage{$ENDIF};
 
 type
+  {$IFDEF FPC}
+  SHSTOCKICONID = Integer;
+  {$ENDIF}
+
   TPaintEvent = procedure(Sender: TObject; Canvas: TCanvas; var ARect: TRect) of object;
 
   TBitmapImageImplementation = record
@@ -120,7 +124,7 @@ procedure Register;
 implementation
 
 uses
-  CommCtrl, SysUtils, Math, Themes, Resample;
+  CommCtrl, SysUtils, Math, {$IFDEF FPC}IntfGraphics, GraphType, FPImage,{$ELSE}Themes,{$ENDIF} Resample;
 
 procedure Register;
 begin
@@ -157,6 +161,7 @@ class function TBitmapImageImplementation.AdjustColorForStyle(const Control: TCo
   const Color: TColor): TColor;
 begin
   Result := Color;
+  {$IFNDEF FPC}
   if (Result = clBtnFace) or (Result = clWindow) then begin
     var LStyle := StyleServices(Control);
     if not LStyle.Enabled or LStyle.IsSystemStyle then
@@ -168,13 +173,16 @@ begin
         Result := LStyle.GetStyleColor(scWindow);
     end;
   end;
+  {$ENDIF}
 end;
 
 function TBitmapImageImplementation.GetInitializeSize(const AscendingTrySizes: array of Integer): Integer;
+var
+  I: Integer;
 begin
   { Find the largest regular icon size smaller than the scaled image }
   Result := 0;
-  for var I := Length(AscendingTrySizes)-1 downto 0 do begin
+  for I := Length(AscendingTrySizes)-1 downto 0 do begin
     if (FControl.Width >= AscendingTrySizes[I]) and (FControl.Height >= AscendingTrySizes[I]) then begin
       Result := AscendingTrySizes[I];
       Break;
@@ -185,18 +193,23 @@ begin
 end;
 
 function TBitmapImageImplementation.InitializeFromIcon(const Instance: HINST; const Name: PChar; const BkColor: TColor; const AscendingTrySizes: array of Integer): Boolean;
+var
+  Size: Integer;
+  Flags: UINT;
+  Handle: HICON;
+  Icon: TIcon;
 begin
-  const Size = GetInitializeSize(AscendingTrySizes);
+  Size := GetInitializeSize(AscendingTrySizes);
 
   { Load the desired icon }
-  var Flags: UINT := LR_DEFAULTCOLOR;
+  Flags := LR_DEFAULTCOLOR;
   if Instance = 0 then
     Flags := Flags or LR_LOADFROMFILE;
-  var Handle := LoadImage(Instance, Name, IMAGE_ICON, Size, Size, Flags);
+  Handle := LoadImageW(Instance, Name, IMAGE_ICON, Size, Size, Flags);
   if Handle = 0 then
-    Handle := LoadImage(Instance, Name, IMAGE_ICON, 0, 0, Flags);
+    Handle := LoadImageW(Instance, Name, IMAGE_ICON, 0, 0, Flags);
   if Handle <> 0 then begin
-    const Icon = TIcon.Create;
+    Icon := TIcon.Create;
     try
       Icon.Handle := Handle;
 
@@ -221,33 +234,56 @@ end;
 const
   IID_IImageList: TGUID = '{46EB5926-582E-4017-9FDF-E8998DAA0950}';
 
+{$IFDEF FPC}
+const
+  SHGSI_SYSICONINDEX = SHGFI_SYSICONINDEX;
+  SHIL_JUMBO = 4;
+
+type
+  TSHStockIconInfo = record
+    cbSize: DWORD;
+    hIcon: HICON;
+    iSysImageIndex: Integer;
+    iIcon: Integer;
+    szPath: array[0..MAX_PATH-1] of WideChar;
+  end;
+
+function SHGetStockIconInfo(const Siid: SHSTOCKICONID; const Flags: UINT;
+  var Info: TSHStockIconInfo): HRESULT; stdcall; external 'shell32.dll';
+{$ENDIF}
+
 function TBitmapImageImplementation.InitializeFromStockIcon(const Siid: SHSTOCKICONID; const BkColor: TColor; const AscendingTrySizes: array of Integer): Boolean;
+var
+  StockIconInfo: TSHStockIconInfo;
+  Size, ImageListSize: Integer;
+  ImageListIntf: IUnknown;
+  ImageList: HIMAGELIST;
+  Handle: HICON;
+  Icon: TIcon;
 begin
   { Currently this function always fails on Wine: SHGetStockIconInfo succeeds but simply always
     returns -1 as iSysImageIndex, which makes ImageList_GetIcon fail }
 
   Result := False;
 
-  var SHStockIconInfo: TSHStockIconInfo;
-  SHStockIconInfo.cbSize := SizeOf(SHStockIconInfo);
-  if Succeeded(SHGetStockIconInfo(siid, SHGSI_SYSICONINDEX, SHStockIconInfo)) then begin
+  StockIconInfo.cbSize := SizeOf(StockIconInfo);
+  if Succeeded(SHGetStockIconInfo(siid, SHGSI_SYSICONINDEX, StockIconInfo)) then begin
     { The SHGetImageList documentation remarks that SHIL_SMALL and SHIL_LARGE are DPI-aware. However
       because this does not provide per-monitor DPI awareness, we always use SHIL_JUMBO and perform
       scaling ourselves. }
-    const Size = GetInitializeSize(AscendingTrySizes);
-    var iImageList: Integer;
+    Size := GetInitializeSize(AscendingTrySizes);
     if Size > 24 then
-      iImageList := SHIL_JUMBO
+      ImageListSize := SHIL_JUMBO
     else
-      iImageList := SHIL_EXTRALARGE; { For small images use SHIL_EXTRALARGE, which should be 48x48 at least }
-    var ImageListIntf: IUnknown; { Use an interface and not HIMAGELIST for proper release }
-    if Succeeded(SHGetImageList(iImageList, IID_IImageList, Pointer(ImageListIntf))) then begin
+      ImageListSize := SHIL_EXTRALARGE; { For small images use SHIL_EXTRALARGE, which should be 48x48 at least }
+    { Keep the interface alive while using its HIMAGELIST view }
+    if Succeeded(SHGetImageList(ImageListSize, IID_IImageList, {$IFDEF FPC}@ImageListIntf{$ELSE}Pointer(ImageListIntf){$ENDIF})) then begin
       { The SHGetImageList documentation also remarks that "the IImageList pointer type can be cast as an
         HIMAGELIST as needed", and we make use of that }
-      const ImageList = HIMAGELIST(Pointer(ImageListIntf));
-      var Handle := ImageList_GetIcon(ImageList, SHStockIconInfo.iSysImageIndex, ILD_TRANSPARENT);
+      ImageList := HIMAGELIST(Pointer(ImageListIntf));
+      Handle := ImageList_GetIcon(ImageList, StockIconInfo.iSysImageIndex, ILD_TRANSPARENT);
       if Handle <> 0 then begin
-        const Icon = TIcon.Create;
+        Icon := TIcon.Create;
         try
           Icon.Handle := Handle;
 
@@ -365,6 +401,11 @@ begin
 end;
 
 procedure TBitmapImageImplementation.Paint(const Sender: TObject; const Canvas: TCanvas; var R: TRect);
+var
+  Is32bit: Boolean;
+  W, H, X, Y: Integer;
+  Bmp: TBitmap;
+  BrushColor: TColor;
 
   function DoStretchBmp(const W, H: Integer; const Is32bit: Boolean): Boolean;
   begin
@@ -376,11 +417,60 @@ procedure TBitmapImageImplementation.Paint(const Sender: TObject; const Canvas: 
     end;
   end;
 
-begin
-  const Is32bit = Bitmap.SupportsPartialTransparency;
+  {$IFDEF FPC}
+  procedure DrawWithOpacity;
+  var
+    Source, Output: TLazIntfImage;
+    Desc: TRawImageDescription;
+    OutputBitmap: TBitmap;
+    Column, Row: Integer;
+    Color: TFPColor;
+    HasVisiblePixels: Boolean;
+  begin
+    if Opacity = 0 then
+      Exit;
+    Source := Bmp.CreateIntfImage;
+    Output := nil;
+    OutputBitmap := nil;
+    try
+      if Opacity = 255 then begin
+        { The Win32 widget set treats all-zero alpha as an opaque DIB }
+        for Row := 0 to Bmp.Height - 1 do
+          for Column := 0 to Bmp.Width - 1 do
+            if Source.Colors[Column, Row].Alpha shr 8 <> 0 then begin
+              Canvas.Draw(X, Y, Bmp);
+              Exit;
+            end;
+        Exit;
+      end;
+      Output := TLazIntfImage.Create(0, 0);
+      Desc.Init_BPP32_B8G8R8A8_BIO_TTB(Bmp.Width, Bmp.Height);
+      Output.DataDescription := Desc;
+      HasVisiblePixels := False;
+      for Row := 0 to Bmp.Height - 1 do
+        for Column := 0 to Bmp.Width - 1 do begin
+          Color := Source.Colors[Column, Row];
+          if not Is32bit then
+            Color.Alpha := High(Word);
+          Color.Alpha := (Cardinal(Color.Alpha) * Opacity + 127) div 255;
+          HasVisiblePixels := HasVisiblePixels or (Color.Alpha shr 8 <> 0);
+          Output.Colors[Column, Row] := Color;
+        end;
+      if HasVisiblePixels then begin
+        OutputBitmap := TBitmap.Create;
+        OutputBitmap.LoadFromIntfImage(Output);
+        Canvas.Draw(X, Y, OutputBitmap);
+      end;
+    finally
+      OutputBitmap.Free;
+      Output.Free;
+      Source.Free;
+    end;
+  end;
+  {$ENDIF}
 
-  var W, H: Integer;
-  var Bmp: TBitmap;
+begin
+  Is32bit := {$IFDEF FPC}Bitmap.RawImage.Description.AlphaPrec > 0{$ELSE}Bitmap.SupportsPartialTransparency{$ENDIF};
   if Stretch and not Bitmap.Empty then begin
     W := R.Width;
     H := R.Height;
@@ -399,7 +489,7 @@ begin
             W := Bmp.Width;
             H := Bmp.Height;
           end else begin
-            StretchedBitmap.Palette := CopyPalette(Bitmap.Palette);
+            {$IFNDEF FPC}StretchedBitmap.Palette := CopyPalette(Bitmap.Palette);{$ENDIF}
             StretchedBitmap.Width := W;
             StretchedBitmap.Height := H;
             StretchedBitmap.Canvas.StretchDraw(Rect(0, 0, W, H), Bitmap);
@@ -414,7 +504,7 @@ begin
   end;
 
   if (BackColor <> clNone) and (Is32Bit or (Opacity <> 255) or (Bmp.Width < R.Width) or (Bmp.Height < R.Height)) then begin
-    var BrushColor := BackColor;
+    BrushColor := BackColor;
     if Sender is TControl then
       BrushColor := AdjustColorForStyle(TControl(Sender), BrushColor);
     Canvas.Brush.Style := bsSolid;
@@ -430,8 +520,8 @@ begin
 
 
   if not Bmp.Empty then begin
-    var X := R.Left;
-    var Y := R.Top;
+    X := R.Left;
+    Y := R.Top;
     if Center then begin
       Inc(X, (R.Width - W) div 2);
       if X < R.Left then
@@ -444,8 +534,13 @@ begin
     if not Is32bit and (ReplaceColor <> clNone) and (ReplaceWithColor <> clNone) then begin
       Canvas.Brush.Color := ReplaceWithColor;
       Canvas.BrushCopy(Rect(X, Y, X + W, Y + H), Bmp, Rect(0, 0, Bmp.Width, Bmp.Height), ReplaceColor);
+    {$IFDEF FPC}
+    end else if Is32bit or (Opacity <> 255) then
+      DrawWithOpacity
+    {$ELSE}
     end else if Opacity <> 255 then
       Canvas.Draw(X, Y, Bmp, Opacity)
+    {$ENDIF}
     else
       Canvas.Draw(X, Y, Bmp);
   end;
@@ -461,9 +556,11 @@ begin
   inherited;
   ControlStyle := ControlStyle + [csParentBackground, csReplicatable];
   FImpl.Init(Self);
+  {$IFNDEF FPC}
   if IsCustomStyleActive then
     FImpl.BackColor := StyleServices(Self).GetStyleColor(scWindow)
   else
+  {$ENDIF}
     FImpl.BackColor := clBtnFace;
   Width := 105;
   Height := 105;
@@ -541,8 +638,10 @@ begin
 end;
 
 procedure TBitmapImage.Paint;
+var
+  R: TRect;
 begin
-  var R := ClientRect;
+  R := ClientRect;
   FImpl.Paint(Self, Canvas, R);
 end;
 

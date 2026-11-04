@@ -183,7 +183,7 @@ type
   end;
   TDownloadFiles = TObjectList<TDownloadFile>;
 
-  TDownloadFileCompleted = reference to procedure(const DownloadedFile: TDownloadFile;
+  TDownloadFileCompleted = {$IFNDEF FPC}reference to{$ENDIF} procedure(const DownloadedFile: TDownloadFile;
     const DestFile: String; var Remove: Boolean);
 
   TDownloadWizardPage = class(TOutputProgressWizardPage)
@@ -318,7 +318,7 @@ begin
     Width := SurfaceWidth;
     Height := WizardForm.ScalePixelsY(DefaultLabelHeight);
     WordWrap := True;
-    Caption := SubCaption;
+    Caption := {$IFDEF FPC}UTF8Encode(SubCaption){$ELSE}SubCaption{$ENDIF};
   end;
   TSetupForm.SetCtlParent(FSubCaptionLabel, Surface);
   FY := WizardForm.AdjustLabelHeight(FSubCaptionLabel) + WizardForm.ScalePixelsY(DefaultBoxTop);
@@ -326,8 +326,10 @@ end;
 
 function TInputQueryWizardPage.Add(const APrompt: String;
   const APassword: Boolean): NativeInt;
+var
+  PromptLabel: TNewStaticText;
+  Edit: TPasswordEdit;
 begin
-  var PromptLabel: TNewStaticText;
   if APrompt <> '' then begin
     PromptLabel := TNewStaticText.Create(Self);
     with PromptLabel do begin
@@ -336,14 +338,14 @@ begin
       Width := SurfaceWidth;
       Height := WizardForm.ScalePixelsY(DefaultLabelHeight);
       WordWrap := True;
-      Caption := APrompt;
+      Caption := {$IFDEF FPC}UTF8Encode(APrompt){$ELSE}APrompt{$ENDIF};
     end;
     SetCtlParentAtBack(PromptLabel, Surface);
     Inc(FY, WizardForm.AdjustLabelHeight(PromptLabel) + WizardForm.ScalePixelsY(16));
   end else
     PromptLabel := nil;
 
-  const Edit = TPasswordEdit.Create(Self);
+  Edit := TPasswordEdit.Create(Self);
   with Edit do begin
     Password := APassword;
     Top := FY;
@@ -371,18 +373,20 @@ end;
 
 function TInputQueryWizardPage.GetValue(Index: NativeInt): String;
 begin
-  Result := GetEdit(Index).Text;
+  Result := {$IFDEF FPC}UTF8Decode(GetEdit(Index).Text){$ELSE}GetEdit(Index).Text{$ENDIF};
 end;
 
 procedure TInputQueryWizardPage.SetValue(Index: NativeInt; const Value: String);
 begin
-  GetEdit(Index).Text := Value;
+  GetEdit(Index).Text := {$IFDEF FPC}UTF8Encode(Value){$ELSE}Value{$ENDIF};
 end;
 
 {--- InputOption ---}
 
 procedure TInputOptionWizardPage.Initialize(const SubCaption: String;
   const Exclusive, ListBox: Boolean);
+var
+  CaptionYDiff: Integer;
 begin
   FSubCaptionLabel := TNewStaticText.Create(Self);
   with SubCaptionLabel do begin
@@ -390,10 +394,10 @@ begin
     Width := SurfaceWidth;
     Height := WizardForm.ScalePixelsY(DefaultLabelHeight);
     WordWrap := True;
-    Caption := SubCaption;
+    Caption := {$IFDEF FPC}UTF8Encode(SubCaption){$ELSE}SubCaption{$ENDIF};
   end;
   TSetupForm.SetCtlParent(FSubCaptionLabel, Surface);
-  const CaptionYDiff = WizardForm.AdjustLabelHeight(SubCaptionLabel);
+  CaptionYDiff := WizardForm.AdjustLabelHeight(SubCaptionLabel);
 
   FCheckListBox := TNewCheckListBox.Create(Self);
   with FCheckListBox do begin
@@ -429,8 +433,10 @@ begin
 end;
 
 function TInputOptionWizardPage.GetSelectedValueIndex: Integer;
+var
+  I: Integer;
 begin
-  for var I := 0 to FCheckListBox.Items.Count-1 do
+  for I := 0 to FCheckListBox.Items.Count-1 do
     if (FCheckListBox.ItemLevel[I] = 0) and FCheckListBox.Checked[I] then begin
       Result := I;
       Exit;
@@ -444,8 +450,10 @@ begin
 end;
 
 procedure TInputOptionWizardPage.SetSelectedValueIndex(Value: Integer);
+var
+  I: Integer;
 begin
-  for var I := 0 to FCheckListBox.Items.Count-1 do
+  for I := 0 to FCheckListBox.Items.Count-1 do
     if FCheckListBox.ItemLevel[I] = 0 then
       FCheckListBox.Checked[I] := (I = Value);
 end;
@@ -474,22 +482,29 @@ begin
 end;
 
 procedure TInputDirWizardPage.ButtonClick(Sender: TObject);
+var
+  I: NativeInt;
+  Edit: TNewPathEdit;
+  S: String;
 begin
   if Sender is TNewButton then begin
-    const I = FButtons.IndexOf(Sender as TNewButton);
+    I := FButtons.IndexOf(Sender as TNewButton);
     if I <> -1 then begin
-      const Edit = FEdits[I];
-      var S: String := Edit.Text;
+      Edit := FEdits[I];
+      S := {$IFDEF FPC}UTF8Decode(Edit.Text){$ELSE}Edit.Text{$ENDIF};
       if ShowSelectFolderDialog(False, FAppendDir, S, FNewFolderName) then
-        Edit.Text := S;
+        Edit.Text := {$IFDEF FPC}UTF8Encode(S){$ELSE}S{$ENDIF};
     end;
   end;
 end;
 
 procedure TInputDirWizardPage.NextButtonClick(var Continue: Boolean);
+var
+  I: Integer;
+  Edit: TNewPathEdit;
 begin
-  for var I := 0 to FEdits.Count-1 do begin
-    const Edit = FEdits[I];
+  for I := 0 to FEdits.Count-1 do begin
+    Edit := FEdits[I];
     if not ValidateCustomDirEdit(Edit, True, True, True) then begin
       if WizardForm.Visible then
         Edit.SetFocus;
@@ -509,7 +524,7 @@ begin
     Width := SurfaceWidth;
     Height := WizardForm.ScalePixelsY(DefaultLabelHeight);
     WordWrap := True;
-    Caption := SubCaption;
+    Caption := {$IFDEF FPC}UTF8Encode(SubCaption){$ELSE}SubCaption{$ENDIF};
   end;
   TSetupForm.SetCtlParent(FSubCaptionLabel, Surface);
   FY := WizardForm.AdjustLabelHeight(FSubCaptionLabel) + WizardForm.ScalePixelsY(DefaultBoxTop);
@@ -519,10 +534,14 @@ begin
 end;
 
 function TInputDirWizardPage.Add(const APrompt: String): NativeInt;
+var
+  ButtonWidth: Integer;
+  PromptLabel: TNewStaticText;
+  Edit: TNewPathEdit;
+  Button: TNewButton;
 begin
-  const ButtonWidth = WizardForm.CalculateButtonWidth([SetupMessages[msgButtonWizardBrowse]]);
+  ButtonWidth := WizardForm.CalculateButtonWidth([SetupMessages[msgButtonWizardBrowse]]);
 
-  var PromptLabel: TNewStaticText;
   if APrompt <> '' then begin
     PromptLabel := TNewStaticText.Create(Self);
     with PromptLabel do begin
@@ -531,14 +550,14 @@ begin
       Width := SurfaceWidth;
       Height := WizardForm.ScalePixelsY(DefaultLabelHeight);
       WordWrap := True;
-      Caption := APrompt;
+      Caption := {$IFDEF FPC}UTF8Encode(APrompt){$ELSE}APrompt{$ENDIF};
     end;
     SetCtlParentAtBack(PromptLabel, Surface);
     Inc(FY, WizardForm.AdjustLabelHeight(PromptLabel) + WizardForm.ScalePixelsY(16));
   end else
     PromptLabel := nil;
 
-  const Edit = TNewPathEdit.Create(Self);
+  Edit := TNewPathEdit.Create(Self);
   with Edit do begin
     Top := FY;
     Width := SurfaceWidth-ButtonWidth-WizardForm.ScalePixelsX(10);
@@ -548,17 +567,17 @@ begin
   if PromptLabel <> nil then
     PromptLabel.FocusControl := Edit;
 
-  const Button = TNewButton.Create(Self);
+  Button := TNewButton.Create(Self);
   with Button do begin
     Left := SurfaceWidth-ButtonWidth;
     Top := Edit.Top-1;
     Width := ButtonWidth;
     Height := WizardForm.NextButton.Height;
     if FEdits.Count = 0 then
-      Caption := SetupMessages[msgButtonWizardBrowse]
+      Caption := {$IFDEF FPC}UTF8Encode(SetupMessages[msgButtonWizardBrowse]){$ELSE}SetupMessages[msgButtonWizardBrowse]{$ENDIF}
     else
       { Can't use the same accel key for secondary buttons... }
-      Caption := RemoveAccelChar(SetupMessages[msgButtonWizardBrowse]);
+      Caption := {$IFDEF FPC}UTF8Encode(RemoveAccelChar(SetupMessages[msgButtonWizardBrowse])){$ELSE}RemoveAccelChar(SetupMessages[msgButtonWizardBrowse]){$ENDIF};
     OnClick := ButtonClick;
   end;
   SetCtlParentAtBack(Button, Surface);
@@ -586,12 +605,12 @@ end;
 
 function TInputDirWizardPage.GetValue(Index: NativeInt): String;
 begin
-  Result := GetEdit(Index).Text;
+  Result := {$IFDEF FPC}UTF8Decode(GetEdit(Index).Text){$ELSE}GetEdit(Index).Text{$ENDIF};
 end;
 
 procedure TInputDirWizardPage.SetValue(Index: NativeInt; const Value: String);
 begin
-  GetEdit(Index).Text := RemoveBackslashUnlessRoot(PathExpand(Value));
+  GetEdit(Index).Text := {$IFDEF FPC}UTF8Encode(RemoveBackslashUnlessRoot(PathExpand(Value))){$ELSE}RemoveBackslashUnlessRoot(PathExpand(Value)){$ENDIF};
 end;
 
 {--- InputFile ---}
@@ -617,21 +636,25 @@ begin
 end;
 
 procedure TInputFileWizardPage.ButtonClick(Sender: TObject);
+var
+  I: Integer;
+  Edit: TNewPathEdit;
+  FileName, Filter, DefaultExtension: String;
 begin
   if Sender is TNewButton then begin
     { Casting to Integer because TStringList is used below, and TStringList
       indexes are still Integer in 64-bit (unlike TList, which uses NativeInt) }
-    const I = Integer(FButtons.IndexOf(Sender as TNewButton));
+    I := Integer(FButtons.IndexOf(Sender as TNewButton));
     if I <> -1 then begin
-      const Edit = FEdits[I];
-      var FileName: String := Edit.Text;
+      Edit := FEdits[I];
+      FileName := {$IFDEF FPC}UTF8Decode(Edit.Text){$ELSE}Edit.Text{$ENDIF};
+      Filter := {$IFDEF FPC}UTF8Decode(FInputFileFilters[I]){$ELSE}FInputFileFilters[I]{$ENDIF};
+      DefaultExtension := {$IFDEF FPC}UTF8Decode(FInputFileDefaultExtensions[I]){$ELSE}FInputFileDefaultExtensions[I]{$ENDIF};
       if (not IsSaveButton[I] and NewGetOpenFileName(RemoveAccelChar(SetupMessages[msgButtonWizardBrowse]),
-          FileName, PathExtractPath(FileName), FInputFileFilters[I],
-          FInputFileDefaultExtensions[I], Surface.Handle)) or
+          FileName, PathExtractPath(FileName), Filter, DefaultExtension, Surface.Handle)) or
          (IsSaveButton[I] and NewGetSaveFileName(RemoveAccelChar(SetupMessages[msgButtonWizardBrowse]),
-          FileName, PathExtractPath(FileName), FInputFileFilters[I],
-          FInputFileDefaultExtensions[I], Surface.Handle)) then
-        Edit.Text := FileName;
+          FileName, PathExtractPath(FileName), Filter, DefaultExtension, Surface.Handle)) then
+        Edit.Text := {$IFDEF FPC}UTF8Encode(FileName){$ELSE}FileName{$ENDIF};
     end;
   end;
 end;
@@ -644,7 +667,7 @@ begin
     Width := SurfaceWidth;
     Height := WizardForm.ScalePixelsY(DefaultLabelHeight);
     WordWrap := True;
-    Caption := SubCaption;
+    Caption := {$IFDEF FPC}UTF8Encode(SubCaption){$ELSE}SubCaption{$ENDIF};
   end;
   TSetupForm.SetCtlParent(FSubCaptionLabel, Surface);
   FY := WizardForm.AdjustLabelHeight(FSubCaptionLabel) + WizardForm.ScalePixelsY(DefaultBoxTop);
@@ -652,10 +675,14 @@ end;
 
 function TInputFileWizardPage.Add(const APrompt, AFilter,
   ADefaultExtension: String): NativeInt;
+var
+  ButtonWidth: Integer;
+  PromptLabel: TNewStaticText;
+  Edit: TNewPathEdit;
+  Button: TNewButton;
 begin
-  const ButtonWidth = WizardForm.CalculateButtonWidth([SetupMessages[msgButtonWizardBrowse]]);
+  ButtonWidth := WizardForm.CalculateButtonWidth([SetupMessages[msgButtonWizardBrowse]]);
 
-  var PromptLabel: TNewStaticText;
   if APrompt <> '' then begin
     PromptLabel := TNewStaticText.Create(Self);
     with PromptLabel do begin
@@ -664,14 +691,14 @@ begin
       Width := SurfaceWidth;
       Height := WizardForm.ScalePixelsY(DefaultLabelHeight);
       WordWrap := True;
-      Caption := APrompt;
+      Caption := {$IFDEF FPC}UTF8Encode(APrompt){$ELSE}APrompt{$ENDIF};
     end;
     SetCtlParentAtBack(PromptLabel, Surface);
     Inc(FY, WizardForm.AdjustLabelHeight(PromptLabel) + WizardForm.ScalePixelsY(16));
   end else
     PromptLabel := nil;
 
-  const Edit = TNewPathEdit.Create(Self);
+  Edit := TNewPathEdit.Create(Self);
   with Edit do begin
     AutoCompleteFiles := True;
     Top := FY;
@@ -682,24 +709,24 @@ begin
   if PromptLabel <> nil then
     PromptLabel.FocusControl := Edit;
 
-  const Button = TNewButton.Create(Self);
+  Button := TNewButton.Create(Self);
   with Button do begin
     Left := SurfaceWidth-ButtonWidth;
     Top := Edit.Top-1;
     Width := ButtonWidth;
     Height := WizardForm.NextButton.Height;
     if FButtons.Count = 0 then
-      Caption := SetupMessages[msgButtonWizardBrowse]
+      Caption := {$IFDEF FPC}UTF8Encode(SetupMessages[msgButtonWizardBrowse]){$ELSE}SetupMessages[msgButtonWizardBrowse]{$ENDIF}
     else
       { Can't use the same accel key for secondary buttons... }
-      Caption := RemoveAccelChar(SetupMessages[msgButtonWizardBrowse]);
+      Caption := {$IFDEF FPC}UTF8Encode(RemoveAccelChar(SetupMessages[msgButtonWizardBrowse])){$ELSE}RemoveAccelChar(SetupMessages[msgButtonWizardBrowse]){$ENDIF};
     OnClick := ButtonClick;
   end;
   SetCtlParentAtBack(Button, Surface);
   Inc(FY, WizardForm.ScalePixelsY(36));
 
-  FInputFileFilters.Add(AFilter);
-  FInputFileDefaultExtensions.Add(ADefaultExtension);
+  FInputFileFilters.Add({$IFDEF FPC}UTF8Encode(AFilter){$ELSE}AFilter{$ENDIF});
+  FInputFileDefaultExtensions.Add({$IFDEF FPC}UTF8Encode(ADefaultExtension){$ELSE}ADefaultExtension{$ENDIF});
   FButtons.Add(Button);
   FPromptLabels.Add(PromptLabel);
   Result := FEdits.Add(Edit);
@@ -722,12 +749,12 @@ end;
 
 function TInputFileWizardPage.GetValue(Index: NativeInt): String;
 begin
-  Result := GetEdit(Index).Text;
+  Result := {$IFDEF FPC}UTF8Decode(GetEdit(Index).Text){$ELSE}GetEdit(Index).Text{$ENDIF};
 end;
 
 procedure TInputFileWizardPage.SetValue(Index: NativeInt; const Value: String);
 begin
-  GetEdit(Index).Text := Value;
+  GetEdit(Index).Text := {$IFDEF FPC}UTF8Encode(Value){$ELSE}Value{$ENDIF};
 end;
 
 function TInputFileWizardPage.GetIsSaveButton(Index: NativeInt): Boolean;
@@ -754,7 +781,7 @@ begin
     Width := SurfaceWidth;
     Height := WizardForm.ScalePixelsY(DefaultLabelHeight);
     WordWrap := True;
-    Caption := Msg;
+    Caption := {$IFDEF FPC}UTF8Encode(Msg){$ELSE}Msg{$ENDIF};
   end;
   TSetupForm.SetCtlParent(FMsgLabel, Surface);
   WizardForm.AdjustLabelHeight(MsgLabel);
@@ -763,8 +790,10 @@ end;
 {--- OutputMsgMemo ---}
 
 procedure TOutputMsgMemoWizardPage.Initialize(const SubCaption: String; const Msg: AnsiString);
+var
+  Y: Integer;
 begin
-  var Y := 0;
+  Y := 0;
   if SubCaption <> '' then begin
     FSubCaptionLabel := TNewStaticText.Create(Self);
     with FSubCaptionLabel do begin
@@ -772,7 +801,7 @@ begin
       Width := SurfaceWidth;
       Height := WizardForm.ScalePixelsY(DefaultLabelHeight);
       WordWrap := True;
-      Caption := SubCaption;
+      Caption := {$IFDEF FPC}UTF8Encode(SubCaption){$ELSE}SubCaption{$ENDIF};
     end;
     TSetupForm.SetCtlParent(FSubCaptionLabel, Surface);
     Inc(Y, WizardForm.ScalePixelsY(DefaultBoxTop) +
@@ -785,8 +814,12 @@ begin
     Top := Y;
     Width := SurfaceWidth;
     Height := WizardForm.ScalePixelsY(DefaultBoxBottom) + SurfaceExtraHeight - Y;
+    {$IFDEF FPC}
+    BorderStyle := bsSingle;
+    {$ELSE}
     BevelKind := bkFlat;
     BorderStyle := bsNone;
+    {$ENDIF}
     ReadOnly := True;
     ScrollBars := ssVertical;
     WantReturns := False;
@@ -890,10 +923,11 @@ procedure OutputProgressWizardPageMessageBoxCallback(const Flags: Cardinal; cons
 const
   States: array [TNewProgressBarState] of TTaskbarProgressState =
     (tpsNormal, tpsError, tpsPaused);
+var
+  OutputProgressWizardPage: TOutputProgressWizardPage;
+  NewState: TNewProgressBarState;
 begin
-  const OutputProgressWizardPage = TOutputProgressWizardPage(Param);
-
-  var NewState: TNewProgressBarState;
+  OutputProgressWizardPage := TOutputProgressWizardPage(Param);
   if After then
     NewState := npbsNormal
   else if (Flags and MB_ICONSTOP) <> 0 then
@@ -946,17 +980,18 @@ end;
 
 procedure TDownloadWizardPage.AbortButtonClick(Sender: TObject);
 begin
-  FAbortedByUser := LoggedMsgBox(SetupMessages[msgStopDownload], '', mbConfirmation, MB_YESNO, True, ID_YES) = IDYES;
+  FAbortedByUser := LoggedMsgBox(SetupMessages[msgStopDownload], '', mbConfirmation, MB_YESNO, True, IDYES) = IDYES;
 end;
 
 function TDownloadWizardPage.InternalOnDownloadProgress(const Url, BaseName: string; const Progress, ProgressMax: Int64): Boolean;
+var
+  Progress32, ProgressMax32: Integer;
 begin
   if FAbortedByUser then begin
     Log('Need to abort download.');
     Result := False;
   end else begin
-    FMsg2Label.Caption := IfThen(FShowBaseNameInsteadOfUrl, PathExtractName(BaseName), Url);
-    var Progress32, ProgressMax32: Integer;
+    FMsg2Label.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}IfThen(FShowBaseNameInsteadOfUrl, PathExtractName(BaseName), Url){$IFDEF FPC}){$ENDIF};
     if ProgressMax > MaxInt then begin
       Progress32 := Integer(Round((Progress / ProgressMax) * MaxInt));
       ProgressMax32 := MaxInt;
@@ -974,8 +1009,7 @@ begin
 
     { This will call InternalThrottledOnDownloadProgress, which will log progress and call the script's FOnDownloadProgress, but throttled }
     if FThrottler = nil then begin
-      const OnDownloadProgress: TOnDownloadProgress = InternalThrottledOnDownloadProgress;
-      FThrottler := TProgressThrottler.Create(OnDownloadProgress);
+      FThrottler := TProgressThrottler.Create(InternalThrottledOnDownloadProgress);
     end;
     Result := FThrottler.OnDownloadProgress(Url, BaseName, Progress, ProgressMax);
   end;
@@ -1023,13 +1057,13 @@ procedure TDownloadWizardPage.Initialize;
 begin
   inherited;
 
-  FMsg1Label.Caption := SetupMessages[msgDownloadingLabel2];
+  FMsg1Label.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgDownloadingLabel2]{$IFDEF FPC}){$ENDIF};
 
   FAbortButton := TNewButton.Create(Self);
   with FAbortButton do begin
-    Caption := SetupMessages[msgButtonStopDownload];
+    Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonStopDownload]{$IFDEF FPC}){$ENDIF};
     Top := FProgressBar.Top + FProgressBar.Height + WizardForm.ScalePixelsY(8);
-    Width := WizardForm.CalculateButtonWidth([Caption]);
+    Width := WizardForm.CalculateButtonWidth([{$IFDEF FPC}UTF8Decode(Caption){$ELSE}Caption{$ENDIF}]);
     Height := WizardForm.CancelButton.Height;
     OnClick := AbortButtonClick;
   end;
@@ -1054,10 +1088,13 @@ end;
 function TDownloadWizardPage.DoAdd(const Url, BaseName, RequiredSHA256OfFile, UserName, Password: String;
   const ISSigVerify: Boolean; const ISSigAllowedKeys: AnsiString; const DotISSigEntry: Boolean;
   const Data: NativeInt): NativeInt;
+var
+  Verification: TSetupFileVerification;
+  F: TDownloadFile;
 begin
   if ISSigVerify and DotISSigEntry then
     InternalError('ISSigVerify and DotISSigEntry');
-  var Verification := NoVerification;
+  Verification := NoVerification;
   if RequiredSHA256OfFile <> '' then begin
     Verification.Typ := fvHash;
     Verification.Hash := SHA256DigestFromString(RequiredSHA256OfFile)
@@ -1065,7 +1102,7 @@ begin
     Verification.Typ := fvISSig;
     Verification.ISSigAllowedKeys := ISSigAllowedKeys
   end;
-  var F := TDownloadFile.Create;
+  F := TDownloadFile.Create;
   F.Url := Url;
   F.BaseName := BaseName;
   F.UserName := UserName;
@@ -1077,16 +1114,21 @@ begin
 end;
 
 function ConvertAllowedKeysRuntimeIDsToISSigAllowedKeys(const AllowedKeysRuntimeIDs: TStringList): AnsiString;
+var
+  I, KeyIndex: Integer;
+  RuntimeID: String;
+  Found: Boolean;
+  ISSigKeyEntry: PSetupISSigKeyEntry;
 begin
   Result := '';
   if AllowedKeysRuntimeIDs <> nil then begin
-    for var I := 0 to AllowedKeysRuntimeIDs.Count-1 do begin
-      const RuntimeID = AllowedKeysRuntimeIDs[I];
+    for I := 0 to AllowedKeysRuntimeIDs.Count-1 do begin
+      RuntimeID := AllowedKeysRuntimeIDs[I];
       if RuntimeID = '' then
         InternalError('RuntimeID cannot be empty');
-      var Found := False;
-      for var KeyIndex := 0 to Entries[seISSigKey].Count-1 do begin
-        var ISSigKeyEntry := PSetupISSigKeyEntry(Entries[seISSigKey][KeyIndex]);
+      Found := False;
+      for KeyIndex := 0 to Entries[seISSigKey].Count-1 do begin
+        ISSigKeyEntry := PSetupISSigKeyEntry(Entries[seISSigKey][KeyIndex]);
         if SameText(ISSigKeyEntry.RuntimeID, RuntimeID) then begin
           SetISSigAllowedKey(Result, Integer(KeyIndex));
           Found := True;
@@ -1118,8 +1160,10 @@ end;
 
 function TDownloadWizardPage.AddExWithISSigVerify(const Url, ISSigUrl, BaseName, UserName,
   Password: String; const AllowedKeysRuntimeIDs: TStringList; const Data: NativeInt): NativeInt;
+var
+  ISSigAllowedKeys: AnsiString;
 begin
-  const ISSigAllowedKeys = ConvertAllowedKeysRuntimeIDsToISSigAllowedKeys(AllowedKeysRuntimeIDs);
+  ISSigAllowedKeys := ConvertAllowedKeysRuntimeIDsToISSigAllowedKeys(AllowedKeysRuntimeIDs);
   Result := AddExWithISSigVerify(Url, ISSigUrl, BaseName, UserName, Password, ISSigAllowedKeys, Data);
 end;
 
@@ -1137,24 +1181,28 @@ begin
 end;
 
 function TDownloadWizardPage.Download(const OnDownloadFileCompleted: TDownloadFileCompleted): Int64;
+var
+  I: Integer;
+  F: TDownloadFile;
+  DestFile: String;
+  Remove: Boolean;
 begin
   FAbortedByUser := False;
 
   Result := 0;
 
   try
-    for var I := 0 to FFiles.Count-1 do begin
+    for I := 0 to FFiles.Count-1 do begin
       if FThrottler <> nil then
         FThrottler.Reset;
       { Don't need to set DownloadTemporaryFileOrExtractArchiveProcessMessages before downloading since we already process messages ourselves }
-      const F = FFiles[I];
+      F := FFiles[I];
       FLastBaseNameOrUrl := IfThen(FShowBaseNameInsteadOfUrl, PathExtractName(F.BaseName), F.Url);
       SetDownloadTemporaryFileCredentials(F.UserName, F.Password);
-      var DestFile: String;
       Result := Result + DownloadTemporaryFile(F.Url, F.BaseName, F.Verification,
         InternalOnDownloadProgress, InternalOnDownloadNoProgress, DestFile);
       if Assigned(OnDownloadFileCompleted) then begin
-        var Remove := False;
+        Remove := False;
         OnDownloadFileCompleted(F, DestFile, Remove);
         if Remove then
           FFiles[I] := nil;
@@ -1162,7 +1210,13 @@ begin
     end;
   finally
     SetDownloadTemporaryFileCredentials('', '');
+    {$IFDEF FPC}
+    for I := FFiles.Count-1 downto 0 do
+      if FFiles[I] = nil then
+        FFiles.Delete(I);
+    {$ELSE}
     FFiles.Pack;
+    {$ENDIF}
   end;
 end;
 
@@ -1170,10 +1224,12 @@ end;
 
 procedure TExtractionWizardPage.AbortButtonClick(Sender: TObject);
 begin
-  FAbortedByUser := LoggedMsgBox(SetupMessages[msgStopExtraction], '', mbConfirmation, MB_YESNO, True, ID_YES) = IDYES;
+  FAbortedByUser := LoggedMsgBox(SetupMessages[msgStopExtraction], '', mbConfirmation, MB_YESNO, True, IDYES) = IDYES;
 end;
 
 function TExtractionWizardPage.InternalOnExtractionProgress(const ArchiveName, FileName: string; const Progress, ProgressMax: Int64): Boolean;
+var
+  Progress32, ProgressMax32: Integer;
 begin
   if FAbortedByUser then begin
     Log('Need to abort extraction.');
@@ -1181,8 +1237,7 @@ begin
   end else begin
     { Unlike TDownloadWizardPage we don't log progress here. This is because 7zMain.c already logs output dirs and names. }
 
-    FMsg2Label.Caption := IfThen(FShowArchiveInsteadOfFile, ArchiveName, FileName);
-    var Progress32, ProgressMax32: Integer;
+    FMsg2Label.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}IfThen(FShowArchiveInsteadOfFile, ArchiveName, FileName){$IFDEF FPC}){$ENDIF};
     if ProgressMax > MaxInt then begin
       Progress32 := Integer(Round((Progress / ProgressMax) * MaxInt));
       ProgressMax32 := MaxInt;
@@ -1202,8 +1257,7 @@ begin
       Because it does nothing else we first check if FOnExtractionProgress is actually assigned }
     if Assigned(FOnExtractionProgress) then begin
       if FThrottler = nil then begin
-        const OnExtractionProgress: TOnExtractionProgress = InternalThrottledOnExtractionProgress;
-        FThrottler := TProgressThrottler.Create(OnExtractionProgress);
+        FThrottler := TProgressThrottler.Create(InternalThrottledOnExtractionProgress);
       end;
       Result := FThrottler.OnExtractionProgress(ArchiveName, FileName, Progress, ProgressMax);
     end else
@@ -1237,13 +1291,13 @@ procedure TExtractionWizardPage.Initialize;
 begin
   inherited;
 
-  FMsg1Label.Caption := SetupMessages[msgExtractingLabel];
+  FMsg1Label.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgExtractingLabel]{$IFDEF FPC}){$ENDIF};
 
   FAbortButton := TNewButton.Create(Self);
   with FAbortButton do begin
-    Caption := SetupMessages[msgButtonStopExtraction];
+    Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonStopExtraction]{$IFDEF FPC}){$ENDIF};
     Top := FProgressBar.Top + FProgressBar.Height + WizardForm.ScalePixelsY(8);
-    Width := WizardForm.CalculateButtonWidth([Caption]);
+    Width := WizardForm.CalculateButtonWidth([{$IFDEF FPC}UTF8Decode(Caption){$ELSE}Caption{$ENDIF}]);
     Height := WizardForm.CancelButton.Height;
     OnClick := AbortButtonClick;
   end;
@@ -1271,8 +1325,10 @@ begin
 end;
 
 function TExtractionWizardPage.AddEx(const ArchiveFileName, DestDir, Password: String; const FullPaths: Boolean): NativeInt;
+var
+  A: TArchive;
 begin
-  const A = TArchive.Create;
+  A := TArchive.Create;
   A.FileName := ArchiveFileName;
   A.DestDir := DestDir;
   A.Password := Password;
@@ -1286,11 +1342,13 @@ begin
 end;
 
 procedure TExtractionWizardPage.Extract;
+var
+  A: TArchive;
 begin
   FAbortedByUser := False;
 
   try
-    for var A in FArchives do begin
+    for A in FArchives do begin
       if FThrottler <> nil then
         FThrottler.Reset;
       { Don't need to set DownloadTemporaryFileOrExtractArchiveProcessMessages before extraction since we already process messages ourselves }

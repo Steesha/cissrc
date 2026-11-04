@@ -2,7 +2,7 @@ unit SafeDLLPath;
 
 {
   Inno Setup
-  Copyright (C) 1997-2024 Jordan Russell
+  Copyright (C) 1997-2026 Jordan Russell
   Portions by Martijn Laan
   For conditions of distribution and use, see LICENSE.TXT.
 
@@ -29,11 +29,15 @@ interface
 
 implementation
 
+{$IFDEF MSWINDOWS}
 uses
   Windows;
 
 const
   LOAD_LIBRARY_SEARCH_SYSTEM32 = $00000800;
+  {$IF NOT DECLARED(PROCESS_DEP_ENABLE)}
+  PROCESS_DEP_ENABLE = $00000001;
+  {$IFEND}
 
   BASE_SEARCH_PATH_ENABLE_SAFE_SEARCHMODE = $00000001;
   BASE_SEARCH_PATH_PERMANENT              = $00008000;
@@ -59,4 +63,5 @@ initialization
   SetProcessDEPPolicyFunc := GetProcAddress(KernelModule, PAnsiChar('SetProcessDEPPolicy'));
   if Assigned(SetProcessDEPPolicyFunc) then
     SetProcessDEPPolicyFunc(PROCESS_DEP_ENABLE);
+{$ENDIF}
 end.

@@ -12,7 +12,7 @@ unit Compression.Base;
 interface
 
 uses
-  Windows, SysUtils, ChaCha20, Shared.FileClass, Shared.Struct, Shared.EncryptionFunc;
+  SysUtils, ChaCha20, Shared.FileClass, Shared.Struct, Shared.EncryptionFunc;
 
 type
   ECompressError = class(Exception);
@@ -130,7 +130,6 @@ const
   SCompressedBlockDataError = 'Compressed block is corrupted';
 
 var
-  CRC32TableInited: BOOL;
   CRC32Table: array[Byte] of Integer;
 
 procedure InitCRC32Table;
@@ -151,14 +150,12 @@ begin
 end;
 
 function UpdateCRC32(CurCRC: Integer; const Buf; BufSize: Cardinal): Integer;
+var
+  P: PByte;
 begin
-  if not CRC32TableInited then begin
-    InitCRC32Table;
-    InterlockedExchange(Integer(CRC32TableInited), Ord(True));
-  end;
-  var P: PByte := @Buf;
+  P := @Buf;
   while BufSize <> 0 do begin
-    CurCRC := CRC32Table[Lo(CurCRC) xor P^] xor (CurCRC shr 8);
+    CurCRC := CRC32Table[Byte(CurCRC) xor P^] xor (CurCRC shr 8);
     Dec(BufSize);
     Inc(P);
   end;
@@ -195,10 +192,10 @@ begin
         { Change the lower 3 bytes of the address to be relative to the
           beginning of the buffer, instead of to the next instruction. If
           decoding, do the opposite. }
-        Addr := (AddrOffset + I + 4) and $FFFFFF;  { may wrap, but OK }
+        Addr := (UInt64(AddrOffset) + I + 4) and $FFFFFF;  { may wrap, but OK }
         Rel := P[I] or (P[I+1] shl 8) or (P[I+2] shl 16);
         if not Encode then
-          Dec(Rel, Addr);
+          Rel := (Int64(Rel) - Addr) and $FFFFFF;
         { For a slightly higher compression ratio, we want the resulting high
           byte to be $00 for both forward and backward jumps. The high byte
           of the original relative address is likely to be the sign extension
@@ -206,7 +203,7 @@ begin
         if Rel and $800000 <> 0 then
           P[I+3] := not P[I+3];
         if Encode then
-          Inc(Rel, Addr);
+          Rel := (Rel + Addr) and $FFFFFF;
         P[I] := Byte(Rel);
         P[I+1] := Byte(Rel shr 8);
         P[I+2] := Byte(Rel shr 16);
@@ -271,10 +268,13 @@ end;
 { TStoredDecompressor }
 
 procedure TStoredDecompressor.DecompressInto(var Buffer; Count: Cardinal);
+var
+  P: PByte;
+  NumRead: Cardinal;
 begin
-  var P: PByte := @Buffer;
+  P := @Buffer;
   while Count > 0 do begin
-    var NumRead := ReadProc(P^, Count);
+    NumRead := ReadProc(P^, Count);
     if NumRead = 0 then
       raise ECompressDataError.Create(SStoredDataError);
     Inc(P, NumRead);
@@ -347,10 +347,13 @@ begin
 end;
 
 procedure TCompressedBlockWriter.CompressorWriteProc(const Buffer; Count: Cardinal);
+var
+  P: PByte;
+  Bytes: Cardinal;
 begin
-  var P: PByte := @Buffer;
+  P := @Buffer;
   while Count > 0 do begin
-    var Bytes := Count;
+    Bytes := Count;
     if Bytes > SizeOf(FOutBuffer) - FOutBufferCount then
       Bytes := SizeOf(FOutBuffer) - FOutBufferCount;
     UMove(P^, FOutBuffer[FOutBufferCount], Bytes);
@@ -374,12 +377,15 @@ begin
 end;
 
 procedure TCompressedBlockWriter.Write(const Buffer; Count: Cardinal);
+var
+  P: PByte;
+  Bytes: Cardinal;
 begin
   { Writes are buffered strictly as an optimization, to avoid feeding tiny
     blocks to the compressor }
-  var P: PByte := @Buffer;
+  P := @Buffer;
   while Count > 0 do begin
-    var Bytes := Count;
+    Bytes := Count;
     if Bytes > SizeOf(FInBuffer) - FInBufferCount then
       Bytes := SizeOf(FInBuffer) - FInBufferCount;
     UMove(P^, FInBuffer[FInBufferCount], Bytes);
@@ -393,6 +399,7 @@ end;
 
 procedure TCompressedBlockWriter.Finish;
 var
+  Pos: Int64;
   HdrCRC: Integer;
   Hdr: TCompressedBlockHeader;
 begin
@@ -402,7 +409,7 @@ begin
   if FOutBufferCount > 0 then
     FlushOutputBuffer;
 
-  var Pos := FFile.Position;
+  Pos := FFile.Position;
   FFile.Seek(FStartPos);
   Hdr.StoredSize := FTotalBytesStored;
   Hdr.Compressed := Assigned(FCompressor);
@@ -438,6 +445,8 @@ begin
 end;
 
 destructor TCompressedBlockReader.Destroy;
+var
+  P: Int64;
 begin
   FDecompressor.Free;
   if FInitialized then begin
@@ -445,7 +454,7 @@ begin
       compressed, or if it did read everything but zlib is in a "CHECK" state
       (i.e. it didn't read and verify the trailing adler32 yet due to lack of
       input bytes). }
-    var P := FFile.Position;
+    P := FFile.Position;
     Inc(P, FInBytesLeft);
     FFile.Seek(P);
   end;
@@ -493,16 +502,19 @@ end;
 
 function TCompressedBlockReader.DecompressorReadProc(var Buffer;
   Count: Cardinal): Cardinal;
+var
+  P: PByte;
+  Bytes: Cardinal;
 begin
   Result := 0;
-  var P: PByte := @Buffer;
+  P := @Buffer;
   while Count > 0 do begin
     if FInBufferAvail = 0 then begin
       if FInBytesLeft = 0 then
         Break;
       ReadChunk;
     end;
-    var Bytes := Count;
+    Bytes := Count;
     if Bytes > FInBufferAvail then
       Bytes := FInBufferAvail;
     UMove(FInBuffer[FInBufferNext], P^, Bytes);
@@ -524,5 +536,9 @@ begin
       RaiseCompressedBlockDataError;
   end;
 end;
+
+initialization
+  { Initialize before any worker threads can use the table }
+  InitCRC32Table;
 
 end.

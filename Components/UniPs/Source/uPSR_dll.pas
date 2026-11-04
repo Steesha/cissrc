@@ -92,7 +92,7 @@ var
   dllhandle: THandle;
   loadwithalteredsearchpath: Boolean;
   {$IFNDEF UNIX}
-  Filename: String;
+  Filename: {$IFDEF UNICODE}UnicodeString{$ELSE}String{$ENDIF};
   {$ENDIF}
 begin
   s := p.Decl;
@@ -130,16 +130,23 @@ begin
       {$ELSE}
       {$IFDEF UNICODE}
       if Copy(s2, 1, 6) = '<utf8>' then
-        Filename := UTF8ToUnicodeString(Copy(s2, 7, Maxint))
+        Filename := {$IFDEF FPC}UTF8Decode{$ELSE}UTF8ToUnicodeString{$ENDIF}(Copy(s2, 7, Maxint))
       else
-        Filename := String(s2);
+        Filename := UnicodeString(s2);
       {$ELSE}
       Filename := s2;
       {$ENDIF}
+      {$IF Defined(FPC) and Defined(UNICODE)}
+      if loadwithalteredsearchpath then
+        dllhandle := LoadLibraryExW(PWideChar(Filename), 0, LOAD_WITH_ALTERED_SEARCH_PATH)
+      else
+        dllhandle := LoadLibraryW(PWideChar(Filename));
+      {$ELSE}
       if loadwithalteredsearchpath then
         dllhandle := LoadLibraryEx(PChar(Filename), 0, LOAD_WITH_ALTERED_SEARCH_PATH)
       else
         dllhandle := LoadLibrary(PChar(Filename));
+      {$IFEND}
       {$ENDIF}
       if dllhandle = 0 then
       begin

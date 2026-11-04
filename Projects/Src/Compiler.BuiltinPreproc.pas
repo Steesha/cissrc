@@ -14,22 +14,22 @@ unit Compiler.BuiltinPreproc;
 interface
 
 uses
-  Shared.PreprocInt;
+  Shared.PreprocInt, Shared.FPCStringUtils;
 
 function BuiltinPreprocessScript(var Params: TPreprocessScriptParams): Integer; stdcall;
 
 implementation
 
 uses
-  SysUtils, Classes, PathFunc,
-  Shared.CommonFunc, Compiler.Messages, Compiler.HelperFunc;
+  SysUtils, Generics.Collections, {$IFDEF MSWINDOWS}PathFunc,{$ENDIF}
+  Shared.CompilerSupport, Compiler.Messages;
 
 type
   EBuiltinPreprocessScriptError = class(Exception);
 
 function BuiltinPreprocessScript(var Params: TPreprocessScriptParams): Integer; stdcall;
 var
-  IncludeStack: TStringList;
+  IncludeStack: TList<String>;
 
   procedure RaiseError(const LineFilename: String; const LineNumber: Integer;
     const Msg: String);
@@ -51,8 +51,12 @@ var
   begin
     { Check if it's a recursive include }
     for I := 0 to IncludeStack.Count-1 do
+      {$IFDEF MSWINDOWS}
       if PathCompare(IncludeStack[I], IncludeFilename) = 0 then
-        RaiseError(LineFilename, LineNumber, Format(SCompilerRecursiveInclude,
+      {$ELSE}
+      if IncludeStack[I] = IncludeFilename then
+      {$ENDIF}
+        RaiseError(LineFilename, LineNumber, InnoFormat(SCompilerRecursiveInclude,
           [IncludeFilename]));
 
     FileHandle := Params.LoadFileProc(Params.CompilerData,
@@ -75,13 +79,17 @@ var
       Delete(D, 1, Length('include'));
       if (D = '') or (D[1] > ' ') then
         RaiseError(LineFilename, LineNumber, SCompilerInvalidDirective);
-      D := D.TrimLeft;
-      if (Length(D) < 3) or (D[1] <> '"') or (PathLastChar(D)^ <> '"') then
+      D := TrimLeft(D);
+      if (Length(D) < 3) or (D[1] <> '"') or (D[Length(D)] <> '"') then
         RaiseError(LineFilename, LineNumber, SCompilerInvalidDirective);
       if LineFilename = '' then
         Dir := Params.SourcePath
       else
+        {$IFDEF MSWINDOWS}
         Dir := PathExtractPath(LineFilename);
+        {$ELSE}
+        Dir := ExtractFilePath(LineFilename);
+        {$ENDIF}
       IncludeFilename := Params.PrependDirNameProc(Params.CompilerData,
         PChar(RemoveQuotes(D)), PChar(Dir), PChar(LineFilename), LineNumber, 0);
       if IncludeFilename = '' then begin
@@ -90,8 +98,13 @@ var
         RaiseError(LineFilename, LineNumber, 'PrependDirNameProc failed');
       end;
       Params.StatusProc(Params.CompilerData,
-        PChar(Format(SBuiltinPreprocessStatusIncludingFile, [IncludeFilename])), False);
-      ProcessLinesFromFile(LineFilename, LineNumber, PathExpand(IncludeFilename));
+        PChar(InnoFormat(SBuiltinPreprocessStatusIncludingFile, [IncludeFilename])), False);
+      {$IFDEF MSWINDOWS}
+      IncludeFilename := PathExpand(IncludeFilename);
+      {$ELSE}
+      IncludeFilename := ExpandFileName(IncludeFilename);
+      {$ENDIF}
+      ProcessLinesFromFile(LineFilename, LineNumber, IncludeFilename);
     end
     else
       RaiseError(LineFilename, LineNumber, SCompilerInvalidDirective);
@@ -134,7 +147,7 @@ begin
   end;
 
   try
-    IncludeStack := TStringList.Create;
+    IncludeStack := TList<String>.Create;
     try
       ProcessLines(Params.Filename, 0);
     finally

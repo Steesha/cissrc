@@ -12,7 +12,7 @@ unit Compiler.ExeUpdateFunc;
 interface
 
 uses
-  Windows, SysUtils, Shared.FileClass, Shared.VerInfoFunc, Shared.Struct;
+  {$IFDEF MSWINDOWS} Windows, {$ELSE} Shared.PlatformTypes, {$ENDIF} SysUtils, Shared.FileClass, Shared.VerInfoFunc, Shared.Struct, Shared.FPCStringUtils;
 
 type
   TUpdateIconsAndStyleFile = (uisfSetup, uisfSetupCustomStyle, uisfSetupLdr);
@@ -46,9 +46,14 @@ procedure UpdateVersionInfo(const F: TCustomFile;
 implementation
 
 uses
-  Math;
+  Math{$IFDEF FPC}, Classes, Resource, WinPEImageReader, CoffWriter{$ENDIF};
 
 const
+  {$IFNDEF MSWINDOWS}
+  IMAGE_FILE_MACHINE_AMD64 = $8664;
+  ERROR_INVALID_DATA = 13;
+  RT_VERSION = 16;
+  {$ENDIF}
   IMAGE_NT_SIGNATURE = $00004550;
   IMAGE_NT_OPTIONAL_HDR32_MAGIC = $10b;
   IMAGE_NT_OPTIONAL_HDR64_MAGIC = $20b;
@@ -184,7 +189,7 @@ type
 
 procedure Error(const Msg: String);
 begin
-  raise Exception.Create('Resource update error: ' + Msg);
+  raise Exception.Create(ToNativeText('Resource update error: ' + Msg));
 end;
 
 function SeekToPEHeader(const F: TCustomFile): Boolean;
@@ -215,10 +220,11 @@ type
 function SeekToAndReadPEOptionalHeader(const F: TCustomFile;
   var OptHeader32: TImageOptionalHeader; var OptHeader64: TImageOptionalHeader64;
   var OptHeaderOffset: Int64): TOptionalHeader;
+var
+  Header: TImageFileHeader;
 begin
   Result := ohNone;
   if SeekToPEHeader(F) then begin
-    var Header: TImageFileHeader;
     if (F.Read(Header, SizeOf(Header)) = SizeOf(Header)) and
        ((Header.SizeOfOptionalHeader = SizeOf(OptHeader32)) or
         (Header.SizeOfOptionalHeader = SizeOf(OptHeader64))) then begin
@@ -239,45 +245,37 @@ end;
 procedure FindResourceSection(const F: TCustomFile;
   var SectionVirtualAddr, SectionPhysOffset, SectionPhysSize: Cardinal);
 var
-  EXESig: Word;
-  PEHeaderOffset, PESig: Cardinal;
   PEHeader: TImageFileHeader;
   PEOptHeader: TImageOptionalHeader;
   PEOptHeader64: TImageOptionalHeader64;
   PESectionHeader: TImageSectionHeader;
+  PE32, PE32Plus: Boolean;
+  DataDirectory: TDataDirectory;
   I: Integer;
+  OffsetInSection: Cardinal;
 begin
-  { Read DOS header }
-  F.Seek(0);
-  F.ReadBuffer(EXESig, SizeOf(EXESig));
-  if EXESig <> $5A4D {'MZ'} then
-    Error('File isn''t an EXE file (1)');
-  F.Seek($3C);
-  F.ReadBuffer(PEHeaderOffset, SizeOf(PEHeaderOffset));
-  if PEHeaderOffset = 0 then
-    Error('File isn''t a PE file (1)');
+  if not SeekToPEHeader(F) then
+    Error('File isn''t a PE file');
 
-  { Read PE header & optional header }
-  F.Seek(PEHeaderOffset);
-  F.ReadBuffer(PESig, SizeOf(PESig));
-  if PESig <> $00004550 {'PE'#0#0} then
-    Error('File isn''t a PE file (2)');
   F.ReadBuffer(PEHeader, SizeOf(PEHeader));
-  const PE32 = PEHeader.SizeOfOptionalHeader = SizeOf(PEOptHeader);
-  const PE32Plus = PEHeader.SizeOfOptionalHeader = SizeOf(PEOptHeader64);
+  PE32 := PEHeader.SizeOfOptionalHeader = SizeOf(PEOptHeader);
+  PE32Plus := PEHeader.SizeOfOptionalHeader = SizeOf(PEOptHeader64);
   if not PE32 and not PE32Plus then
     Error('File isn''t a PE file (3)');
 
-  var DataDirectory: TDataDirectory;
   if PE32 then begin
     F.ReadBuffer(PEOptHeader, SizeOf(PEOptHeader));
     if PEOptHeader.Magic <> IMAGE_NT_OPTIONAL_HDR32_MAGIC then
       Error('File isn''t a PE file (4)');
+    if PEOptHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_RESOURCE then
+      Error('No resource data directory');
     DataDirectory := PEOptHeader.DataDirectory;
   end else begin
     F.ReadBuffer(PEOptHeader64, SizeOf(PEOptHeader64));
     if PEOptHeader64.Magic <> IMAGE_NT_OPTIONAL_HDR64_MAGIC then
       Error('File isn''t a PE file (5)');
+    if PEOptHeader64.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_RESOURCE then
+      Error('No resource data directory');
     DataDirectory := PEOptHeader64.DataDirectory;
   end;
 
@@ -286,28 +284,38 @@ begin
      (DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].Size = 0) then
     Error('No resources (1)');
   SectionVirtualAddr := DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress;
-  SectionPhysOffset := 0;
   for I := 0 to PEHeader.NumberOfSections-1 do begin
     F.ReadBuffer(PESectionHeader, SizeOf(PESectionHeader));
-    if (PESectionHeader.VirtualAddress = SectionVirtualAddr) and
-       (PESectionHeader.SizeOfRawData <> 0) then begin
-      SectionPhysOffset := PESectionHeader.PointerToRawData;
-      SectionPhysSize := PESectionHeader.SizeOfRawData;
-      Break;
-    end;
+    if SectionVirtualAddr < PESectionHeader.VirtualAddress then
+      Continue;
+    OffsetInSection := SectionVirtualAddr - PESectionHeader.VirtualAddress;
+    if OffsetInSection >= PESectionHeader.SizeOfRawData then
+      Continue;
+    SectionPhysSize := PESectionHeader.SizeOfRawData - OffsetInSection;
+    if (PESectionHeader.PointerToRawData = 0) or
+       (Int64(PESectionHeader.PointerToRawData) + PESectionHeader.SizeOfRawData > F.Size) or
+       (Int64(PESectionHeader.PointerToRawData) + OffsetInSection > High(Cardinal)) or
+       (DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].Size > SectionPhysSize) then
+      Error('Invalid resource section bounds');
+    SectionPhysOffset := PESectionHeader.PointerToRawData + OffsetInSection;
+    Exit;
   end;
-  if SectionPhysOffset = 0 then
-    Error('No resources (2)');
+  Error('No resources (2)');
 end;
 
-function FindResOffset(const F: TCustomFile; const AnyId: Boolean;
+function FindResOffset(const F: TCustomFile; const SectionEnd: Int64; const AnyId: Boolean;
   const Id: Cardinal; const FindSubdir: Boolean; var Offset: Cardinal): Boolean;
 var
   Dir: TImageResourceDirectory;
   Entry: TImageResourceDirectoryEntry;
   I: Integer;
 begin
+  if SectionEnd - F.Position < SizeOf(Dir) then
+    Error('Truncated resource directory');
   F.ReadBuffer(Dir, SizeOf(Dir));
+  if (Integer(Dir.NumberOfNamedEntries) + Dir.NumberOfIdEntries) * SizeOf(Entry) >
+     SectionEnd - F.Position then
+    Error('Truncated resource directory entries');
   { Skip over named entries }
   for I := 0 to Dir.NumberOfNamedEntries-1 do
     F.ReadBuffer(Entry, SizeOf(Entry));
@@ -330,20 +338,24 @@ function SeekToResourceData(const F: TCustomFile; const ResType, ResId: Cardinal
 var
   SectionVirtualAddr, SectionPhysOffset, SectionPhysSize, Ofs: Cardinal;
   DataEntry: TImageResourceDataEntry;
+  SectionEnd: Int64;
 begin
   FindResourceSection(F, SectionVirtualAddr, SectionPhysOffset, SectionPhysSize);
 
+  SectionEnd := Int64(SectionPhysOffset) + SectionPhysSize;
   { Scan the resource directory }
   F.Seek(SectionPhysOffset);
-  if not FindResOffset(F, False, ResType, True, Ofs) then
+  if not FindResOffset(F, SectionEnd, False, ResType, True, Ofs) then
     Error('Can''t find resource (1)');
-  F.Seek(SectionPhysOffset + Ofs);
-  if not FindResOffset(F, False, ResId, True, Ofs) then
+  F.Seek(Int64(SectionPhysOffset) + Ofs);
+  if not FindResOffset(F, SectionEnd, False, ResId, True, Ofs) then
     Error('Can''t find resource (2)');
-  F.Seek(SectionPhysOffset + Ofs);
-  if not FindResOffset(F, True, 0, False, Ofs) then
+  F.Seek(Int64(SectionPhysOffset) + Ofs);
+  if not FindResOffset(F, SectionEnd, True, 0, False, Ofs) then
     Error('Can''t find resource (3).');
-  F.Seek(SectionPhysOffset + Ofs);
+  F.Seek(Int64(SectionPhysOffset) + Ofs);
+  if SectionEnd - F.Position < SizeOf(DataEntry) then
+    Error('Truncated resource data entry');
   F.ReadBuffer(DataEntry, SizeOf(DataEntry));
 
   { Sanity check: DataEntry.OffsetToData is an RVA. It's technically possible
@@ -354,7 +366,7 @@ begin
     Error('Invalid resource (2)');
 
   { Seek to the resource }
-  F.Seek(SectionPhysOffset + (DataEntry.OffsetToData - SectionVirtualAddr));
+  F.Seek(Int64(SectionPhysOffset) + (DataEntry.OffsetToData - SectionVirtualAddr));
   Result := DataEntry.Size;
 end;
 
@@ -362,11 +374,13 @@ function ReadSignatureAndChecksumFields(const F: TCustomFile;
   var ASignatureAddress, ASignatureSize, AChecksum: DWORD): Boolean;
 { Reads the signature and checksum fields in the specified file's header.
   If the file is not a valid PE32 or PE32+ executable, False is returned. }
+var
+  OptHeader32: TImageOptionalHeader;
+  OptHeader64: TImageOptionalHeader64;
+  OptHeaderOffset: Int64;
+  OptHeader: TOptionalHeader;
 begin
-  var OptHeader32: TImageOptionalHeader;
-  var OptHeader64: TImageOptionalHeader64;
-  var OptHeaderOffset: Int64;
-  const OptHeader = SeekToAndReadPEOptionalHeader(F, OptHeader32, OptHeader64, OptHeaderOffset);
+  OptHeader := SeekToAndReadPEOptionalHeader(F, OptHeader32, OptHeader64, OptHeaderOffset);
   Result := OptHeader <> ohNone;
   if Result then begin
     if OptHeader = oh32 then begin
@@ -385,11 +399,13 @@ function UpdateSignatureAndChecksumFields(const F: TCustomFile;
   const ASignatureAddress, ASignatureSize, AChecksum: DWORD): Boolean;
 { Sets the signature and checksum fields in the specified file's header.
   If the file is not a valid PE32 or PE32+ executable, False is returned. }
+var
+  OptHeader32: TImageOptionalHeader;
+  OptHeader64: TImageOptionalHeader64;
+  OptHeaderOffset: Int64;
+  OptHeader: TOptionalHeader;
 begin
-  var OptHeader32: TImageOptionalHeader;
-  var OptHeader64: TImageOptionalHeader64;
-  var OptHeaderOffset: Int64;
-  const OptHeader = SeekToAndReadPEOptionalHeader(F, OptHeader32, OptHeader64, OptHeaderOffset);
+  OptHeader := SeekToAndReadPEOptionalHeader(F, OptHeader32, OptHeader64, OptHeaderOffset);
   Result := OptHeader <> ohNone;
   if Result then begin
     F.Seek(OptHeaderOffset);
@@ -417,14 +433,16 @@ const
   OffsetOfDllCharacteristics = $46; { Valid for both PE32 and PE32+ }
 var
   Header: TImageFileHeader;
-  OptMagic, DllChars, OrigDllChars: Word;
+  OptMagic, DllChars, OrigDllChars, ASLRFlags: Word;
+  PE32, PE32Plus: Boolean;
+  Ofs: Int64;
 begin
   if SeekToPEHeader(F) then begin
     if (F.Read(Header, SizeOf(Header)) = SizeOf(Header)) then begin
-      const PE32 = Header.SizeOfOptionalHeader = SizeOf(TImageOptionalHeader);
-      const PE32Plus = Header.SizeOfOptionalHeader = SizeOf(TImageOptionalHeader64);
+      PE32 := Header.SizeOfOptionalHeader = SizeOf(TImageOptionalHeader);
+      PE32Plus := Header.SizeOfOptionalHeader = SizeOf(TImageOptionalHeader64);
       if PE32 or PE32Plus then begin
-        const Ofs = F.Position;
+        Ofs := F.Position;
         if (F.Read(OptMagic, SizeOf(OptMagic)) = SizeOf(OptMagic)) and
            ((PE32 and (OptMagic = IMAGE_NT_OPTIONAL_HDR32_MAGIC)) or
             (PE32Plus and (OptMagic = IMAGE_NT_OPTIONAL_HDR64_MAGIC))) then begin
@@ -440,7 +458,7 @@ begin
               DllChars := DllChars or IMAGE_DLLCHARACTERISTICS_NX_COMPAT
             else
               DllChars := Word(DllChars and not IMAGE_DLLCHARACTERISTICS_NX_COMPAT);
-            var ASLRFlags: Word := IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE;
+            ASLRFlags := IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE;
             if Header.Machine = IMAGE_FILE_MACHINE_AMD64 then
               ASLRFlags := ASLRFlags or IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA;
             if IsASLRCompatible then
@@ -461,23 +479,28 @@ begin
 end;
 
 procedure ResUpdateError(const Msg: String; const ResourceName: String = ''; const ErrorCode: DWORD = ERROR_INVALID_DATA);
+var
+  S: String;
+  E: EResUpdateError;
 begin
-  var S: String;
   if ResourceName <> '' then
-    S := Format('Resource %s update error: %s', [ResourceName, Msg])
+    S := InnoFormat('Resource %s update error: %s', [ResourceName, Msg])
   else
-    S := Format('Resource update error: %s', [Msg]);
+    S := InnoFormat('Resource update error: %s', [Msg]);
 
-  const E = EResUpdateError.Create(S);
+  E := EResUpdateError.Create(ToNativeText(S));
   E.FErrorCode := ErrorCode;
   raise E;
 end;
 
+{$IFNDEF FPC}
 procedure ResUpdateErrorWithLastError(const Msg: String; const ResourceName: String = '');
 begin
   const ErrorCode = GetLastError;
-  ResUpdateError(Msg + ' (' + IntToStr(ErrorCode) + ')', ResourceName, ErrorCode);
+  ResUpdateError(Msg + ' (' + InnoIntToStr(ErrorCode) + ')', ResourceName, ErrorCode);
 end;
+
+{$ENDIF}
 
 procedure UpdateVersionInfo(const F: TCustomFile;
   const NewBinaryFileVersion, NewBinaryProductVersion: TFileVersionNumbers;
@@ -514,45 +537,63 @@ procedure UpdateVersionInfo(const F: TCustomFile;
       NativeUInt(P) := (NativeUInt(P) or 3) + 1;
   end;
 
-  function QueryValue(P: Pointer; Path: PWideChar; var Buf: Pointer;
-    var BufLen: Cardinal): Boolean;
+  function BoundedWideLength(const Value: PWideChar; const Limit: Pointer): NativeInt;
+  var
+    Cursor: PWideChar;
+  begin
+    Cursor := Value;
+    while NativeInt(PByte(Limit) - PByte(Cursor)) >= SizeOf(WideChar) do begin
+      if Cursor^ = #0 then
+        Exit(Cursor - Value);
+      Inc(Cursor);
+    end;
+    ResUpdateError('Unterminated version resource string');
+    Result := 0;
+  end;
+
+  function QueryValue(P, Limit: Pointer; Path: PWideChar; var Buf: Pointer;
+    var BufLen: Cardinal; var ValueEnd: Pointer): Boolean;
   var
     EndP: Pointer;
-    ValueLength: Cardinal;
+    BlockLength, ValueLength: Word;
+    KeyLength: NativeInt;
   begin
     Result := False;
-    EndP := PByte(P) + PWord(P)^;
+    if NativeInt(PByte(Limit) - PByte(P)) < 3 * SizeOf(Word) then
+      ResUpdateError('Truncated version resource block');
+    BlockLength := PWord(P)^;
+    if (BlockLength < 3 * SizeOf(Word)) or (BlockLength > PByte(Limit) - PByte(P)) then
+      ResUpdateError('Invalid version resource block length');
+    EndP := PByte(P) + BlockLength;
     Inc(PWord(P));
     ValueLength := PWord(P)^;
-    Inc(PWord(P));
-    Inc(PWord(P));
-    if WideStrsEqual(PWideChar(P), Path) then begin
-      Inc(PWideChar(P), lstrlenW(P) + 1);
+    Inc(PWord(P), 2);
+    KeyLength := BoundedWideLength(PWideChar(P), EndP);
+    if not WideStrsEqual(PWideChar(P), Path) then
+      Exit;
+
+    Inc(PWideChar(P), KeyLength + 1);
+    BumpToDWordBoundary(P);
+    Inc(Path, StrLen(Path) + 1);
+    if PByte(P) > PByte(EndP) then
+      ResUpdateError('Invalid version resource value offset');
+    if Path^ = #0 then begin
+      Buf := P;
+      BufLen := ValueLength;
+      ValueEnd := EndP;
+      Exit(True);
+    end;
+
+    { Container value lengths are byte counts. String leaves are handled above. }
+    if ValueLength > PByte(EndP) - PByte(P) then
+      ResUpdateError('Invalid version resource value length');
+    Inc(PByte(P), ValueLength);
+    BumpToDWordBoundary(P);
+    while PByte(P) < PByte(EndP) do begin
+      if QueryValue(P, EndP, Path, Buf, BufLen, ValueEnd) then
+        Exit(True);
+      Inc(PByte(P), PWord(P)^);
       BumpToDWordBoundary(P);
-      Inc(Path, lstrlenW(Path) + 1);
-      if Path^ = #0 then begin
-        { Found the requested value }
-        Buf := P;
-        BufLen := ValueLength;
-        Result := True;
-      end
-      else begin
-        { Handle children.
-          Note: Like VerQueryValue, we always treat ValueLength as a byte count
-          when looking for child nodes. Many resource compilers, including
-          Borland's, wrongly set ValueLength to a *character* count on string
-          nodes. But since we never try to query for a child of a string node,
-          that doesn't matter here. }
-        Inc(PByte(P), ValueLength);
-        BumpToDWordBoundary(P);
-        while PByte(P) < PByte(EndP) do begin
-          Result := QueryValue(P, Path, Buf, BufLen);
-          if Result then
-            Exit;
-          Inc(PByte(P), PWord(P)^);
-          BumpToDWordBoundary(P);
-        end;
-      end;
     end;
   end;
 
@@ -560,7 +601,7 @@ procedure UpdateVersionInfo(const F: TCustomFile;
   var
     Len, I, J: Integer;
   begin
-    Len := lstrlenW(Value);
+    Len := StrLen(Value);
     for I := 0 to Len-3 do begin
       if (Value[I] = '(') and (Value[I+1] = 'C') and (Value[I+2] = ')') then begin
         Value[I] := WideChar($00A9);
@@ -573,25 +614,32 @@ procedure UpdateVersionInfo(const F: TCustomFile;
     end;
   end;
 
-  procedure UpdateStringValue(P: Pointer; const Path: PWideChar; NewValue: String);
+  procedure UpdateStringValue(P, Limit: Pointer; const Path: PWideChar; NewValue: String);
   var
     Value: PWideChar;
     ValueLen: Cardinal;
+    ValueEnd: Pointer;
+    CharCount: NativeInt;
   begin
-    if not QueryValue(P, Path, Pointer(Value), ValueLen) then
+    if not QueryValue(P, Limit, Path, Pointer(Value), ValueLen, ValueEnd) then
       ResUpdateError('Unexpected version resource format (1)');
-    Move(Pointer(NewValue)^, Value^, (Min(Length(NewValue), lstrlenW(Value)))*SizeOf(Char));
+    CharCount := Min(Length(NewValue), BoundedWideLength(Value, ValueEnd));
+    if CharCount > 0 then
+      Move(Pointer(NewValue)^, Value^, CharCount * SizeOf(Char));
     ReplaceWithRealCopyrightSymbols(Value);
   end;
 
-  procedure UpdateFixedFileInfo(P: Pointer; const Path: PWideChar;
+  procedure UpdateFixedFileInfo(P, Limit: Pointer; const Path: PWideChar;
     const NewFileVersion, NewProductVersion: TFileVersionNumbers;
     const SetFileVersion: Boolean);
   var
-    FixedFileInfo: PVSFixedFileInfo;
+    FixedFileInfo: ^TVSFixedFileInfo;
     ValueLen: Cardinal;
+    ValueEnd: Pointer;
   begin
-    if not QueryValue(P, Path, Pointer(FixedFileInfo), ValueLen) then
+    if not QueryValue(P, Limit, Path, Pointer(FixedFileInfo), ValueLen, ValueEnd) or
+       (ValueLen < SizeOf(TVSFixedFileInfo)) or
+       (PByte(ValueEnd) - PByte(FixedFileInfo) < SizeOf(TVSFixedFileInfo)) then
       ResUpdateError('Unexpected version resource format (2)');
     if FixedFileInfo.dwSignature <> $FEEF04BD then
       ResUpdateError('Unexpected version resource format (3)');
@@ -605,28 +653,32 @@ procedure UpdateVersionInfo(const F: TCustomFile;
 
 var
   ResSize: Cardinal;
-  VersRes: Pointer;
+  VersRes, ResourceEnd: Pointer;
+  ResOffset: Int64;
 begin
   { Locate the resource }
   ResSize := SeekToResourceData(F, Cardinal(RT_VERSION), 1);
-  const ResOffset = F.Position;
+  ResOffset := F.Position;
+  if ResSize < 3 * SizeOf(Word) then
+    ResUpdateError('Truncated version resource');
 
   GetMem(VersRes, ResSize);
   try
     { Read the resource }
     F.ReadBuffer(VersRes^, ResSize);
+    ResourceEnd := PByte(VersRes) + ResSize;
 
     { Update the resource }
-    UpdateStringValue(VersRes, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'CompanyName'#0, NewCompanyName);
+    UpdateStringValue(VersRes, ResourceEnd, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'CompanyName'#0, NewCompanyName);
     if SetFileVersionAndDescription then begin
-      UpdateStringValue(VersRes, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'FileDescription'#0, NewFileDescription);
-      UpdateStringValue(VersRes, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'FileVersion'#0, NewTextFileVersion);
+      UpdateStringValue(VersRes, ResourceEnd, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'FileDescription'#0, NewFileDescription);
+      UpdateStringValue(VersRes, ResourceEnd, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'FileVersion'#0, NewTextFileVersion);
     end;
-    UpdateStringValue(VersRes, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'LegalCopyright'#0, NewLegalCopyright);
-    UpdateStringValue(VersRes, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'ProductName'#0, NewProductName);
-    UpdateStringValue(VersRes, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'OriginalFileName'#0, NewOriginalFileName);
-    UpdateStringValue(VersRes, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'ProductVersion'#0, NewTextProductVersion);
-    UpdateFixedFileInfo(VersRes, 'VS_VERSION_INFO'#0, NewBinaryFileVersion, NewBinaryProductVersion, SetFileVersionAndDescription);
+    UpdateStringValue(VersRes, ResourceEnd, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'LegalCopyright'#0, NewLegalCopyright);
+    UpdateStringValue(VersRes, ResourceEnd, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'ProductName'#0, NewProductName);
+    UpdateStringValue(VersRes, ResourceEnd, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'OriginalFileName'#0, NewOriginalFileName);
+    UpdateStringValue(VersRes, ResourceEnd, 'VS_VERSION_INFO'#0'StringFileInfo'#0'000004b0'#0'ProductVersion'#0, NewTextProductVersion);
+    UpdateFixedFileInfo(VersRes, ResourceEnd, 'VS_VERSION_INFO'#0, NewBinaryFileVersion, NewBinaryProductVersion, SetFileVersionAndDescription);
 
     { Write the updated resource }
     F.Seek(ResOffset);
@@ -636,6 +688,7 @@ begin
   end;
 end;
 
+{$IFNDEF FPC}
 function EnumLangsFunc(M: HMODULE; lpType, lpName: PAnsiChar; wLanguage: Word; lParam: IntPtr): BOOL; stdcall;
 begin
   PWord(lParam)^ := wLanguage;
@@ -868,21 +921,21 @@ type
   begin
     { Also see DeleteResource calls below }
     var StyleName: PChar := nil;
-    if SameText(StyleFileName, 'builtin:polar') then begin
+    if InnoSameText(StyleFileName, 'builtin:polar') then begin
       if Dark then
         StyleName := 'WINDOWSPOLARDARK'
       else
         StyleName := 'WINDOWSPOLARLIGHT';
-    end else if SameText(StyleFileName, 'builtin:windows11') then begin
+    end else if InnoSameText(StyleFileName, 'builtin:windows11') then begin
       if Dark then
         StyleName := GetWindowsModernDarkStyleName(M)
       else
         StyleName := 'WINDOWSMODERNLIGHT';
-    end else if SameText(StyleFileName, 'builtin:slate') then
+    end else if InnoSameText(StyleFileName, 'builtin:slate') then
       StyleName := 'SLATECLASSICO'
-    else if SameText(StyleFileName, 'builtin:stellar') then
+    else if InnoSameText(StyleFileName, 'builtin:stellar') then
       StyleName := 'STELLAR'
-    else if SameText(StyleFileName, 'builtin:zircon') then
+    else if InnoSameText(StyleFileName, 'builtin:zircon') then
       StyleName := 'ZIRCON';
     Result := StyleName <> nil;
     if Result then
@@ -1086,5 +1139,548 @@ begin
       FreeMem(Ico);
   end;
 end;
+
+{$ELSE}
+type
+  TPEResourceWriter = class(TCoffResourceWriter)
+  public
+    procedure WriteSection(const Resources: TResources; const Stream: TMemoryStream;
+      const VirtualAddress: Cardinal; out DataOffset, DataSize: Cardinal);
+  end;
+
+procedure TPEResourceWriter.WriteSection(const Resources: TResources; const Stream: TMemoryStream;
+  const VirtualAddress: Cardinal; out DataOffset, DataSize: Cardinal);
+var
+  Section: TImageSectionHeader;
+  I: Integer;
+  Offset, Address: Cardinal;
+begin
+  Resources.WriteToStream(Stream, Self);
+  Stream.Position := SizeOf(TImageFileHeader);
+  Stream.ReadBuffer(Section, SizeOf(Section));
+  DataOffset := Section.PointerToRawData;
+  DataSize := Section.SizeOfRawData;
+  if (Int64(DataOffset) + DataSize > Stream.Size) or (DataSize < SizeOf(Address)) then
+    Error('Invalid generated resource section');
+  for I := 0 to fRelocations.Count - 1 do begin
+    Offset := fRelocations[I]^.VirtualAddress;
+    if Offset > DataSize - SizeOf(Address) then
+      Error('Invalid generated resource relocation');
+    Stream.Position := Int64(DataOffset) + Offset;
+    Stream.ReadBuffer(Address, SizeOf(Address));
+    if (Address >= DataSize) or (Address > High(Cardinal) - VirtualAddress) then
+      Error('Invalid generated resource address');
+    Inc(Address, VirtualAddress);
+    Stream.Position := Int64(DataOffset) + Offset;
+    Stream.WriteBuffer(Address, SizeOf(Address));
+  end;
+end;
+
+procedure AppendPEResourceSection(const Filename: String; const Resources: TResources);
+var
+  F: TFile;
+  Writer: TPEResourceWriter;
+  Stream: TMemoryStream;
+  Header: TImageFileHeader;
+  Optional32: TImageOptionalHeader;
+  Optional64: TImageOptionalHeader64;
+  Section, NewSection: TImageSectionHeader;
+  Directory: ^TDataDirectory;
+  FileAlignment, SectionAlignment, HeaderSize, FirstRawOffset: Cardinal;
+  HeaderOffset, NewHeaderOffset: Int64;
+  VirtualEnd, NewImageSize: Int64;
+  DataOffset, DataSize, ZeroCount: Cardinal;
+  I: Integer;
+  Zeros: TBytes;
+
+  function Align(const Value: Int64; const Alignment: Cardinal): Cardinal;
+  var
+    Aligned: Int64;
+  begin
+    if (Alignment = 0) or (Alignment > 65536) or (Alignment and (Alignment - 1) <> 0) then
+      Error('Invalid PE alignment');
+    Aligned := (Value + Alignment - 1) and not Int64(Alignment - 1);
+    if (Value < 0) or (Aligned > High(Cardinal)) then
+      Error('PE resource section exceeds the image size limit');
+    Result := Aligned;
+  end;
+
+begin
+  { Resource streams may still read from the original file during the append }
+  F := TFile.Create(Filename, fdOpenExisting, faReadWrite, fsRead);
+  try
+    if not SeekToPEHeader(F) then
+      Error('Invalid PE header');
+    HeaderOffset := F.Position;
+    F.ReadBuffer(Header, SizeOf(Header));
+    if Header.SizeOfOptionalHeader = SizeOf(Optional32) then begin
+      F.ReadBuffer(Optional32, SizeOf(Optional32));
+      if (Optional32.Magic <> IMAGE_NT_OPTIONAL_HDR32_MAGIC) or
+         (Optional32.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_SECURITY) then
+        Error('Invalid PE32 optional header');
+      Directory := @Optional32.DataDirectory;
+      FileAlignment := Optional32.FileAlignment;
+      SectionAlignment := Optional32.SectionAlignment;
+      HeaderSize := Optional32.SizeOfHeaders;
+      VirtualEnd := Optional32.SizeOfImage;
+    end else if Header.SizeOfOptionalHeader = SizeOf(Optional64) then begin
+      F.ReadBuffer(Optional64, SizeOf(Optional64));
+      if (Optional64.Magic <> IMAGE_NT_OPTIONAL_HDR64_MAGIC) or
+         (Optional64.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_SECURITY) then
+        Error('Invalid PE32+ optional header');
+      Directory := @Optional64.DataDirectory;
+      FileAlignment := Optional64.FileAlignment;
+      SectionAlignment := Optional64.SectionAlignment;
+      HeaderSize := Optional64.SizeOfHeaders;
+      VirtualEnd := Optional64.SizeOfImage;
+    end else
+      Error('Unsupported PE optional header');
+    if (Directory^[IMAGE_DIRECTORY_ENTRY_SECURITY].Size <> 0) or
+       (Directory^[IMAGE_DIRECTORY_ENTRY_SECURITY].VirtualAddress <> 0) then
+      Error('Cannot replace resources in an Authenticode-signed template');
+
+    FirstRawOffset := HeaderSize;
+    for I := 1 to Header.NumberOfSections do begin
+      F.ReadBuffer(Section, SizeOf(Section));
+      if Section.SizeOfRawData <> 0 then
+        FirstRawOffset := Min(FirstRawOffset, Section.PointerToRawData);
+      VirtualEnd := Max(VirtualEnd, Int64(Section.VirtualAddress) +
+        Max(Section.Misc.VirtualSize, Section.SizeOfRawData));
+    end;
+    NewHeaderOffset := F.Position;
+    if (Header.NumberOfSections >= 96) or (NewHeaderOffset + SizeOf(NewSection) > FirstRawOffset) or
+       (NewHeaderOffset + SizeOf(NewSection) > F.Size) then
+      Error('PE has no room for an additional resource section header');
+
+    NewSection := Default(TImageSectionHeader);
+    Move(PAnsiChar(AnsiString('.innorsc'))^, NewSection.Name, SizeOf(NewSection.Name));
+    NewSection.VirtualAddress := Align(VirtualEnd, SectionAlignment);
+    NewSection.PointerToRawData := Align(F.Size, FileAlignment);
+    NewSection.Characteristics := $40000040; { Readable initialized data }
+
+    Writer := TPEResourceWriter.Create;
+    try
+      Stream := TMemoryStream.Create;
+      try
+        Writer.WriteSection(Resources, Stream, NewSection.VirtualAddress, DataOffset, DataSize);
+        NewSection.Misc.VirtualSize := DataSize;
+        NewSection.SizeOfRawData := Align(DataSize, FileAlignment);
+        NewImageSize := Align(Int64(NewSection.VirtualAddress) +
+          Max(DataSize, NewSection.SizeOfRawData), SectionAlignment);
+        if Int64(NewSection.PointerToRawData) + NewSection.SizeOfRawData > High(Cardinal) then
+          Error('PE resource section exceeds the file size limit');
+        SetLength(Zeros, FileAlignment);
+        ZeroCount := NewSection.PointerToRawData - F.Size;
+        F.Seek(F.Size);
+        if ZeroCount <> 0 then
+          F.WriteBuffer(Zeros[0], ZeroCount);
+        F.WriteBuffer((PByte(Stream.Memory) + DataOffset)^, DataSize);
+        ZeroCount := NewSection.SizeOfRawData - DataSize;
+        if ZeroCount <> 0 then
+          F.WriteBuffer(Zeros[0], ZeroCount);
+      finally
+        Stream.Free;
+      end;
+    finally
+      Writer.Free;
+    end;
+
+    Inc(Header.NumberOfSections);
+    Directory^[IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress := NewSection.VirtualAddress;
+    Directory^[IMAGE_DIRECTORY_ENTRY_RESOURCE].Size := DataSize;
+    F.Seek(HeaderOffset);
+    F.WriteBuffer(Header, SizeOf(Header));
+    if Header.SizeOfOptionalHeader = SizeOf(Optional32) then begin
+      Optional32.SizeOfImage := NewImageSize;
+      Inc(Optional32.SizeOfInitializedData, NewSection.SizeOfRawData);
+      Optional32.CheckSum := 0;
+      F.WriteBuffer(Optional32, SizeOf(Optional32));
+    end else begin
+      Optional64.SizeOfImage := NewImageSize;
+      Inc(Optional64.SizeOfInitializedData, NewSection.SizeOfRawData);
+      Optional64.CheckSum := 0;
+      F.WriteBuffer(Optional64, SizeOf(Optional64));
+    end;
+    F.Seek(NewHeaderOffset);
+    F.WriteBuffer(NewSection, SizeOf(NewSection));
+  finally
+    F.Free;
+  end;
+end;
+
+type
+  TResourceInputStream = class(THandleStream)
+  private
+    FFile: TFile;
+  public
+    constructor Create(const Filename: String; const Sharing: TFileSharing);
+    destructor Destroy; override;
+  end;
+
+constructor TResourceInputStream.Create(const Filename: String; const Sharing: TFileSharing);
+begin
+  FFile := TFile.Create(Filename, fdOpenExisting, faRead, Sharing);
+  inherited Create(FFile.Handle);
+end;
+
+destructor TResourceInputStream.Destroy;
+begin
+  FFile.Free;
+  inherited;
+end;
+
+procedure RebuildPEIconsAndStyles(const Filename, IconFilename, StyleFilename, DarkStyleFilename: String;
+  const Uisf: TUpdateIconsAndStyleFile; const WizardDarkStyle: TSetupWizardDarkStyle;
+  const OnUpdateIconsAndStyle: TOnUpdateIconsAndStyle);
+const
+  IconType = 3;
+  GroupIconType = 14;
+  Language = 1033;
+type
+  TIcoHeader = packed record
+    Reserved, Kind, Count: Word;
+  end;
+  TIcoEntry = packed record
+    Width, Height, Colors, Reserved: Byte;
+    Planes, BitCount: Word;
+    Size, Offset: Cardinal;
+  end;
+var
+  Input, Icon: TStream;
+  Reader: TWinPEImageResourceReader;
+  Resources, Original: TResources;
+  Header: TIcoHeader;
+  Entries: array of TIcoEntry;
+  Entry: TIcoEntry;
+  Group, Image, Existing: TAbstractResource;
+  TypeDesc, NameDesc: TResourceDesc;
+  ImageId: Word;
+  UsedIds: array[Word] of Boolean;
+  I: Integer;
+  Name, UnusedGroup: String;
+
+  function AddResource(const ResourceType, ResourceName: TResourceDesc; const LangId: Word): TAbstractResource;
+  begin
+    Result := TGenericResource.Create(ResourceType, ResourceName);
+    try
+      Result.LangID := LangId;
+      Resources.Add(Result);
+    except
+      Result.Free;
+      raise;
+    end;
+  end;
+
+  function FindBuiltinStyle(const Preset: String; const Dark: Boolean): TAbstractResource;
+  var
+    PrimaryName, FallbackName: String;
+    Candidate: TAbstractResource;
+    Index: Integer;
+    CandidateName: String;
+  begin
+    FallbackName := '';
+    if InnoSameText(Preset, 'builtin:polar') then begin
+      if Dark then
+        PrimaryName := 'WINDOWSPOLARDARK'
+      else
+        PrimaryName := 'WINDOWSPOLARLIGHT';
+    end else if InnoSameText(Preset, 'builtin:windows11') then begin
+      if Dark then begin
+        PrimaryName := 'WINDOWSMODERNDARKSE';
+        FallbackName := 'WINDOWSMODERNDARK';
+      end else
+        PrimaryName := 'WINDOWSMODERNLIGHT';
+    end else if InnoSameText(Preset, 'builtin:slate') then
+      PrimaryName := 'SLATECLASSICO'
+    else if InnoSameText(Preset, 'builtin:stellar') then
+      PrimaryName := 'STELLAR'
+    else if InnoSameText(Preset, 'builtin:zircon') then
+      PrimaryName := 'ZIRCON'
+    else
+      Error('Unknown built-in wizard style: ' + Preset);
+
+    Result := nil;
+    for Index := 0 to Integer(Original.Count) - 1 do begin
+      Candidate := Original[Index];
+      if (Candidate._Type.DescType <> dtName) or (FromNativeText(Candidate._Type.Name) <> ('VCLSTYLE')) or
+         (Candidate.Name.DescType <> dtName) then
+        Continue;
+      CandidateName := UTF8Decode(Candidate.Name.Name);
+      if CandidateName = PrimaryName then
+        Exit(Candidate);
+      if (FallbackName <> '') and (CandidateName = FallbackName) then
+        Result := Candidate;
+    end;
+    if Result = nil then
+      Error('Built-in wizard style resource is unavailable: ' + Preset);
+  end;
+
+  procedure AddStyle(const StylePath, ResourceName: String; const Dark: Boolean;
+    const Operation: TUpdateIconsAndStyleOperation);
+  var
+    InputStyle, OwnedStyle: TStream;
+    StyleType, StyleName: TResourceDesc;
+    StyleResource: TAbstractResource;
+  begin
+    if StylePath = '' then
+      Exit;
+    if Assigned(OnUpdateIconsAndStyle) then
+      OnUpdateIconsAndStyle(Operation);
+    OwnedStyle := nil;
+    if Pos('builtin:', LowerCase(StylePath)) = 1 then
+      InputStyle := FindBuiltinStyle(StylePath, Dark).RawData
+    else begin
+      OwnedStyle := TResourceInputStream.Create(StylePath, fsRead);
+      InputStyle := OwnedStyle;
+    end;
+    try
+      if (InputStyle.Size = 0) or (InputStyle.Size > High(Integer)) then
+        Error('Invalid wizard style file size');
+      StyleType := TResourceDesc.Create('VCLSTYLE');
+      try
+        StyleName := TResourceDesc.Create(UTF8Encode(ResourceName));
+        try
+          StyleResource := AddResource(StyleType, StyleName, Language);
+          InputStyle.Position := 0;
+          StyleResource.RawData.CopyFrom(InputStyle, InputStyle.Size);
+        finally
+          StyleName.Free;
+        end;
+      finally
+        StyleType.Free;
+      end;
+    finally
+      OwnedStyle.Free;
+    end;
+  end;
+
+begin
+  Icon := nil;
+  try
+    if IconFilename <> '' then begin
+      if Assigned(OnUpdateIconsAndStyle) then
+        OnUpdateIconsAndStyle(uisoIcoFileName);
+      Icon := TResourceInputStream.Create(IconFilename, fsRead);
+      Icon.ReadBuffer(Header, SizeOf(Header));
+      if (Header.Reserved <> 0) or (Header.Kind <> 1) or (Header.Count = 0) or
+         (Int64(Header.Count) * SizeOf(Entry) > Icon.Size - SizeOf(Header)) then
+        Error('Invalid ICO header');
+      SetLength(Entries, Header.Count);
+      Icon.ReadBuffer(Entries[0], Length(Entries) * SizeOf(Entry));
+      for Entry in Entries do
+        if (Entry.Size = 0) or (Entry.Offset < SizeOf(Header) + Length(Entries) * SizeOf(Entry)) or
+           (Int64(Entry.Offset) + Entry.Size > Icon.Size) then
+          Error('Invalid ICO image bounds');
+    end;
+
+    Input := TResourceInputStream.Create(Filename, fsReadWrite);
+    try
+      Original := TResources.Create;
+      try
+        Reader := TWinPEImageResourceReader.Create;
+        try
+          Original.LoadFromStream(Input, Reader);
+        finally
+          Reader.Free;
+        end;
+        Resources := TResources.Create;
+        try
+          FillChar(UsedIds, SizeOf(UsedIds), 0);
+          UnusedGroup := '';
+          if WizardDarkStyle = wdsLight then
+            UnusedGroup := 'Z_GROUPICON_DARK'
+          else if WizardDarkStyle = wdsDark then
+            UnusedGroup := 'Z_GROUPICON';
+          for I := 0 to Integer(Original.Count) - 1 do begin
+            Existing := Original[I];
+            if ((StyleFilename <> '') or (DarkStyleFilename <> '')) and
+               (Existing._Type.DescType = dtName) and (FromNativeText(Existing._Type.Name) = ('VCLSTYLE')) then begin
+              if (Existing.Name.DescType <> dtName) or
+                 ((FromNativeText(Existing.Name.Name) <> ('MYSTYLE1')) and (FromNativeText(Existing.Name.Name) <> ('MYSTYLE1_DARK'))) or
+                 ((FromNativeText(Existing.Name.Name) = ('MYSTYLE1')) and (StyleFilename <> '')) or
+                 ((FromNativeText(Existing.Name.Name) = ('MYSTYLE1_DARK')) and (DarkStyleFilename <> '')) then
+                Continue;
+            end;
+            if (Icon <> nil) and (Existing._Type.DescType = dtID) and
+               (Existing._Type.ID = GroupIconType) and
+               (Existing.Name.DescType = dtName) then begin
+              Name := UTF8Decode(Existing.Name.Name);
+              if (Name = 'MAINICON') or (Name = 'MAINICON_DARK') or
+                 ((Uisf = uisfSetup) and ((Name = 'Z_UNINSTALLICON') or
+                  (Name = 'Z_UNINSTALLICON_DARK') or (Name = UnusedGroup))) then
+                Continue;
+            end;
+            if (Existing._Type.DescType = dtID) and (Existing._Type.ID = IconType) and
+               (Existing.Name.DescType = dtID) and (Existing.Name.ID <= High(Word)) then
+              UsedIds[Existing.Name.ID] := True;
+            Image := AddResource(Existing._Type, Existing.Name, Existing.LangID);
+            Image.CodePage := Existing.CodePage;
+            if Existing.DataSize <> 0 then begin
+              Existing.RawData.Position := 0;
+              Image.RawData.CopyFrom(Existing.RawData, Existing.DataSize);
+            end;
+          end;
+
+          if Icon <> nil then begin
+            TypeDesc := TResourceDesc.Create(TResID(GroupIconType));
+            try
+              NameDesc := TResourceDesc.Create('MAINICON');
+              try
+                Group := AddResource(TypeDesc, NameDesc, Language);
+                Group.RawData.WriteBuffer(Header, SizeOf(Header));
+                TypeDesc.ID := IconType;
+                ImageId := 0;
+                for Entry in Entries do begin
+                  repeat
+                    if ImageId = High(Word) then
+                      Error('No unused PE icon resource IDs');
+                    Inc(ImageId);
+                  until not UsedIds[ImageId];
+                  NameDesc.ID := ImageId;
+                  Image := AddResource(TypeDesc, NameDesc, Language);
+                  Icon.Position := Entry.Offset;
+                  Image.RawData.CopyFrom(Icon, Entry.Size);
+                  Group.RawData.WriteBuffer(Entry, SizeOf(Entry) - SizeOf(Entry.Offset));
+                  Group.RawData.WriteBuffer(ImageId, SizeOf(ImageId));
+                end;
+              finally
+                NameDesc.Free;
+              end;
+            finally
+              TypeDesc.Free;
+            end;
+          end;
+          AddStyle(StyleFilename, 'MYSTYLE1', WizardDarkStyle = wdsDark, uisoStyleFileName);
+          AddStyle(DarkStyleFilename, 'MYSTYLE1_DARK', True, uisoStyleFileNameDynamicDark);
+          AppendPEResourceSection(Filename, Resources);
+        finally
+          Resources.Free;
+        end;
+      finally
+        Original.Free;
+      end;
+    finally
+      Input.Free;
+    end;
+  finally
+    Icon.Free;
+  end;
+end;
+
+procedure UpdateIconsAndStyle(const FileName: String; const Uisf: TUpdateIconsAndStyleFile; const IcoFileName: String;
+  const WizardDarkStyle: TSetupWizardDarkStyle; const StyleFileName, StyleFileNameDynamicDark: String;
+  const OnUpdateIconsAndStyle: TOnUpdateIconsAndStyle);
+const
+  GroupIconType = 14;
+  SubdirectoryFlag = Cardinal($80000000);
+type
+  PDirectory = ^TImageResourceDirectory;
+  PEntry = ^TImageResourceDirectoryEntry;
+var
+  F: TFile;
+  SectionRVA, SectionOffset, SectionSize, GroupOffset: Cardinal;
+  Section: TBytes;
+  Group: PDirectory;
+  Main, Dark: Integer;
+  Suffix: String;
+
+  procedure Notify(const Operation: TUpdateIconsAndStyleOperation);
+  begin
+    if Assigned(OnUpdateIconsAndStyle) then
+      OnUpdateIconsAndStyle(Operation);
+  end;
+
+  function GroupEntry(const Index: Integer): PEntry;
+  begin
+    Result := PEntry(PByte(Group) + SizeOf(TImageResourceDirectory) + Index * SizeOf(TImageResourceDirectoryEntry));
+  end;
+
+  function FindGroup(const Name: String): Integer;
+  var
+    I: Integer;
+    NameOffset: Cardinal;
+    NameLength: Word;
+  begin
+    for I := 0 to Group^.NumberOfNamedEntries - 1 do begin
+      NameOffset := GroupEntry(I)^.Id;
+      if NameOffset and SubdirectoryFlag = 0 then
+        Error('Invalid icon group name');
+      NameOffset := NameOffset and not SubdirectoryFlag;
+      if Int64(NameOffset) + SizeOf(NameLength) > SectionSize then
+        Error('Truncated icon group name');
+      Move(Section[NameOffset], NameLength, SizeOf(NameLength));
+      Inc(NameOffset, SizeOf(NameLength));
+      if Int64(NameOffset) + Int64(NameLength) * SizeOf(WideChar) > SectionSize then
+        Error('Truncated icon group name');
+      if (NameLength = Length(Name)) and
+         CompareMem(Pointer(Name), @Section[NameOffset], NameLength * SizeOf(WideChar)) then
+        Exit(I);
+    end;
+    Result := -1;
+  end;
+
+  procedure RemoveGroup(const Index: Integer);
+  var
+    Remaining: Integer;
+  begin
+    if Index < 0 then
+      Exit;
+    Remaining := Integer(Group^.NumberOfNamedEntries) + Group^.NumberOfIdEntries - Index - 1;
+    if Remaining > 0 then
+      Move(GroupEntry(Index + 1)^, GroupEntry(Index)^, Remaining * SizeOf(TImageResourceDirectoryEntry));
+    Dec(Group^.NumberOfNamedEntries);
+  end;
+
+begin
+  if (IcoFileName = '') and (WizardDarkStyle <> wdsDynamic) then begin
+    Notify(uisoWizardDarkStyle);
+    F := TFile.Create(FileName, fdOpenExisting, faReadWrite, fsNone);
+    try
+      FindResourceSection(F, SectionRVA, SectionOffset, SectionSize);
+      F.Seek(SectionOffset);
+      if not FindResOffset(F, Int64(SectionOffset) + SectionSize, False,
+        GroupIconType, True, GroupOffset) then
+        Error('No icon groups');
+      if Int64(GroupOffset) + SizeOf(TImageResourceDirectory) > SectionSize then
+        Error('Truncated icon group directory');
+      SetLength(Section, SectionSize);
+      F.Seek(SectionOffset);
+      F.ReadBuffer(Section[0], SectionSize);
+      Group := PDirectory(@Section[GroupOffset]);
+      if Int64(GroupOffset) + SizeOf(TImageResourceDirectory) +
+         (Integer(Group^.NumberOfNamedEntries) + Group^.NumberOfIdEntries) *
+         SizeOf(TImageResourceDirectoryEntry) > SectionSize then
+        Error('Truncated icon group entries');
+
+      Dark := FindGroup('MAINICON_DARK');
+      if WizardDarkStyle = wdsDark then begin
+        Main := FindGroup('MAINICON');
+        if (Main < 0) or (Dark < 0) then
+          Error('Missing light or dark main icon');
+        GroupEntry(Main)^.Offset := GroupEntry(Dark)^.Offset;
+      end;
+      RemoveGroup(Dark);
+
+      if Uisf = uisfSetup then begin
+        Suffix := '';
+        if WizardDarkStyle = wdsLight then
+          Suffix := '_DARK';
+        RemoveGroup(FindGroup('Z_GROUPICON' + Suffix));
+        RemoveGroup(FindGroup('Z_UNINSTALLICON' + Suffix));
+      end;
+
+      F.Seek(SectionOffset);
+      F.WriteBuffer(Section[0], SectionSize);
+    finally
+      F.Free;
+    end;
+  end;
+  if (IcoFileName <> '') or (StyleFileName <> '') or (StyleFileNameDynamicDark <> '') then
+    RebuildPEIconsAndStyles(Filename, IcoFileName, StyleFileName, StyleFileNameDynamicDark,
+      Uisf, WizardDarkStyle, OnUpdateIconsAndStyle);
+  Notify(uisoDone);
+end;
+
+{$ENDIF}
 
 end.

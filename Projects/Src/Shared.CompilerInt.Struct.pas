@@ -12,7 +12,7 @@ unit Shared.CompilerInt.Struct;
 interface
 
 uses
-  Windows;
+  {$IFDEF MSWINDOWS} Windows {$ELSE} Shared.PlatformTypes {$ENDIF};
 
 const
   { Constants passed in Code parameter of callback function }

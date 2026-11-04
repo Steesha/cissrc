@@ -4,14 +4,14 @@
 */
 
 #include <stddef.h>
-#include <windows.h>
+#include <stdlib.h>
 #include "../../../../Components/Lzma2/Alloc.h"
 #include "islzma.h"
 
 #define LZMA_HANDLE_MARKER 0x3E1A981F
 #define LZMA_HANDLE_VALID(h) ((h) && (h)->marker == LZMA_HANDLE_MARKER)
 
-SRes __stdcall LZMA_Init(BOOL LZMA2, struct LZMAHandle **handle)
+SRes Z7_STDCALL LZMA_Init(BoolInt LZMA2, struct LZMAHandle **handle)
 {
 	struct LZMAHandle *h = calloc(1, sizeof(*h));
 	if (!h) return SZ_ERROR_MEM;
@@ -35,7 +35,7 @@ SRes __stdcall LZMA_Init(BOOL LZMA2, struct LZMAHandle **handle)
 	return SZ_OK;
 }
 
-SRes __stdcall LZMA_SetProps(struct LZMAHandle *handle,
+SRes Z7_STDCALL LZMA_SetProps(struct LZMAHandle *handle,
 	struct LZMAEncoderProps *encProps, size_t encPropsSize)
 {
 	CLzmaEncProps props1;
@@ -72,7 +72,7 @@ SRes __stdcall LZMA_SetProps(struct LZMAHandle *handle,
 	}
 }
 
-SRes __stdcall LZMA_Encode(struct LZMAHandle *handle, ISeqInStream *inStream,
+SRes Z7_STDCALL LZMA_Encode(struct LZMAHandle *handle, ISeqInStream *inStream,
 	ISeqOutStream *outStream, ICompressProgress *progress)
 {
 	if (!LZMA_HANDLE_VALID(handle)) return SZ_ERROR_PARAM;
@@ -99,7 +99,7 @@ SRes __stdcall LZMA_Encode(struct LZMAHandle *handle, ISeqInStream *inStream,
 	}
 }
 
-SRes __stdcall LZMA_End(struct LZMAHandle *handle)
+SRes Z7_STDCALL LZMA_End(struct LZMAHandle *handle)
 {
 	if (!LZMA_HANDLE_VALID(handle)) return SZ_ERROR_PARAM;
 

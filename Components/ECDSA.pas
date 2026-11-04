@@ -12,7 +12,12 @@ unit ECDSA;
 interface
 
 uses
-  Windows, SysUtils;
+  {$IFDEF MSWINDOWS} Windows, {$ENDIF} SysUtils;
+
+{$IF Defined(FPC) and Defined(MSWINDOWS) and not Declared(NTSTATUS)}
+type
+  NTSTATUS = LongInt;
+{$IFEND}
 
 type
   TECDSAInt256 = array[0..31] of Byte;
@@ -34,10 +39,15 @@ type
 
   TECDSAKey = class
   private
+    {$IFDEF MSWINDOWS}
     FAlgorithmHandle: THandle;  { BCRYPT_ALG_HANDLE }
     FKeyHandle: THandle;        { BCRYPT_KEY_HANDLE }
     class procedure CheckStatus(const AFunctionName: String;
       const AStatus: NTSTATUS); static;
+    {$ELSE}
+    FKeyHandle: Pointer;
+    procedure ImportKey(const PublicKey: TECDSAPublicKey; PrivateData: Pointer);
+    {$ENDIF}
     procedure KeyHandleRequired;
   public
     constructor Create;
@@ -46,8 +56,8 @@ type
     procedure ExportPrivateKey(out APrivateKey: TECDSAPrivateKey);
     procedure ExportPublicKey(out APublicKey: TECDSAPublicKey);
     procedure GenerateKeyPair;
-    procedure ImportPrivateKey([ref] const APrivateKey: TECDSAPrivateKey);
-    procedure ImportPublicKey([ref] const APublicKey: TECDSAPublicKey);
+    procedure ImportPrivateKey({$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} APrivateKey: TECDSAPrivateKey);
+    procedure ImportPublicKey({$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} APublicKey: TECDSAPublicKey);
     procedure SignHash(const AHash: array of Byte;
       out ASignature: TECDSASignature);
     function VerifySignature(const AHash: array of Byte;
@@ -57,6 +67,8 @@ type
   EECDSAError = class(Exception);
 
 implementation
+
+{$IFDEF MSWINDOWS}
 
 type
   BCRYPT_ALG_HANDLE = type THandle;
@@ -148,28 +160,33 @@ var
 
 var
   SystemDir: array[0..MAX_PATH-1] of Char;
+  SystemDirLength: Cardinal;
 begin
   if BCryptFunctionsInitialized then begin
-    MemoryBarrier;
+    {$IFDEF FPC}ReadBarrier{$ELSE}MemoryBarrier{$ENDIF};
     Exit;
   end;
 
-  GetSystemDirectory(SystemDir, SizeOf(SystemDir) div SizeOf(SystemDir[0]));
-  M := LoadLibrary(PChar(SystemDir + '\bcrypt.dll'));
+  SystemDirLength := GetSystemDirectoryW(@SystemDir[0], Length(SystemDir));
+  if SystemDirLength >= Cardinal(Length(SystemDir)) then
+    raise EECDSAError.Create('System directory path is too long');
+  if SystemDirLength = 0 then
+    raise EECDSAError.Create('Failed to get the system directory');
+  M := LoadLibraryW(PChar(String(PChar(@SystemDir[0])) + '\bcrypt.dll'));
   if M = 0 then
     raise EECDSAError.Create('Failed to load bcrypt.dll');
 
-  InitFunc(Pointer(@BCryptCloseAlgorithmProvider), 'BCryptCloseAlgorithmProvider');
-  InitFunc(Pointer(@BCryptDestroyKey), 'BCryptDestroyKey');
-  InitFunc(Pointer(@BCryptExportKey), 'BCryptExportKey');
-  InitFunc(Pointer(@BCryptFinalizeKeyPair), 'BCryptFinalizeKeyPair');
-  InitFunc(Pointer(@BCryptGenerateKeyPair), 'BCryptGenerateKeyPair');
-  InitFunc(Pointer(@BCryptImportKeyPair), 'BCryptImportKeyPair');
-  InitFunc(Pointer(@BCryptOpenAlgorithmProvider), 'BCryptOpenAlgorithmProvider');
-  InitFunc(Pointer(@BCryptSignHash), 'BCryptSignHash');
-  InitFunc(Pointer(@BCryptVerifySignature), 'BCryptVerifySignature');
+  InitFunc({$IFDEF FPC}PPointer(@@BCryptCloseAlgorithmProvider)^{$ELSE}Pointer(@BCryptCloseAlgorithmProvider){$ENDIF}, 'BCryptCloseAlgorithmProvider');
+  InitFunc({$IFDEF FPC}PPointer(@@BCryptDestroyKey)^{$ELSE}Pointer(@BCryptDestroyKey){$ENDIF}, 'BCryptDestroyKey');
+  InitFunc({$IFDEF FPC}PPointer(@@BCryptExportKey)^{$ELSE}Pointer(@BCryptExportKey){$ENDIF}, 'BCryptExportKey');
+  InitFunc({$IFDEF FPC}PPointer(@@BCryptFinalizeKeyPair)^{$ELSE}Pointer(@BCryptFinalizeKeyPair){$ENDIF}, 'BCryptFinalizeKeyPair');
+  InitFunc({$IFDEF FPC}PPointer(@@BCryptGenerateKeyPair)^{$ELSE}Pointer(@BCryptGenerateKeyPair){$ENDIF}, 'BCryptGenerateKeyPair');
+  InitFunc({$IFDEF FPC}PPointer(@@BCryptImportKeyPair)^{$ELSE}Pointer(@BCryptImportKeyPair){$ENDIF}, 'BCryptImportKeyPair');
+  InitFunc({$IFDEF FPC}PPointer(@@BCryptOpenAlgorithmProvider)^{$ELSE}Pointer(@BCryptOpenAlgorithmProvider){$ENDIF}, 'BCryptOpenAlgorithmProvider');
+  InitFunc({$IFDEF FPC}PPointer(@@BCryptSignHash)^{$ELSE}Pointer(@BCryptSignHash){$ENDIF}, 'BCryptSignHash');
+  InitFunc({$IFDEF FPC}PPointer(@@BCryptVerifySignature)^{$ELSE}Pointer(@BCryptVerifySignature){$ENDIF}, 'BCryptVerifySignature');
 
-  MemoryBarrier;
+  {$IFDEF FPC}WriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
   BCryptFunctionsInitialized := True;
 end;
 
@@ -187,34 +204,14 @@ begin
   FillChar(Self, SizeOf(Self), 0);
 end;
 
-{ TECDSAPublicKey }
-
-procedure TECDSAPublicKey.Clear;
-begin
-  FillChar(Self, SizeOf(Self), 0);
-end;
-
-{ TECDSAPrivateKey }
-
-procedure TECDSAPrivateKey.Clear;
-begin
-  FillChar(Self, SizeOf(Self), 0);
-end;
-
-{ TECDSASignature }
-
-procedure TECDSASignature.Clear;
-begin
-  FillChar(Self, SizeOf(Self), 0);
-end;
-
 { TECDSAKey }
 
 constructor TECDSAKey.Create;
+var
+  LAlgorithmHandle: BCRYPT_ALG_HANDLE;
 begin
   inherited;
   InitBCryptFunctions;
-  var LAlgorithmHandle: BCRYPT_ALG_HANDLE;
   CheckStatus('BCryptOpenAlgorithmProvider',
     BCryptOpenAlgorithmProvider(LAlgorithmHandle, BCRYPT_ECDSA_P256_ALGORITHM,
       nil, 0));
@@ -238,8 +235,10 @@ begin
 end;
 
 procedure TECDSAKey.DestroyKey;
+var
+  H: THandle;
 begin
-  const H = FKeyHandle;
+  H := FKeyHandle;
   if H <> 0 then begin
     FKeyHandle := 0;
     BCryptDestroyKey(H);
@@ -247,15 +246,16 @@ begin
 end;
 
 procedure TECDSAKey.ExportPrivateKey(out APrivateKey: TECDSAPrivateKey);
+var
+  KeyBlob: TBCryptPrivateKeyBlob;
+  ResultSize: ULONG;
 begin
   KeyHandleRequired;
 
-  var KeyBlob: TBCryptPrivateKeyBlob;
   { Initially clear KeyBlob just to make it easier to verify that
     BCryptExportKey overwrites the entire record }
   KeyBlob.Clear;
   try
-    var ResultSize: ULONG;
     CheckStatus('BCryptExportKey',
       BCryptExportKey(FKeyHandle, 0, BCRYPT_ECCPRIVATE_BLOB, KeyBlob,
         SizeOf(KeyBlob), ResultSize, 0));
@@ -277,15 +277,16 @@ begin
 end;
 
 procedure TECDSAKey.ExportPublicKey(out APublicKey: TECDSAPublicKey);
+var
+  KeyBlob: TBCryptPublicKeyBlob;
+  ResultSize: ULONG;
 begin
   KeyHandleRequired;
 
-  var KeyBlob: TBCryptPublicKeyBlob;
   { Initially clear KeyBlob just to make it easier to verify that
     BCryptExportKey overwrites the entire record }
   KeyBlob.Clear;
   try
-    var ResultSize: ULONG;
     CheckStatus('BCryptExportKey',
       BCryptExportKey(FKeyHandle, 0, BCRYPT_ECCPUBLIC_BLOB, KeyBlob,
         SizeOf(KeyBlob), ResultSize, 0));
@@ -306,10 +307,11 @@ begin
 end;
 
 procedure TECDSAKey.GenerateKeyPair;
+var
+  LKeyHandle: BCRYPT_KEY_HANDLE;
 begin
   DestroyKey;
 
-  var LKeyHandle: BCRYPT_KEY_HANDLE;
   CheckStatus('BCryptGenerateKeyPair',
     BCryptGenerateKeyPair(FAlgorithmHandle, LKeyHandle, 256, 0));
   try
@@ -322,11 +324,13 @@ begin
   FKeyHandle := LKeyHandle;  { assign only on success }
 end;
 
-procedure TECDSAKey.ImportPrivateKey([ref] const APrivateKey: TECDSAPrivateKey);
+procedure TECDSAKey.ImportPrivateKey({$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} APrivateKey: TECDSAPrivateKey);
+var
+  KeyBlob: TBCryptPrivateKeyBlob;
+  LKeyHandle: BCRYPT_KEY_HANDLE;
 begin
   DestroyKey;
 
-  var KeyBlob: TBCryptPrivateKeyBlob;
   try
     KeyBlob.Header.dwMagic := BCRYPT_ECDSA_PRIVATE_P256_MAGIC;
     KeyBlob.Header.cbKey := SizeOf(KeyBlob.Public_x);
@@ -334,7 +338,6 @@ begin
     KeyBlob.Public_y := APrivateKey.PublicKey.Public_y;
     KeyBlob.Private_d := APrivateKey.Private_d;
 
-    var LKeyHandle: BCRYPT_KEY_HANDLE;
     CheckStatus('BCryptImportKeyPair',
       BCryptImportKeyPair(FAlgorithmHandle, 0, BCRYPT_ECCPRIVATE_BLOB,
         LKeyHandle, KeyBlob, SizeOf(KeyBlob), 0));
@@ -345,18 +348,19 @@ begin
   end;
 end;
 
-procedure TECDSAKey.ImportPublicKey([ref] const APublicKey: TECDSAPublicKey);
+procedure TECDSAKey.ImportPublicKey({$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} APublicKey: TECDSAPublicKey);
+var
+  KeyBlob: TBCryptPublicKeyBlob;
+  LKeyHandle: BCRYPT_KEY_HANDLE;
 begin
   DestroyKey;
 
-  var KeyBlob: TBCryptPublicKeyBlob;
   try
     KeyBlob.Header.dwMagic := BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
     KeyBlob.Header.cbKey := SizeOf(KeyBlob.Public_x);
     KeyBlob.Public_x := APublicKey.Public_x;
     KeyBlob.Public_y := APublicKey.Public_y;
 
-    var LKeyHandle: BCRYPT_KEY_HANDLE;
     CheckStatus('BCryptImportKeyPair',
       BCryptImportKeyPair(FAlgorithmHandle, 0, BCRYPT_ECCPUBLIC_BLOB,
         LKeyHandle, KeyBlob, SizeOf(KeyBlob), 0));
@@ -375,6 +379,8 @@ end;
 
 procedure TECDSAKey.SignHash(const AHash: array of Byte;
   out ASignature: TECDSASignature);
+var
+  ResultSize: ULONG;
 begin
   KeyHandleRequired;
 
@@ -382,7 +388,6 @@ begin
     BCryptSignHash overwrites the entire record }
   ASignature.Clear;
 
-  var ResultSize: ULONG;
   CheckStatus('BCryptSignHash',
     BCryptSignHash(FKeyHandle, nil, AHash[0], ULONG(Length(AHash)), ASignature,
       SizeOf(ASignature), ResultSize, 0));
@@ -393,10 +398,12 @@ end;
 
 function TECDSAKey.VerifySignature(const AHash: array of Byte;
   const ASignature: TECDSASignature): Boolean;
+var
+  Status: NTSTATUS;
 begin
   KeyHandleRequired;
 
-  const Status = BCryptVerifySignature(FKeyHandle, nil, AHash[0],
+  Status := BCryptVerifySignature(FKeyHandle, nil, AHash[0],
     ULONG(Length(AHash)), ASignature, SizeOf(ASignature), 0);
   if Status = STATUS_INVALID_SIGNATURE then
     Result := False
@@ -404,6 +411,31 @@ begin
     CheckStatus('BCryptVerifySignature', Status);
     Result := True;
   end;
+end;
+
+{$ELSE}
+{$I ECDSA.Native.inc}
+{$ENDIF}
+
+{ TECDSAPublicKey }
+
+procedure TECDSAPublicKey.Clear;
+begin
+  FillChar(Self, SizeOf(Self), 0);
+end;
+
+{ TECDSAPrivateKey }
+
+procedure TECDSAPrivateKey.Clear;
+begin
+  FillChar(Self, SizeOf(Self), 0);
+end;
+
+{ TECDSASignature }
+
+procedure TECDSASignature.Clear;
+begin
+  FillChar(Self, SizeOf(Self), 0);
 end;
 
 end.

@@ -59,7 +59,7 @@ type
 
 implementation
 
-{$ZEROBASEDSTRINGS OFF}
+{$IFNDEF FPC}{$ZEROBASEDSTRINGS OFF}{$ENDIF}
 
 function TPSStackHelper.GetArray(const ItemNo, FieldNo: Longint;
   out N: Integer): TPSVariantIFC;
@@ -84,8 +84,10 @@ begin
 end;
 
 function TPSStackHelper.GetChar(const ItemNo: Longint): Char;
+var
+  S: String;
 begin
-  var S := GetString(ItemNo);
+  S := GetString(ItemNo);
   if S <> '' then
     Result := S[1]
   else
@@ -93,20 +95,24 @@ begin
 end;
 
 function TPSStackHelper.GetClassArray(const ItemNo, FieldNo: Longint): TArrayOfObject;
+var
+  N, I: Integer;
+  Arr: TPSVariantIFC;
 begin
-  var N: Integer;
-  var Arr := GetArray(ItemNo, FieldNo, N);
+  Arr := GetArray(ItemNo, FieldNo, N);
   SetLength(Result, N);
-  for var I := 0 to N-1 do
+  for I := 0 to N-1 do
     Result[I] := VNGetObject(PSGetArrayField(Arr, I));
 end;
 
 function TPSStackHelper.GetIntArray(const ItemNo, FieldNo: Longint): TArrayOfInteger;
+var
+  N, I: Integer;
+  Arr: TPSVariantIFC;
 begin
-  var N: Integer;
-  var Arr := GetArray(ItemNo, FieldNo, N);
+  Arr := GetArray(ItemNo, FieldNo, N);
   SetLength(Result, N);
-  for var I := 0 to N-1 do
+  for I := 0 to N-1 do
     Result[I] := VNGetInt(PSGetArrayField(Arr, I));
 end;
 
@@ -129,18 +135,22 @@ begin
 end;
 
 function TPSStackHelper.GetProc(const ItemNo: Longint; const Exec: TPSExec): TMethod;
+var
+  P: PPSVariantProcPtr;
 begin
-  var P := PPSVariantProcPtr(Items[ItemNo]);
+  P := PPSVariantProcPtr(Items[ItemNo]);
   { ProcNo 0 means nil was passed by the script and GetProcAsMethod will then return a (nil, nil) TMethod }
   Result := Exec.GetProcAsMethod(P.ProcNo);
 end;
 
 function TPSStackHelper.GetStringArray(const ItemNo, FieldNo: Longint): TArrayOfString;
+var
+  N, I: Integer;
+  Arr: TPSVariantIFC;
 begin
-  var N: Integer;
-  var Arr := GetArray(ItemNo, FieldNo, N);
+  Arr := GetArray(ItemNo, FieldNo, N);
   SetLength(Result, N);
-  for var I := 0 to N-1 do
+  for I := 0 to N-1 do
     Result[I] := VNGetString(PSGetArrayField(Arr, I));
 end;
 
@@ -187,26 +197,34 @@ begin
 end;
 
 procedure TPSStackHelper.SetArray(const ItemNo: Longint; const Data: TArray<String>; const FieldNo: Longint);
+var
+  N, I: Integer;
+  Arr: TPSVariantIFC;
 begin
-  var N := Integer(System.Length(Data));
-  var Arr := SetArray(ItemNo, FieldNo, N);
-  for var I := 0 to N-1 do
+  N := Integer(System.Length(Data));
+  Arr := SetArray(ItemNo, FieldNo, N);
+  for I := 0 to N-1 do
     VNSetString(PSGetArrayField(Arr, I), Data[I]);
 end;
 
 procedure TPSStackHelper.SetArray(const ItemNo: Longint; const Data: TStrings; const FieldNo: Longint);
+var
+  N, I: Integer;
+  Arr: TPSVariantIFC;
 begin
-  var N := Data.Count;
-  var Arr := SetArray(ItemNo, FieldNo, N);
-  for var I := 0 to N-1 do
+  N := Data.Count;
+  Arr := SetArray(ItemNo, FieldNo, N);
+  for I := 0 to N-1 do
     VNSetString(PSGetArrayField(Arr, I), Data[I]);
 end;
 
 procedure TPSStackHelper.SetInt(const ItemNo: Longint; const Data: Integer;
   const FieldNo: Longint);
+var
+  PSVariantIFC: TPSVariantIFC;
 begin
   if FieldNo >= 0 then begin
-    var PSVariantIFC := NewTPSVariantRecordIFC(Items[ItemNo], FieldNo);
+    PSVariantIFC := NewTPSVariantRecordIFC(Items[ItemNo], FieldNo);
     VNSetInt(PSVariantIFC, Data);
   end else
     inherited SetInt(ItemNo, Data)
@@ -214,9 +232,11 @@ end;
 
 procedure TPSStackHelper.SetUInt(const ItemNo: Longint; const Data: Cardinal;
   const FieldNo: Longint);
+var
+  PSVariantIFC: TPSVariantIFC;
 begin
   if FieldNo >= 0 then begin
-    var PSVariantIFC := NewTPSVariantRecordIFC(Items[ItemNo], FieldNo);
+    PSVariantIFC := NewTPSVariantRecordIFC(Items[ItemNo], FieldNo);
     VNSetUInt(PSVariantIFC, Data);
   end else
     inherited SetUInt(ItemNo, Data)
@@ -224,9 +244,11 @@ end;
 
 procedure TPSStackHelper.SetInt64(const ItemNo: Longint; const Data: Int64;
   const FieldNo: Longint);
+var
+  PSVariantIFC: TPSVariantIFC;
 begin
   if FieldNo >= 0 then begin
-    var PSVariantIFC := NewTPSVariantRecordIFC(Items[ItemNo], FieldNo);
+    PSVariantIFC := NewTPSVariantRecordIFC(Items[ItemNo], FieldNo);
     VNSetInt64(PSVariantIFC, Data);
   end else
     inherited SetInt64(ItemNo, Data)
@@ -234,9 +256,11 @@ end;
 
 procedure TPSStackHelper.SetUInt64(const ItemNo: Longint; const Data: UInt64;
   const FieldNo: Longint);
+var
+  PSVariantIFC: TPSVariantIFC;
 begin
   if FieldNo >= 0 then begin
-    var PSVariantIFC := NewTPSVariantRecordIFC(Items[ItemNo], FieldNo);
+    PSVariantIFC := NewTPSVariantRecordIFC(Items[ItemNo], FieldNo);
     VNSetUInt64(PSVariantIFC, Data);
   end else
     inherited SetUInt64(ItemNo, Data)

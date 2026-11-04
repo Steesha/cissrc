@@ -133,6 +133,7 @@
         <DCCReference Include="Src\SetupLdrAndSetup.Messages.pas"/>
         <DCCReference Include="Src\Shared.SetupMessageIDs.pas"/>
         <DCCReference Include="Src\Setup.UninstallLog.pas"/>
+        <DCCReference Include="Src\Setup.UninstallLog.Actions.pas"/>
         <DCCReference Include="Src\Shared.Struct.pas"/>
         <DCCReference Include="Src\Setup.NewDiskForm.pas">
             <Form>NewDiskForm</Form>

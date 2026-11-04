@@ -11,6 +11,7 @@ unit Shared.DebugStruct;
 
 interface
 
+{$IFDEF MSWINDOWS}
 uses
   Windows, Messages;
 
@@ -47,6 +48,8 @@ const
   CD_DebugClient_EvaluateVariableEntry = $801;
   CD_DebugClient_CompiledCodeTextA = $802;
   CD_DebugClient_CompiledCodeDebugInfoA = $803;
+
+{$ENDIF}
 
 { The current format of the 'debug info' is as follows:
   1. A TDebugInfoHeader record.
@@ -97,6 +100,7 @@ type
     Param4: array [0..127] of AnsiChar;    { Used by Setup }
   end;
 
+{$IFDEF MSWINDOWS}
 function GetThreadTopWindow: HWND;
 function SendCopyDataMessage(DestWnd, SourceWnd: HWND; CopyDataMsg: DWORD;
   Data: Pointer; Size: Cardinal): LRESULT;
@@ -105,7 +109,11 @@ function SendCopyDataMessageStr(DestWnd, SourceWnd: HWND; CopyDataMsg: DWORD;
 function SendCopyDataMessageStr(DestWnd, SourceWnd: HWND; CopyDataMsg: DWORD;
   Data: UnicodeString): LRESULT; overload;
 
+{$ENDIF}
+
 implementation
+
+{$IFDEF MSWINDOWS}
 
 uses
   UnsignedFunc;
@@ -151,5 +159,7 @@ begin
   Result := SendCopyDataMessage(DestWnd, SourceWnd, CopyDataMsg,
     Pointer(Data), ULength(Data)*SizeOf(Data[1]));
 end;
+
+{$ENDIF}
 
 end.

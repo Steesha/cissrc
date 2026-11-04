@@ -12,7 +12,7 @@ unit Setup.UninstallSharedFileForm;
 interface
 
 uses
-  Windows, Classes, Graphics, Controls, Forms,
+  Windows, {$IFDEF FPC}LCLType,{$ENDIF} Classes, Graphics, Controls, Forms,
   Setup.SetupForm, StdCtrls, NewStaticText, NewCtrls;
 
 type
@@ -40,7 +40,7 @@ implementation
 uses
   PathFunc, SetupLdrAndSetup.Messages, Shared.SetupMessageIDs;
 
-{$R *.DFM}
+{$R *.dfm}
 
 function ExecuteRemoveSharedFileDlg(const Filename: String;
   var AAll: Boolean): Boolean;
@@ -50,8 +50,8 @@ var
 begin
   Form := TUninstallSharedFileForm.Create(nil);
   try
-    Form.FilenameEdit.Text := PathExtractName(Filename);
-    Form.LocationEdit.Text := PathExtractDir(Filename);
+    Form.FilenameEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}PathExtractName(Filename){$IFDEF FPC}){$ENDIF};
+    Form.LocationEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}PathExtractDir(Filename){$IFDEF FPC}){$ENDIF};
     Res := Form.ShowModal;
   finally
     Form.Free;
@@ -68,14 +68,14 @@ begin
 
   InitializeFont(False, True);
 
-  Caption := SetupMessages[msgConfirmDeleteSharedFileTitle];
-  BodyLabel.Caption := SetupMessages[msgConfirmDeleteSharedFile2];
-  FilenameLabel.Caption := SetupMessages[msgSharedFileNameLabel];
-  LocationLabel.Caption := SetupMessages[msgSharedFileLocationLabel];
-  YesButton.Caption := SetupMessages[msgButtonYes];
-  YesToAllButton.Caption := SetupMessages[msgButtonYesToAll];
-  NoButton.Caption := SetupMessages[msgButtonNo];
-  NoToAllButton.Caption := SetupMessages[msgButtonNoToAll];
+  Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgConfirmDeleteSharedFileTitle]{$IFDEF FPC}){$ENDIF};
+  BodyLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgConfirmDeleteSharedFile2]{$IFDEF FPC}){$ENDIF};
+  FilenameLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgSharedFileNameLabel]{$IFDEF FPC}){$ENDIF};
+  LocationLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgSharedFileLocationLabel]{$IFDEF FPC}){$ENDIF};
+  YesButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonYes]{$IFDEF FPC}){$ENDIF};
+  YesToAllButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonYesToAll]{$IFDEF FPC}){$ENDIF};
+  NoButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonNo]{$IFDEF FPC}){$ENDIF};
+  NoToAllButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonNoToAll]{$IFDEF FPC}){$ENDIF};
 end;
 
 procedure TUninstallSharedFileForm.CreateParams(var Params: TCreateParams);

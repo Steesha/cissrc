@@ -18,15 +18,15 @@ implementation
 
 uses
   Windows, SysUtils, Messages, Forms, Themes, Graphics,
-  PathFunc, UnsignedFunc, FormBackgroundStyleHook,
-  Shared.CommonFunc, Shared.CommonFunc.Vcl, Setup.UninstallLog, SetupLdrAndSetup.Messages,
+  PathFunc, UnsignedFunc, {$IFNDEF FPC}FormBackgroundStyleHook,{$ENDIF}
+  Shared.CommonFunc, Shared.CommonFunc.Vcl, Setup.UninstallLog, Setup.UninstallLog.Actions, SetupLdrAndSetup.Messages,
   Shared.SetupMessageIDs, SetupLdrAndSetup.InstFunc, Setup.InstFunc, Shared.Struct,
   Shared.SetupEntFunc, Setup.UninstallProgressForm, Setup.UninstallSharedFileForm,
   Shared.FileClass, Setup.ScriptRunner, Setup.DebugClient, Shared.SetupSteps,
   Setup.LoggingFunc, Setup.MainFunc, Setup.SpawnServer, Setup.SetupForm;
 
 type
-  TExtUninstallLog = class(TUninstallLog)
+  TExtUninstallLog = class(TUninstallActionLog)
   private
     FLastUpdateTime: DWORD;
     FNoSharedFileDlgs: Boolean;
@@ -129,14 +129,14 @@ end;
 function Exec(const Filename: String; const Parms: String): THandle;
 var
   CmdLine: String;
-  StartupInfo: TStartupInfo;
+  StartupInfo: TStartupInfoW;
   ProcessInfo: TProcessInformation;
 begin
   CmdLine := '"' + Filename + '" ' + Parms;
 
   FillChar(StartupInfo, SizeOf(StartupInfo), 0);
   StartupInfo.cb := SizeOf(StartupInfo);
-  if not CreateProcess(nil, PChar(CmdLine), nil, nil, False, 0, nil, nil,
+  if not CreateProcessW(nil, PWideChar(CmdLine), nil, nil, False, 0, nil, nil,
      StartupInfo, ProcessInfo) then
     RaiseLastError(SetupMessages[msgLdrCannotExecTemp]);
   CloseHandle(ProcessInfo.hThread);
@@ -181,18 +181,21 @@ procedure DeleteUninstallDataFiles;
   { Creates the _unins-done.tmp file, which is an empty file that signals to
     DeleteResidualTempUninstallDirs that the temporary directory needs to be
     deleted, because we're terminating the first phase. }
+  var
+    SelfExeFilename, DoneFilename: String;
+    H: THandle;
   begin
-    const SelfExeFilename = NewParamStr(0);
+    SelfExeFilename := NewParamStr(0);
     if not SameText(PathExtractName(SelfExeFilename), '_unins.tmp') then begin
       { This may be the case when debugging }
       Log('Current Uninstall EXE is not named "_unins.tmp"; not creating "_unins-done.tmp".');
       Exit;
     end;
 
-    const DoneFilename = PathExtractPath(SelfExeFilename) + '_unins-done.tmp';
+    DoneFilename := PathExtractPath(SelfExeFilename) + '_unins-done.tmp';
 
     Log('Creating "_unins-done.tmp" file.');
-    const H = CreateFile(PChar(DoneFilename), GENERIC_WRITE, FILE_SHARE_READ,
+    H := CreateFileW(PWideChar(DoneFilename), GENERIC_WRITE, FILE_SHARE_READ,
       nil, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
     if H = INVALID_HANDLE_VALUE then
       LogWithLastError('Failed to create "_unins-done.tmp".');
@@ -382,21 +385,27 @@ begin
 end;
 
 procedure RunFirstPhase;
+var
+  Wnd: HWND;
+  ProcessHandle: THandle;
+  ShouldDeleteTempDir: Boolean;
+  TempDir, TempFile: String;
+  WaitResult: DWORD;
 begin
   { Copy self to _unins.tmp in a new subdirectory of the TEMP directory with
     a name like is-*-uninstall.tmp. The actual uninstallation process must
     be done from somewhere outside the application directory since EXE's
     can't delete themselves while they are running. }
-  var Wnd: HWND := 0;
-  var ProcessHandle: THandle := 0;
-  var ShouldDeleteTempDir := True;
-  const TempDir = CreateTempDir('-uninstall.tmp', IsAdmin);
-  const TempFile = AddBackslash(TempDir) + '_unins.tmp';
+  Wnd := 0;
+  ProcessHandle := 0;
+  ShouldDeleteTempDir := True;
+  TempDir := CreateTempDir('-uninstall.tmp', IsAdmin);
+  TempFile := AddBackslash(TempDir) + '_unins.tmp';
   try
-    if not CopyFile(PChar(UninstExeFilename), PChar(TempFile), False) then
+    if not CopyFileW(PWideChar(UninstExeFilename), PWideChar(TempFile), False) then
       RaiseLastError(SetupMessages[msgLdrCannotCreateTemp]);
     { Don't want any attribute like read-only transferred }
-    SetFileAttributes(PChar(TempFile), FILE_ATTRIBUTE_NORMAL);
+    SetFileAttributesW(PWideChar(TempFile), FILE_ATTRIBUTE_NORMAL);
 
     { Create first phase window. This window waits for a WM_KillFirstPhase
       message from the second phase process, and terminates itself in
@@ -418,7 +427,7 @@ begin
     { Wait till the second phase process unexpectedly dies or is ready
       for the first phase to terminate. }
     while not ProcessMsgs do begin
-      const WaitResult = MsgWaitForMultipleObjects(1, ProcessHandle, False,
+      WaitResult := MsgWaitForMultipleObjects(1, ProcessHandle, False,
         INFINITE, QS_ALLINPUT);
       if WaitResult <> WAIT_OBJECT_0 + 1 then begin
         { When the second phase process terminates without us receiving a
@@ -440,7 +449,7 @@ begin
       DestroyWindow(Wnd);
     if ShouldDeleteTempDir then begin
       DelayDeleteFile(TempFile, 13, 50, 250);
-      RemoveDirectory(PChar(TempDir));
+      RemoveDirectoryW(PWideChar(TempDir));
     end;
   end;
 end;
@@ -507,6 +516,7 @@ var
   CompiledCodeData: array[0..6] of String;
   CompiledCodeText: AnsiString;
   Res, RemovedAll, UninstallNeedsRestart: Boolean;
+  IsDynamicDark, IsForcedDark, EnableRedirectionGuard: Boolean;
   StartTime: DWORD;
 begin
   RestartSystem := False;
@@ -546,18 +556,23 @@ begin
     { Apply style - also see Setup.MainFunc's InitializeSetup }
     IsWinDark := DarkModeActive;
     if not HighContrastActive and not InitNoStyle then begin
-      const IsDynamicDark = (lfWizardDarkStyleDynamic in MessagesLangOptions.Flags) and IsWinDark;
-      const IsForcedDark = lfWizardDarkStyleDark in MessagesLangOptions.Flags;
+      IsDynamicDark := (lfWizardDarkStyleDynamic in MessagesLangOptions.Flags) and IsWinDark;
+      IsForcedDark := lfWizardDarkStyleDark in MessagesLangOptions.Flags;
       if IsDynamicDark then begin
         SetupHeader.WizardBackColor := SetupHeader.WizardBackColorDynamicDark;
         MainIconPostfix := '_DARK';
-        if FindResource(HInstance, PChar('MAINICON' + MainIconPostfix), RT_GROUP_ICON) = 0 then
+        if FindResourceW(HInstance, PWideChar('MAINICON' + MainIconPostfix), PWideChar(RT_GROUP_ICON)) = 0 then
           MainIconPostfix := '';
       end;
       if IsDynamicDark or IsForcedDark then begin
         IsDarkInstallMode := True;
         WizardIconsPostfix := '_DARK';
       end;
+      {$IFDEF FPC}
+      ApplyVclStyleFormColors(SetupHeader.WizardBackColor, IsDynamicDark);
+      CustomWizardBackground := (SetupHeader.WizardBackColor <> clNone) and
+        (SetupHeader.WizardBackColor <> clWindow);
+      {$ELSE}
       TStyleManager.AutoDiscoverStyleResources := False;
       var StyleName := 'MYSTYLE1';
       if IsDynamicDark then
@@ -580,6 +595,7 @@ begin
           TFormBackgroundStyleHook.BackColor := SetupHeader.WizardBackColor;
         end;
       end;
+      {$ENDIF}
     end;
 
     Application.Title := FmtSetupMessage1(msgUninstallAppFullTitle, UninstLog.AppName);
@@ -636,7 +652,7 @@ begin
     else
       Initialize64BitInstallMode(False);
 
-    const EnableRedirectionGuard = InitRedirectionGuard or
+    EnableRedirectionGuard := InitRedirectionGuard or
       ((ufRedirectionGuard in UninstLog.Flags) and not InitNoRedirectionGuard);
     RedirectionGuardConfigure(EnableRedirectionGuard);
 

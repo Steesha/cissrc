@@ -20,12 +20,20 @@ implementation
 {$WEAKLINKRTTI ON}
 
 { The compiler may delete some of the resources included here }
+{$IFDEF INNO_SOURCE_RESOURCES}
+{$IFDEF INNO_LCL_DARK_RESOURCES}
+{$I SetupCustomStyle.Resources.inc}
+{$ELSE}
+{$I Setup.Resources.inc}
+{$ENDIF}
+{$ELSE}
 {$R Res\Setup.icon.res}
 {$R Res\Setup.images.res}
 {$R Res\Setup.version.res}
+{$ENDIF}
 
 uses
-  Windows, Messages,
+  Windows, Messages, {$IFDEF FPC}CommCtrl,{$ENDIF}
   SysUtils,
   Forms,
   RichEditViewer,
@@ -94,6 +102,23 @@ begin
       end;
   end;
 end;
+
+{$IFDEF FPC}
+function AntiShutdownSubclass(Wnd: HWND; Msg: UINT; WParam: WPARAM;
+  LParam: LPARAM; SubclassID: UINT_PTR; RefData: DWORD_PTR): LRESULT; stdcall;
+var
+  Message: TMessage;
+begin
+  Message.Msg := Msg;
+  Message.WParam := WParam;
+  Message.LParam := LParam;
+  Message.Result := 0;
+  if TDummyClass.AntiShutdownHook(Message) then
+    Result := Message.Result
+  else
+    Result := DefSubclassProc(Wnd, Msg, WParam, LParam);
+end;
+{$ENDIF}
 
 class procedure TDummyClass.ShowException(Sender: TObject; E: Exception);
 begin
@@ -182,7 +207,15 @@ begin
   try
     SetErrorMode(SEM_FAILCRITICALERRORS);
     DisableWindowGhosting;
+    {$IFDEF FPC}
+    { LCL creates the application window during Initialize }
+    CmdShow := SW_SHOWNORMAL;
+    Application.Initialize;
+    if not SetWindowSubclass(Application.Handle, @AntiShutdownSubclass, 0, 0) then
+      raise Exception.Create('Failed to install Setup shutdown handler');
+    {$ELSE}
     Application.HookMainWindow(TDummyClass.AntiShutdownHook);
+    {$ENDIF}
     TRichEditViewer.CustomShellExecute := ShellExecuteAsOriginalUser;
 
     { Don't respect the show command passed by the parent process.
@@ -217,7 +250,9 @@ begin
   { Initialize (Setup mode) }
   Application.ShowMainForm := False;
   try
+    {$IFNDEF FPC}
     Application.Initialize;
+    {$ENDIF}
     Application.MainFormOnTaskBar := True;
     InitializeSetup;
     MainForm := TMainForm.Create(Application);
@@ -240,7 +275,8 @@ begin
 
   { Run }
   try
-    Application.Run;
+    {$IFDEF FPC}if not Application.Terminated then{$ENDIF}
+      Application.Run;
   except
     { Show any exception and continue }
     ShowExceptionMsg;
@@ -254,9 +290,13 @@ begin
     ShowExceptionMsg;
   end;
 
+  {$IFDEF FPC}
+  RemoveWindowSubclass(Application.Handle, @AntiShutdownSubclass, 0);
+  {$ELSE}
   {$IFDEF DEBUG}
   { Prevent a warning about an expected memory leak, at least when exiting normally }
   Application.UnhookMainWindow(TDummyClass.AntiShutdownHook);
+  {$ENDIF}
   {$ENDIF}
 
   System.ExitCode := SetupExitCode;

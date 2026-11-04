@@ -19,9 +19,12 @@ procedure ScriptClassesLibraryRegister_C(Cl: TPSPascalCompiler);
 implementation
 
 uses
-  Windows, Shared.SetupTypes,
+  Shared.SetupTypes,
   uPSC_std, uPSC_classes, uPSC_graphics, uPSC_controls, uPSC_stdctrls,
   uPSC_forms, uPSC_extctrls, uPSC_comobj;
+
+const
+  COLOR_HOTLIGHT = 26; { Windows target system color index }
 
 procedure RegisterWinControl_C(Cl: TPSPascalCompiler);
 begin
@@ -45,9 +48,16 @@ end;
 
 procedure RegisterNewStaticText_C(Cl: TPSPascalCompiler);
 begin
+  {$IFDEF FPC}
+  Cl.AddTypeS('TStyleElement', '(seFont, seClient, seBorder)');
+  Cl.AddTypeS('TStyleElements', 'set of TStyleElement');
+  {$ENDIF}
   with Cl.AddClassN(Cl.FindClass('TWinControl'), 'TNewStaticText') do
   begin
     RegisterMethod('function AdjustHeight: Integer');
+    {$IFDEF FPC}
+    RegisterProperty('StyleElements', 'TStyleElements', iptrw);
+    {$ENDIF}
     RegisterProperty('Alignment', 'TAlignment', iptrw);
     RegisterProperty('Anchors', 'TAnchors', iptrw);
     RegisterProperty('AutoSize', 'Boolean', iptrw);
@@ -293,8 +303,16 @@ begin
   Cl.AddClassN(Cl.FindClass('TMemo'), 'TNewMemo');
   Cl.AddClassN(Cl.FindClass('TComboBox'), 'TNewComboBox');
   Cl.AddClassN(Cl.FindClass('TListBox'), 'TNewListBox');
+  {$IFDEF FPC}
+  Cl.AddTypeS('TButtonStyle', '(bsPushButton, bsCommandLink, bsSplitButton)');
+  {$ENDIF}
   with Cl.AddClassN(Cl.FindClass('TButton'), 'TNewButton') do
   begin
+    {$IFDEF FPC}
+    RegisterProperty('CommandLinkHint', 'string', iptrw);
+    RegisterProperty('ElevationRequired', 'Boolean', iptrw);
+    RegisterProperty('Style', 'TButtonStyle', iptrw);
+    {$ENDIF}
     RegisterMethod('function AdjustHeightIfCommandLink: Integer');
   end;
   Cl.AddClassN(Cl.FindClass('TCheckBox'), 'TNewCheckBox');

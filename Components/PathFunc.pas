@@ -25,7 +25,7 @@ unit PathFunc;
 interface
 
 uses
-  Windows, SysUtils;
+  {$IFDEF MSWINDOWS} Windows, {$ELSE} Character, {$ENDIF} SysUtils;
 
 type
   EPathFuncError = class(Exception);
@@ -37,19 +37,28 @@ function PathCharIsSlash(const C: Char): Boolean;
 function PathCombine(const Dir, Filename: String): String;
 function PathCompare(const S1, S2: String; const IgnoreCase: Boolean = True): Integer;
 function PathComponentIsReservedName(const Filename: String): Boolean;
+{$IFDEF MSWINDOWS}
 function PathConvertNormalToSuper(const Filename: String): String; overload;
 function PathConvertNormalToSuper(const Filename: String;
   out SuperFilename: String): Boolean; overload;
+{$ENDIF}
+
 function PathConvertSuperToNormal(const Filename: String): String; overload;
+{$IFDEF MSWINDOWS}
 function PathConvertSuperToNormal(const Filename: String;
   out NormalFilename: String): Boolean; overload;
+{$ENDIF}
+
 function PathDrivePartLength(const Filename: String): Integer;
 function PathDrivePartLengthEx(const Filename: String;
   const IncludeSignificantSlash: Boolean): Integer;
 function PathEndsWith(const S, AEndsWith: String;
   const IgnoreCase: Boolean = True): Boolean;
+{$IFDEF MSWINDOWS}
 function PathExpand(const Filename: String): String; overload;
 function PathExpand(const Filename: String; out ExpandedFilename: String): Boolean; overload;
+{$ENDIF}
+
 function PathExtensionPos(const Filename: String): Integer;
 function PathExtractDir(const Filename: String): String;
 function PathExtractDrive(const Filename: String): String;
@@ -82,13 +91,22 @@ function PathStrNextChar(const S: PChar): PChar;
 function PathStrScan(const S: PChar; const C: Char): PChar;
 function RemoveBackslash(const S: String): String;
 function RemoveBackslashUnlessRoot(const S: String): String;
+{$IFDEF MSWINDOWS}
 function ValidateAndCombinePath(const ADestDir, AFilename: String;
   out AResultingPath: String): Boolean; overload;
 function ValidateAndCombinePath(const ADestDir, AFilename: String): Boolean; overload;
+{$ENDIF}
 
 implementation
 
+{$IF NOT DECLARED(FIND_FROMSTART)}
+const
+  FIND_FROMSTART = $00400000;
+{$IFEND}
+
+{$IFNDEF FPC}
 {$ZEROBASEDSTRINGS OFF}
+{$ENDIF}
 
 function AddBackslash(const S: String): String;
 { Returns S plus a trailing backslash, unless S is an empty string or already
@@ -204,9 +222,13 @@ const
   Sup3 = #$00B3;
   DeviceNames: array[0..5] of String =
     ('CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$');
+var
+  NewLength: Integer;
+  I: Integer;
+  J: Integer;
 begin
-  var NewLength := 0;
-  for var I := 1 to Length(Filename) do
+  NewLength := 0;
+  for I := 1 to Length(Filename) do
     case Filename[I] of
       ' ': ;
       '.', ':': Break;
@@ -217,7 +239,7 @@ begin
   case NewLength of
     3, 6, 7:
        begin
-         for var J := Low(DeviceNames) to High(DeviceNames) do
+         for J := Low(DeviceNames) to High(DeviceNames) do
            if (NewLength = Length(DeviceNames[J])) and
               PathStartsWith(Filename, DeviceNames[J]) then
              Exit(True);
@@ -233,6 +255,7 @@ begin
   Result := False;
 end;
 
+{$IFDEF MSWINDOWS}
 function PathInternalConvertNormalToSuper(var Filename: String): Boolean;
 { For internal use. PathExpand must have already been called on Filename. }
 begin
@@ -266,8 +289,9 @@ end;
 function PathConvertNormalToSuper(const Filename: String;
   out SuperFilename: String): Boolean;
 { Does not fail if the specified path already is an extended-length path. }
+var
+  NewFilename: String;
 begin
-  var NewFilename: String;
   if not PathExpand(Filename, NewFilename) then
     Exit(False);
   if not PathInternalConvertNormalToSuper(NewFilename) then
@@ -279,8 +303,10 @@ end;
 
 function PathConvertNormalToSuper(const Filename: String): String;
 { Does not fail if the specified path already is an extended-length path. }
+var
+  NewFilename: String;
 begin
-  var NewFilename := PathExpand(Filename);  { may raise exception }
+  NewFilename := PathExpand(Filename);  { may raise exception }
   if NewFilename <> '' then begin
     { There is no known case in which PathInternalConvertNormalToSuper
       actually can return False when passed a non-empty path returned by
@@ -291,6 +317,7 @@ begin
 
   Result := NewFilename;
 end;
+{$ENDIF}
 
 function PathConvertSuperToNormal(const Filename: String): String;
 { Attempts to convert a "\\?\"-prefixed path to normal form, and returns the
@@ -319,11 +346,13 @@ function PathConvertSuperToNormal(const Filename: String): String;
     \\?\C:\xxx           -> C:\xxx
     \\?\UNC\server\share -> \\server\share
 }
+var
+  Len: Integer;
 begin
   if PathStartsWith(Filename, '\\?\UNC\') then
     Exit('\\' + Copy(Filename, 9, Maxint));
 
-  const Len = Length(Filename);
+  Len := Length(Filename);
   if (Len >= 6) and PathStartsWith(Filename, '\\?\') and
      not PathCharIsSlash(Filename[5]) and
      (Filename[6] = ':') then begin
@@ -339,6 +368,7 @@ begin
   Result := Filename;
 end;
 
+{$IFDEF MSWINDOWS}
 function PathConvertSuperToNormal(const Filename: String;
   out NormalFilename: String): Boolean;
 { Like the other overload, but returns False if the normal form can't be used
@@ -348,14 +378,16 @@ function PathConvertSuperToNormal(const Filename: String;
   trailing dots or spaces and with reserved device names, which only super
   paths can access because they skip Win32 path normalization.
   If False is returned, NormalFilename is empty. }
+var
+  NewNormalFilename: String;
+  SuperFilename: String;
 begin
-  const NewNormalFilename = PathConvertSuperToNormal(Filename);
+  NewNormalFilename := PathConvertSuperToNormal(Filename);
   if PathStartsWith(NewNormalFilename, '\\?\') or
      (Length(NewNormalFilename) >= MAX_PATH) then
     Exit(False);
   { If Filename was already a normal path, there is nothing to check }
   if NewNormalFilename <> Filename then begin
-    var SuperFilename: String;
     if not PathConvertNormalToSuper(NewNormalFilename, SuperFilename) or
        not PathSame(SuperFilename, Filename) then
       Exit(False);
@@ -363,6 +395,8 @@ begin
   NormalFilename := NewNormalFilename;
   Result := True;
 end;
+
+{$ENDIF}
 
 function PathDrivePartLength(const Filename: String): Integer;
 begin
@@ -389,6 +423,12 @@ function PathDrivePartLengthEx(const Filename: String;
 }
 var
   Len, I: Integer;
+  FirstComponentIsNamespace: Boolean;
+  SecondComponentIsDrive: Boolean;
+  MaxComponents: Integer;
+  CurComponent: Integer;
+  ComponentStartIndex: Integer;
+  ComponentLen: Integer;
 begin
   Len := Length(Filename);
 
@@ -407,15 +447,15 @@ begin
       we don't collapse 3 leading slashes into 2. Instead, a leading "\\\" is
       treated like "\\<empty computer name>\".
       PathNormalizeSlashes works the same way. }
-    var FirstComponentIsNamespace := False;
-    var SecondComponentIsDrive := False;
-    var MaxComponents := 2;
-    var CurComponent := 0;
-    var ComponentStartIndex := 3;
+    FirstComponentIsNamespace := False;
+    SecondComponentIsDrive := False;
+    MaxComponents := 2;
+    CurComponent := 0;
+    ComponentStartIndex := 3;
     I := ComponentStartIndex;
     while I <= Len do begin
       if PathCharIsSlash(Filename[I]) then begin
-        const ComponentLen = I - ComponentStartIndex;
+        ComponentLen := I - ComponentStartIndex;
         case CurComponent of
           0: begin
                if (ComponentLen = 1) and
@@ -481,8 +521,10 @@ end;
 function PathIsRooted(const Filename: String): Boolean;
 { Returns True if Filename begins with a slash or drive ('x:').
   Equivalent to: PathDrivePartLengthEx(Filename, True) <> 0 }
+var
+  Len: Integer;
 begin
-  const Len = Length(Filename);
+  Len := Length(Filename);
   Result :=
     ((Len >= 1) and PathCharIsSlash(Filename[1])) or
     ((Len >= 2) and (Filename[2] = ':'));
@@ -498,9 +540,12 @@ function PathPathPartLength(const Filename: String;
     length of the entire string, NOT the length of '\\server\'.
   - If you pass in a filename with a reference to an NTFS alternate data
     stream, e.g. 'abc:def', it will return 0, NOT the length of 'abc:'. }
+var
+  DrivePartLen: Integer;
+  FoundSlash: Boolean;
 begin
-  const DrivePartLen = PathDrivePartLengthEx(Filename, True);
-  var FoundSlash := False;
+  DrivePartLen := PathDrivePartLengthEx(Filename, True);
+  FoundSlash := False;
   Result := Length(Filename);
   while Result > DrivePartLen do begin
     if PathCharIsSlash(Filename[Result]) then begin
@@ -524,10 +569,13 @@ begin
     IgnoreCase);
 end;
 
+{$IFDEF MSWINDOWS}
 function PathIsEmptyOrOnlySpaces(const S: String): Boolean;
 { Internally used by the PathExpand functions. }
+var
+  I: Integer;
 begin
-  for var I := Low(S) to High(S) do
+  for I := Low(S) to High(S) do
     if S[I] <> ' ' then
       Exit(False);
 
@@ -568,6 +616,8 @@ function PathExpand(const Filename: String; out ExpandedFilename: String): Boole
   files. }
 var
   Buf: array[0..$7FFF] of Char;
+  Res: DWORD;
+  FilePart: PChar;
 begin
   { Length limits observed on Windows 11 25H2:
     - GetFullPathName fails with ERROR_FILENAME_EXCED_RANGE [sic] if lpFileName
@@ -584,8 +634,7 @@ begin
   if PathIsEmptyOrOnlySpaces(Filename) then
     Exit(False);
 
-  var FilePart: PChar;
-  const Res = GetFullPathName(PChar(Filename), SizeOf(Buf) div SizeOf(Buf[0]),
+  Res := GetFullPathNameW(PChar(Filename), SizeOf(Buf) div SizeOf(Buf[0]),
     Buf, FilePart);
   Result := (Res > 0) and (Res < SizeOf(Buf) div SizeOf(Buf[0]));
   if Result then begin
@@ -617,15 +666,19 @@ begin
     raise EPathFuncError.CreateFmt('PathExpand: GetFullPathName failed (length: %d)',
       [Length(Filename)]);
 end;
+{$ENDIF}
 
 function PathExtensionPos(const Filename: String): Integer;
 { Returns index of the last '.' character in the filename portion of Filename,
   or 0 if there is no '.' in the filename portion.
   Note: Filename is assumed to NOT include an NTFS alternate data stream name
   (i.e. 'filename:stream'). }
+var
+  NamePartStartIndex: Integer;
+  I: Integer;
 begin
-  const NamePartStartIndex = PathPathPartLength(Filename, True) + 1;
-  for var I := Length(Filename) downto NamePartStartIndex do
+  NamePartStartIndex := PathPathPartLength(Filename, True) + 1;
+  for I := Length(Filename) downto NamePartStartIndex do
     if Filename[I] = '.' then
       Exit(I);
 
@@ -728,10 +781,13 @@ function PathHasInvalidCharacters(const S: String;
     '..:streamname'
     'file :streamname'
 }
+var
+  C: Char;
+  I: Integer;
 begin
   Result := True;
-  for var I := Low(S) to High(S) do begin
-    var C := S[I];
+  for I := Low(S) to High(S) do begin
+    C := S[I];
     if Ord(C) < 32 then
       Exit;
     case C of
@@ -764,10 +820,12 @@ function PathHasSubstringAt(const S, Substring: String; const Offset: Integer;
   the end of S (partially or fully).
   If Substring is empty and Offset = Length(S), then True is returned because
   that is not considered going *beyond* the end of S. }
+var
+  SubstringLen: Integer;
 begin
   if Offset < 0 then
     Exit(False);
-  const SubstringLen = Length(Substring);
+  SubstringLen := Length(Substring);
   if Offset > Length(S) - SubstringLen then
     Exit(False);
 
@@ -791,8 +849,10 @@ function PathLastDelimiter(const Delimiters, S: string): Integer;
   Both strings are allowed to contain #0 characters; they are treated the same
   as any other character. (Delphi's LastDelimiter function doesn't allow #0
   in Delimiters.) }
+var
+  I: Integer;
 begin
-  for var I := Length(S) downto 1 do
+  for I := Length(S) downto 1 do
     if PathPos(S[I], Delimiters) <> 0 then
       Exit(I);
 
@@ -802,7 +862,11 @@ end;
 function PathLowercase(const S: String): String;
 { Converts the specified path name to lowercase }
 begin
+  {$IFDEF MSWINDOWS}
   Result := AnsiLowerCase(S);
+  {$ELSE}
+  Result := Character.ToLower(S);
+  {$ENDIF}
 end;
 
 function PathPos(const C: Char; const S: String;
@@ -813,9 +877,11 @@ function PathPos(const C: Char; const S: String;
   The optional Offset parameter (1-based) specifies where the search should
   start. If Offset is less than 1, then 0 is returned (same as Delphi's Pos
   function). }
+var
+  I: Integer;
 begin
   if Offset >= 1 then
-    for var I := Offset to Length(S) do
+    for I := Offset to Length(S) do
       if S[I] = C then
         Exit(I);
 
@@ -834,14 +900,17 @@ function PathNormalizeSlashes(S: String): String;
   Note that paths with 3+ leading slashes don't actually work. But Windows'
   GetFullPathName function, used by PathExpand, collapses slashes the same
   way. Best to be consistent. }
+var
+  Len: Integer;
+  EndIndex: Integer;
+  I: Integer;
 begin
-  const Len = Length(S);
-  var I: Integer;
+  Len := Length(S);
   for I := 1 to Len do
     if S[I] = '/' then
       S[I] := '\';
 
-  var EndIndex := 2;
+  EndIndex := 2;
   if (Len >= 2) and (S[1] = '\') and (S[2] = '\') then
     Inc(EndIndex, 2);
 
@@ -869,12 +938,14 @@ begin
   Result := PathHasSubstringAt(S, AStartsWith, 0, IgnoreCase);
 end;
 
+{$IFDEF MSWINDOWS}
 { Use our own CompareStringOrdinal declaration. The one in the Windows unit is
   "delayload" (yuck), and the bIgnoreCase parameter type differs between
   Delphi 11 and 12 (BOOL vs. DWORD). }
 function CompareStringOrdinal_static(lpString1: LPCWSTR; cchCount1: Integer;
   lpString2: LPCWSTR; cchCount2: Integer; bIgnoreCase: BOOL): Integer; stdcall;
   external kernel32 name 'CompareStringOrdinal';
+{$ENDIF}
 
 function PathStrCompare(const S1: PChar; const S1Length: Integer;
   const S2: PChar; const S2Length: Integer;
@@ -884,11 +955,14 @@ function PathStrCompare(const S1: PChar; const S1Length: Integer;
   An ordinal comparison is used, ignoring case by default.
   A length of -1 may be passed if a string is null-terminated; in that case,
   the length is determined automatically. }
+{$IFDEF MSWINDOWS}
+var
+  CompareResult: Integer;
 begin
   { As documented, CompareStringOrdinal only allows 1 for TRUE in the
     bIgnoreCase parameter. "BOOL(Byte(IgnoreCase))" ensures we pass 1, not the
     usual -1 Delphi passes when a Boolean is implicitly converted to BOOL. }
-  const CompareResult = CompareStringOrdinal_static(S1, S1Length, S2, S2Length,
+  CompareResult := CompareStringOrdinal_static(S1, S1Length, S2, S2Length,
     BOOL(Byte(IgnoreCase)));
   case CompareResult of
     0: raise EPathFuncError.CreateFmt('PathStrCompare: CompareStringOrdinal failed (%u)',
@@ -899,14 +973,44 @@ begin
       [CompareResult]);
   end;
   Result := CompareResult - 2;
+{$ELSE}
+var
+  Length1, Length2, I: Integer;
+  C1, C2: Char;
+begin
+  Length1 := S1Length;
+  Length2 := S2Length;
+  if Length1 = -1 then
+    Length1 := StrLen(S1);
+  if Length2 = -1 then
+    Length2 := StrLen(S2);
+  if (Length1 < 0) or (Length2 < 0) then
+    raise EPathFuncError.Create('PathStrCompare: Invalid length');
+  I := 0;
+  while (I < Length1) and (I < Length2) do begin
+    C1 := S1[I];
+    C2 := S2[I];
+    if IgnoreCase and (C1 <> C2) then begin
+      { Use the RTL Unicode uppercase table for each UTF-16 code unit }
+      C1 := Character.ToUpper(C1);
+      C2 := Character.ToUpper(C2);
+    end;
+    if C1 <> C2 then
+      Exit(Ord(C1) - Ord(C2));
+    Inc(I);
+  end;
+  Result := Length1 - Length2;
+{$ENDIF}
 end;
 
+{$IFDEF MSWINDOWS}
 { Use our own FindStringOrdinal declaration. The one in the Windows unit is
   "delayload" (yuck). }
 function FindStringOrdinal_static(dwFindStringOrdinalFlags: DWORD;
   lpStringSource: LPCWSTR; cchSource: Integer;
   lpStringValue: LPCWSTR; cchValue: Integer; bIgnoreCase: BOOL): Integer; stdcall;
   external kernel32 name 'FindStringOrdinal';
+{$ENDIF}
 
 function PathStrFind(const SSource: PChar; const SSourceLength: Integer;
   const SValue: PChar; const SValueLength: Integer;
@@ -916,13 +1020,17 @@ function PathStrFind(const SSource: PChar; const SSourceLength: Integer;
   An ordinal comparison is used, ignoring case by default.
   A length of -1 may be passed if a string is null-terminated; in that case,
   the length is determined automatically. }
+{$IFDEF MSWINDOWS}
+var
+  CompareResult: Integer;
+  LastError: DWORD;
 begin
   { This is not documented for FindStringOrdinal, but like CompareStringOrdinal
     it only allows 1 for TRUE in the bIgnoreCase parameter. See above. }
-  const CompareResult = FindStringOrdinal_static(FIND_FROMSTART, SSource, SSourceLength,
+  CompareResult := FindStringOrdinal_static(FIND_FROMSTART, SSource, SSourceLength,
     SValue, SValueLength, BOOL(Byte(IgnoreCase)));
   if CompareResult = -1 then begin
-    const LastError = GetLastError;
+    LastError := GetLastError;
     if LastError <> ERROR_SUCCESS then
       raise EPathFuncError.CreateFmt('PathStrFind: FindStringOrdinal failed (%u)',
         [LastError]);
@@ -930,6 +1038,23 @@ begin
     raise EPathFuncError.CreateFmt('PathStrFind: FindStringOrdinal result invalid (%d)',
       [CompareResult]);
   Result := CompareResult;
+{$ELSE}
+var
+  SourceLength, ValueLength, I: Integer;
+begin
+  SourceLength := SSourceLength;
+  ValueLength := SValueLength;
+  if SourceLength = -1 then
+    SourceLength := StrLen(SSource);
+  if ValueLength = -1 then
+    ValueLength := StrLen(SValue);
+  if (SourceLength <= 0) or (ValueLength <= 0) then
+    raise EPathFuncError.Create('PathStrFind: Invalid length');
+  for I := 0 to SourceLength - ValueLength do
+    if PathStrCompare(SSource + I, ValueLength, SValue, ValueLength, IgnoreCase) = 0 then
+      Exit(I);
+  Result := -1;
+{$ENDIF}
 end;
 
 function PathStrNextChar(const S: PChar): PChar;
@@ -985,6 +1110,7 @@ begin
     Result := Copy(S, 1, I);
 end;
 
+{$IFDEF MSWINDOWS}
 function ValidateAndCombinePath(const ADestDir, AFilename: String;
   out AResultingPath: String): Boolean;
 { Combines ADestDir and AFilename without allowing a result outside of
@@ -995,15 +1121,17 @@ function ValidateAndCombinePath(const ADestDir, AFilename: String;
   AFilename may be a file or directory name. }
 
   function IsAnyComponentReservedName(S: String): Boolean;
+  var
+    LastComponent, ParentDir: String;
   begin
     { GetFullPathName doesn't treat 'NUL\file.txt' as a device name, but the
       caller might access 'NUL' if it tries to create parent directories. So
       check all components, not just the last one. }
     while True do begin
-      const LastComponent = PathExtractName(S);
+      LastComponent := PathExtractName(S);
       if PathComponentIsReservedName(LastComponent) then
         Exit(True);
-      const ParentDir = PathExtractDir(S);
+      ParentDir := PathExtractDir(S);
       if (ParentDir = '') or (ParentDir = S) then
         Break;
       S := ParentDir;
@@ -1011,6 +1139,9 @@ function ValidateAndCombinePath(const ADestDir, AFilename: String;
     Result := False;
   end;
 
+var
+  CombinedPath: String;
+  TestExpandedPath: String;
 begin
   { - Don't allow empty names
     - Don't allow forward slashes or repeated slashes
@@ -1034,8 +1165,7 @@ begin
       and the path doesn't start with '\\?\', then PathExpand may return a
       '\\.\' prefixed path. For example, PathExpand('c:\path\NUL') returns
       '\\.\NUL'. }
-    var CombinedPath := ADestDir + AFilename;
-    var TestExpandedPath: String;
+    CombinedPath := ADestDir + AFilename;
     if PathExpand(CombinedPath, TestExpandedPath) and
        (CombinedPath = TestExpandedPath) then begin
       AResultingPath := CombinedPath;
@@ -1045,9 +1175,12 @@ begin
 end;
 
 function ValidateAndCombinePath(const ADestDir, AFilename: String): Boolean;
+var
+  ResultingPath: String;
 begin
-  var ResultingPath: String;
   Result := ValidateAndCombinePath(ADestDir, AFilename, ResultingPath);
 end;
+
+{$ENDIF}
 
 end.

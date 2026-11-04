@@ -1,0 +1,25 @@
+#!@Python3_EXECUTABLE@
+"""Translate legacy FPC Darwin linker options for the configured LLVM linker."""
+
+import os
+import sys
+
+arguments = []
+seen_libraries = set()
+source = iter(sys.argv[1:])
+for argument in source:
+    if argument == '-macosx_version_min':
+        next(source)
+        arguments.extend(['-platform_version', 'macos', '@CMAKE_OSX_DEPLOYMENT_TARGET@',
+                          '@CMAKE_OSX_DEPLOYMENT_TARGET@'])
+        continue
+    if argument == '-multiply_defined':
+        # Current linkers diagnose duplicate definitions without this obsolete flag.
+        next(source)
+        continue
+    if argument.startswith('-l'):
+        if argument in seen_libraries:
+            continue
+        seen_libraries.add(argument)
+    arguments.append(argument)
+os.execv('@INNO_DARWIN_LINKER@', ['@INNO_DARWIN_LINKER@', *arguments])

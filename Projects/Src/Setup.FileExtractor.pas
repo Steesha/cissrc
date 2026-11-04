@@ -17,11 +17,18 @@ uses
 
 type
   TExtractorProgressProc = procedure(const Bytes: Cardinal);
+  TExtractorSliceFilenameFunc = function(const Slice: Integer): String;
+  TExtractorErrorProc = procedure(const Reason: String; const Corrupt: Boolean);
 
   TFileExtractor = class
   private
     FDecompressor: array[Boolean] of TCustomDecompressor;
     FSourceF: TFile;
+    FSourceFilename: String;
+    FDataOffset: Int64;
+    FEncryptionBaseNonce: TSetupEncryptionNonce;
+    FSliceFilename: TExtractorSliceFilenameFunc;
+    FOnError: TExtractorErrorProc;
     FOpenedSlice, FChunkFirstSlice, FChunkLastSlice: Integer;
     FChunkStartOffset: Int64;
     FChunkBytesLeft, FChunkDecompressedBytesRead: Int64;
@@ -31,13 +38,15 @@ type
     FCryptKey: TSetupEncryptionKey;
     FCryptKeySet: Boolean;
     FEntered: Integer;
+    procedure Fail(const Reason: String; const Corrupt: Boolean);
     procedure DecompressBytes(var Buffer; Count: Cardinal);
-    class function FindSliceFilename(const ASlice: Integer): String; static;
     procedure OpenSlice(const ASlice: Integer);
     function ReadProc(var Buf; Count: Cardinal): Cardinal;
     procedure SetCryptKey(const Value: TSetupEncryptionKey);
   public
-    constructor Create(ADecompressorClass: TCustomDecompressorClass);
+    constructor Create(ADecompressorClass: TCustomDecompressorClass; const SourceFilename: String;
+      const DataOffset: Int64; const EncryptionBaseNonce: TSetupEncryptionNonce;
+      const SliceFilename: TExtractorSliceFilenameFunc; const OnError: TExtractorErrorProc);
     destructor Destroy; override;
     procedure DecompressFile(const FL: TSetupFileLocationEntry; const DestF: TFile;
       const ProgressProc: TExtractorProgressProc; const VerifyChecksum: Boolean);
@@ -46,46 +55,23 @@ type
     property CryptKey: TSetupEncryptionKey write SetCryptKey;
   end;
 
-function FileExtractor: TFileExtractor;
-procedure FreeFileExtractor;
-
 implementation
 
 uses
-  PathFunc, Shared.CommonFunc, Setup.MainFunc, SetupLdrAndSetup.Messages,
-  Shared.SetupMessageIDs, Setup.InstFunc, Compression.Zlib, Compression.bzlib,
-  Compression.LZMADecompressor, SHA256, Setup.LoggingFunc, Setup.NewDiskForm;
+  SHA256, Shared.EncryptionFunc;
 
-var
-  FFileExtractor: TFileExtractor;
-
-function FileExtractor: TFileExtractor;
-const
-  DecompClasses: array[TSetupCompressMethod] of TCustomDecompressorClass =
-    (TStoredDecompressor, TZDecompressor, TBZDecompressor, TLZMA1Decompressor,
-     TLZMA2Decompressor);
-begin
-  if FFileExtractor = nil then
-    FFileExtractor := TFileExtractor.Create(DecompClasses[SetupHeader.CompressMethod]);
-  Result := FFileExtractor;
-end;
-
-procedure FreeFileExtractor;
-begin
-  FreeAndNil(FFileExtractor);
-end;
-
-procedure SourceIsCorrupted(const AReason: String);
-begin
-  Log('Source file corrupted: ' + AddPeriod(AReason));
-  raise Exception.Create(SetupMessages[msgSourceIsCorrupted]);
-end;
-
-{ TFileExtractor }
-
-constructor TFileExtractor.Create(ADecompressorClass: TCustomDecompressorClass);
+constructor TFileExtractor.Create(ADecompressorClass: TCustomDecompressorClass;
+  const SourceFilename: String; const DataOffset: Int64; const EncryptionBaseNonce: TSetupEncryptionNonce;
+  const SliceFilename: TExtractorSliceFilenameFunc; const OnError: TExtractorErrorProc);
 begin
   inherited Create;
+  if (DataOffset = 0) and not Assigned(SliceFilename) then
+    raise Exception.Create('Disk-spanning extraction requires a slice filename callback');
+  FSourceFilename := SourceFilename;
+  FDataOffset := DataOffset;
+  FEncryptionBaseNonce := EncryptionBaseNonce;
+  FSliceFilename := SliceFilename;
+  FOnError := OnError;
   FOpenedSlice := -1;
   FChunkFirstSlice := -1;
   { Create one 'decompressor' for use with uncompressed chunks, and another
@@ -108,39 +94,13 @@ begin
   FCryptKeySet := True;
 end;
 
-var
-  LastSourceDir: String;
-
-class function TFileExtractor.FindSliceFilename(const ASlice: Integer): String;
-var
-  Major, Minor: Integer;
-  Prefix, F1, Path: String;
+procedure TFileExtractor.Fail(const Reason: String; const Corrupt: Boolean);
 begin
-  Prefix := PathChangeExt(PathExtractName(SetupLdrOriginalFilename), '');
-  Major := ASlice div SetupHeader.SlicesPerDisk + 1;
-  Minor := ASlice mod SetupHeader.SlicesPerDisk;
-  if SetupHeader.SlicesPerDisk = 1 then
-    F1 := Format('%s-%d.bin', [Prefix, Major])
-  else
-    F1 := Format('%s-%d%s.bin', [Prefix, Major, Chr(Ord('a') + Minor)]);
-  if LastSourceDir <> '' then begin
-    Result := AddBackslash(LastSourceDir) + F1;
-    if NewFileExists(Result) then Exit;
-  end;
-  Result := AddBackslash(SourceDir) + F1;
-  {$IFDEF DEBUG}
-  { Also see Setup.MainFunc's InitializeSetup }
-  Result := Result.Replace('SetupCustomStyle', 'Setup');
-  {$ENDIF}
-  if NewFileExists(Result) then Exit;
-  Path := SourceDir;
-  LogFmt('Asking user for new disk containing "%s".', [F1]);
-  if SelectDisk(Major, F1, Path) then begin
-    LastSourceDir := Path;
-    Result := AddBackslash(Path) + F1;
-  end
-  else
-    Abort;
+  if Assigned(FOnError) then
+    FOnError(Reason, Corrupt);
+  if Corrupt then
+    raise ECompressDataError.Create({$IFDEF FPC}UTF8Encode(Reason){$ELSE}Reason{$ENDIF});
+  raise Exception.Create({$IFDEF FPC}UTF8Encode(Reason){$ELSE}Reason{$ENDIF});
 end;
 
 procedure TFileExtractor.OpenSlice(const ASlice: Integer);
@@ -155,20 +115,20 @@ begin
   FOpenedSlice := -1;
   FreeAndNil(FSourceF);
 
-  if SetupLdrOffset1 = 0 then
-    Filename := FindSliceFilename(ASlice)
+  if FDataOffset = 0 then
+    Filename := FSliceFilename(ASlice)
   else
-    Filename := SetupLdrOriginalFilename;
+    Filename := FSourceFilename;
   FSourceF := TFile.Create(Filename, fdOpenExisting, faRead, fsRead);
-  if SetupLdrOffset1 = 0 then begin
+  if FDataOffset = 0 then begin
     if FSourceF.Read(TestDiskSliceID, SizeOf(TestDiskSliceID)) <> SizeOf(TestDiskSliceID) then
-      SourceIsCorrupted('Invalid slice header (1)');
+      Fail('Invalid slice header (1)', True);
     if TestDiskSliceID <> DiskSliceID then
-      SourceIsCorrupted('Invalid slice header (2)');
+      Fail('Invalid slice header (2)', True);
     if FSourceF.Read(DiskSliceHeader, SizeOf(DiskSliceHeader)) <> SizeOf(DiskSliceHeader) then
-      SourceIsCorrupted('Invalid slice header (3)');
+      Fail('Invalid slice header (3)', True);
     if FSourceF.Size <> DiskSliceHeader.TotalSize then
-      SourceIsCorrupted('Invalid slice header (4)');
+      Fail('Invalid slice header (4)', True);
   end;
   FOpenedSlice := ASlice;
 end;
@@ -193,23 +153,14 @@ end;
 procedure TFileExtractor.SeekTo(const FL: TSetupFileLocationEntry;
   const ProgressProc: TExtractorProgressProc);
 
-  procedure InitDecryption;
-  begin
-    { Recreate the unique nonce from the base nonce }
-    var Nonce := SetupEncryptionHeader.BaseNonce;
-    Nonce.RandomXorStartOffset := Nonce.RandomXorStartOffset xor FChunkStartOffset;
-    Nonce.RandomXorFirstSlice := Nonce.RandomXorFirstSlice xor FChunkFirstSlice;
-
-    XChaCha20Init(FCryptContext, FCryptKey[0], Length(FCryptKey), Nonce, SizeOf(Nonce), 0);
-  end;
-
   procedure Discard(Count: Int64);
   var
     Buf: array[0..65535] of Byte;
+    BufSize: Cardinal;
   begin
     try
       while Count > 0 do begin
-        var BufSize: Cardinal := SizeOf(Buf);
+        BufSize := SizeOf(Buf);
         if Count < BufSize then
           BufSize := Cardinal(Count);
         DecompressBytes(Buf, BufSize);
@@ -219,17 +170,20 @@ procedure TFileExtractor.SeekTo(const FL: TSetupFileLocationEntry;
       end;
     except
       on E: ECompressDataError do
-        SourceIsCorrupted(E.Message);
+        Fail(E.Message, True);
     end;
   end;
 
+var
+  TestCompID: TCompID;
+  Diff: Int64;
 begin
   if FEntered <> 0 then
-    InternalError('Cannot call file extractor recursively');
+    Fail('Cannot call file extractor recursively', False);
   Inc(FEntered);
   try
     if (floChunkEncrypted in FL.Flags) and not FCryptKeySet then
-      InternalError('Cannot read an encrypted file before the key has been set');
+      Fail('Cannot read an encrypted file before the key has been set', False);
 
     { Is the file in a different chunk than the current one?
       Or, is the file in a part of the current chunk that we've already passed?
@@ -244,12 +198,11 @@ begin
 
       OpenSlice(FL.FirstSlice);
 
-      FSourceF.Seek(SetupLdrOffset1 + FL.StartOffset);
-      var TestCompID: TCompID;
+      FSourceF.Seek(FDataOffset + FL.StartOffset);
       if FSourceF.Read(TestCompID, SizeOf(TestCompID)) <> SizeOf(TestCompID) then
-        SourceIsCorrupted('Failed to read CompID');
+        Fail('Failed to read CompID', True);
       if TestCompID <> ZLIBID then
-        SourceIsCorrupted('Invalid CompID');
+        Fail('Invalid CompID', True);
 
       FChunkFirstSlice := FL.FirstSlice;
       FChunkLastSlice := FL.LastSlice;
@@ -260,12 +213,12 @@ begin
       FChunkEncrypted := floChunkEncrypted in FL.Flags;
 
       if floChunkEncrypted in FL.Flags then
-        InitDecryption;
+        InitCryptContext(FCryptKey, FEncryptionBaseNonce, FChunkStartOffset, FChunkFirstSlice, FCryptContext);
     end;
 
     { Need to seek forward in the chunk? }
     if FL.ChunkSuboffset > FChunkDecompressedBytesRead then begin
-      var Diff := FL.ChunkSuboffset;
+      Diff := FL.ChunkSuboffset;
       Dec(Diff, FChunkDecompressedBytesRead);
       Discard(Diff);
     end;
@@ -280,7 +233,7 @@ var
   Left, Res: Cardinal;
 begin
   if FChunkBytesLeft < 0 then  { sanity checks }
-    InternalError('TFileExtractor.ReadProc: Negative FChunkBytesLeft');
+    Fail('TFileExtractor.ReadProc: Negative FChunkBytesLeft', False);
   Buffer := @Buf;
   Left := Count;
   if FChunkBytesLeft < Left then
@@ -302,7 +255,7 @@ begin
       { Go to next disk }
       if FOpenedSlice >= FChunkLastSlice then
         { Already on the last slice, so the file must be corrupted... }
-        SourceIsCorrupted('Already on last slice');
+        Fail('Already on last slice', True);
       OpenSlice(FOpenedSlice + 1);
     end;
   end;
@@ -314,17 +267,19 @@ procedure TFileExtractor.DecompressFile(const FL: TSetupFileLocationEntry;
 var
   Context: TSHA256Context;
   AddrOffset: UInt32;
+  BytesLeft: Int64;
+  BufSize: Cardinal;
   Buf: array[0..65535] of Byte;
   { ^ *must* be the same buffer size used by the compiler (TCompressionHandler),
     otherwise the TransformCallInstructions call will break }
 begin
   if FEntered <> 0 then
-    InternalError('Cannot call file extractor recursively');
+    Fail('Cannot call file extractor recursively', False);
   Inc(FEntered);
   try
-    var BytesLeft := FL.OriginalSize;
+    BytesLeft := FL.OriginalSize;
     if BytesLeft < 0 then  { sanity check }
-      InternalError('TFileExtractor.DecompressFile: Negative size');
+      Fail('TFileExtractor.DecompressFile: Negative size', False);
 
     { To avoid file system fragmentation, preallocate all of the bytes in the
       destination file }
@@ -337,7 +292,7 @@ begin
     try
       AddrOffset := 0;
       while BytesLeft > 0 do begin
-        var BufSize: Cardinal := SizeOf(Buf);
+        BufSize := SizeOf(Buf);
         if BytesLeft < BufSize then
           BufSize := Cardinal(BytesLeft);
 
@@ -355,11 +310,11 @@ begin
       end;
     except
       on E: ECompressDataError do
-        SourceIsCorrupted(E.Message);
+        Fail(E.Message, True);
     end;
 
     if VerifyChecksum and not SHA256DigestsEqual(SHA256Final(Context), FL.SHA256Sum) then
-      SourceIsCorrupted('SHA-256 hash mismatch');
+      Fail('SHA-256 hash mismatch', True);
   finally
     Dec(FEntered);
   end;

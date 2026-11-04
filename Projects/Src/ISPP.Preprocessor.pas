@@ -13,8 +13,8 @@ unit ISPP.Preprocessor;
 interface
 
 uses
-  Windows, SysUtils, Classes, Shared.PreprocInt, ISPP.Intf,
-  ISPP.Base, ISPP.Stack, ISPP.IdentMan, ISPP.Parser;
+  {$IFDEF MSWINDOWS}Windows,{$ENDIF} SysUtils, Classes, Shared.PreprocInt, ISPP.Intf,
+  ISPP.Base, ISPP.Stack, ISPP.IdentMan, ISPP.Parser, Shared.FPCStringUtils;
 
 type
 
@@ -106,9 +106,9 @@ type
     procedure InternalFlushQueuedLine(FileIndex, LineNo: Integer);
     function ParseFormalParams(Parser: TParser; var ParamList: PParamList): Integer;
     { IUnknown }
-    function QueryInterface(const IID: TGUID; out Obj): HRESULT; stdcall;
-    function _AddRef: Integer; stdcall;
-    function _Release: Integer; stdcall;
+    function QueryInterface({$IFDEF FPC}constref{$ELSE}const{$ENDIF} IID: TGUID; out Obj): HRESULT; {$IFDEF MSWINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
+    function _AddRef: Integer; {$IFDEF MSWINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
+    function _Release: Integer; {$IFDEF MSWINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
     { IIdentManager }
     function LookupPredefined(Name: string; Value: PIsppVariant): Boolean;
     function Defined(const Name: String): Boolean;
@@ -152,7 +152,7 @@ implementation
 
 uses
   PathFunc, UnsignedFunc,
-  Shared.CommonFunc, Shared.FileClass, Shared.Struct,
+  {$IFDEF MSWINDOWS}Shared.CommonFunc{$ELSE}Shared.CompilerSupport{$ENDIF}, Shared.FileClass, Shared.Struct,
   ISPP.Consts, ISPP.Funcs, ISPP.VarUtils, ISPP.Sessions, ISPP.CTokenizer;
 
 const
@@ -168,6 +168,7 @@ const
      #0, #0);
 
 function GetEnv(const EnvVar: String): String;
+{$IFDEF MSWINDOWS}
 
   function AdjustLength(var S: String; const Res: Cardinal): Boolean;
   begin
@@ -180,32 +181,36 @@ var
 begin
   SetLength(Result, 255);
   repeat
-    Res := GetEnvironmentVariable(PChar(EnvVar), PChar(Result), ULength(Result));
+    Res := GetEnvironmentVariableW(PWideChar(EnvVar), PWideChar(Result), ULength(Result));
     if Res = 0 then begin
       Result := '';
       Break;
     end;
   until AdjustLength(Result, Res);
+{$ELSE}
+begin
+  Result := UTF8Decode(GetEnvironmentVariable(UTF8Encode(EnvVar)));
+{$ENDIF}
 end;
 
-function ParsePreprocCommand(var P: PChar; ExtraTerminator: Char): TPreprocessorCommand;
+function ParsePreprocCommand(var P: PChar; const ExtraTerminator: Char): TPreprocessorCommand;
 begin
   for Result := TPreprocessorCommand(1) to High(TPreprocessorCommand) do begin
     if (PpCmdSynonyms[Result] <> #0) and (P^ = PpCmdSynonyms[Result]) then
       Inc(P)
     else if (StrLIComp(P, @PreprocCommands[Result][1], ULength(PreprocCommands[Result])) = 0) and
-            CharInSet(P[Length(PreprocCommands[Result])], [#0..#32, ExtraTerminator]) then
+            ((P[Length(PreprocCommands[Result])] <= #32) or (P[Length(PreprocCommands[Result])] = ExtraTerminator)) then
       Inc(P, Length(PreprocCommands[Result]))
     else
       Continue;
     Exit;
   end;
   if (StrLIComp('echo', P, 4) = 0) and
-     CharInSet(P[4], [#0..#32, ExtraTerminator]) then begin
+     ((P[4] <= #32) or (P[4] = ExtraTerminator)) then begin
     Result := pcEmit;
     Inc(P, 4)
   end else if (StrLIComp('call', P, 4) = 0) and
-              CharInSet(P[4], [#0..#32, ExtraTerminator]) then begin
+              ((P[4] <= #32) or (P[4] = ExtraTerminator)) then begin
     Result := pcExpr;
     Inc(P, 4);
   end else
@@ -216,7 +221,7 @@ end;
 
 constructor EPreprocError.Create(Preproc: TPreprocessor; const Msg: string);
 begin
-  inherited Create(AddPeriod(Msg));
+  inherited Create(ToNativeText(AddPeriod(Msg)));
   FileName := Preproc.GetFileName(-1);
   LineNumber := Preproc.GetLineNumber(-1);
 end;
@@ -252,7 +257,7 @@ begin
   FSourcePath := SourcePath;
   FFileStack := TStringList.Create;
   FIncludes := TStringList.Create;
-  FIncludes.Add(FileName);  //main file - no name
+  FIncludes.Add(ToNativeText(FileName));  //main file - no name
   FInsertionPoint := -1;
   FOutput := TStringList.Create;
   FProcs := TStringList.Create;
@@ -280,9 +285,9 @@ end;
 function TPreprocessor.GetFileName(Code: Integer): string;
 begin
   if Code = -1 then
-    Result := FIncludes[FCurrentFile]
+    Result := FromNativeText(FIncludes[FCurrentFile])
   else
-    Result := FIncludes[Integer(NativeUInt(FOutput.Objects[Code]) and $FFFF)];
+    Result := FromNativeText(FIncludes[Integer(NativeUInt(FOutput.Objects[Code]) and $FFFF)]);
 end;
 
 function TPreprocessor.GetLineNumber(Code: Integer): Integer;
@@ -301,7 +306,7 @@ begin
   begin
     LineFilename := GetFileName(FLinePointer);
     LineNumber := GetLineNumber(FLinePointer);
-    LineText := FOutput[FLinePointer];
+    LineText := FromNativeText(FOutput[FLinePointer]);
     Inc(FLinePointer);
     Result := True;
   end;
@@ -315,6 +320,7 @@ end;
 procedure TPreprocessor.InternalAddLine(const LineRead: string; FileIndex, LineNo: Integer);
 var
   IncludeLine: Boolean;
+  DirectiveOffset: Integer;
   P, P1: PChar;
   Command: TPreprocessorCommand;
   State: Boolean;
@@ -354,7 +360,7 @@ begin
         else
         begin
           State := FStack.Include;
-          const DirectiveOffset = P - P1;
+          DirectiveOffset := P - P1;
           //S := Copy(LineRead, DirectiveOffset + 1, MaxInt);
           S := P;
           case Command of
@@ -392,7 +398,7 @@ begin
             IncludeLine := False
           else
             if (P^ <> #0) and (P^ <> ';') and not FInProcBody then
-              S := PChar(ProcessInlineDirectives(P1))
+              S := ProcessInlineDirectives(P1)
             else
               S := P1;
     end
@@ -410,22 +416,22 @@ begin
         SetString(S1, P1, P - P1);
         if FInsertionPoint >= 0 then
         begin
-          EmitDestination.InsertObject(FInsertionPoint, S1,
+          EmitDestination.InsertObject(FInsertionPoint, ToNativeText(S1),
             TObject(NativeUInt(LineNo) shl 16 or NativeUInt(FileIndex)));
           Inc(FInsertionPoint);
         end
         else
-          EmitDestination.AddObject(S1, TObject(NativeUInt(LineNo) shl 16 or NativeUInt(FileIndex)));
+          EmitDestination.AddObject(ToNativeText(S1), TObject(NativeUInt(LineNo) shl 16 or NativeUInt(FileIndex)));
         while CharInSet(P^, [#10, #13]) do Inc(P);
       until P^ = #0;
     end;
   except
     on E: EParsingError do
-      RaiseErrorEx(E.Message, E.Position);
+      RaiseErrorEx(FromNativeText(E.Message), E.Position);
     on E: EPreprocError do
       raise;
     on E: Exception do
-      RaiseError(E.Message);
+      RaiseError(FromNativeText(E.Message));
   end;
 end;
 
@@ -437,6 +443,8 @@ var
   LineStart, P1, DStart, DEnd: PChar;
 
   function ScanForInlineStart(var P, D: PChar): Boolean;
+  var
+    I: Integer;
   begin
     Result := False;
     while P^ <> #0 do
@@ -445,7 +453,7 @@ var
       begin
         D := P;
         Result := True;
-        for var I := 2 to Length(FOptions.InlineStart) do
+        for I := 2 to Length(FOptions.InlineStart) do
         begin
           Inc(D);
           if D^ <> FOptions.InlineStart[I] then
@@ -462,15 +470,18 @@ var
   end;
 
   function ScanForInlineEnd(var P: PChar): PChar;
+  var
+    D: PChar;
+    I: Integer;
   begin
     Result := nil;
     while P^ <> #0 do
     begin
       if P^ = FOptions.InlineEnd[1] then
       begin
-        var D := P;
+        D := P;
         Result := P;
-        for var I := 2 to Length(FOptions.InlineEnd) do
+        for I := 2 to Length(FOptions.InlineEnd) do
         begin
           Inc(D);
           if D^ <> FOptions.InlineEnd[I] then
@@ -521,7 +532,7 @@ begin
         if LineStack.Include then
           case Command of
             pcInclude, pcInsert..pcEndSub, pcReDim:
-              RaiseError(Format(SDirectiveCannotBeInline,
+              RaiseError(InnoFormat(SDirectiveCannotBeInline,
                 [PreprocCommands[Command]]));
             pcEmit, pcEnv, pcFile:
               begin
@@ -573,7 +584,7 @@ function TPreprocessor.ProcessPreprocCommand(Command: TPreprocessorCommand;
   begin
     Parser.NextTokenExpect([tkIdent]);
     for Result := Low(ScopeClauses) to High(ScopeClauses) do
-      if CompareText(Parser.TokenString, ScopeClauses[Result]) = 0 then
+      if InnoCompareText(Parser.TokenString, ScopeClauses[Result]) = 0 then
       begin
         Parser.NextTokenExpect(ExpectedTokens);
         Exit;
@@ -639,7 +650,8 @@ function TPreprocessor.ProcessPreprocCommand(Command: TPreprocessorCommand;
     IsMacroDefine: Boolean;
     ParamList: PParamList;
     AExpr: string;
-    VarIndex: Integer;
+    VarIndex, AParamCount: Integer;
+    IndexSpecified: Boolean;
     Scope: TDefineScope;
     MacroExprPos: TExprPosition;
 
@@ -661,11 +673,11 @@ function TPreprocessor.ProcessPreprocCommand(Command: TPreprocessorCommand;
       if IsMacroDefine then
       begin
         NextToken;
-        const AParamCount = ParseFormalParams(Parser, ParamList);
+        AParamCount := ParseFormalParams(Parser, ParamList);
         try
           while CharInSet(FExpr^, [#1..#32]) do Inc(FExpr);
           P := FExpr;
-          MacroExprPos.FileName := FIncludes[FCurrentFile];
+          MacroExprPos.FileName := FromNativeText(FIncludes[FCurrentFile]);
           MacroExprPos.Line := FCurrentLine;
           MacroExprPos.Column := Integer((FExpr - Start) + ParamsOffset);
           while P^ <> #0 do Inc(P);
@@ -682,7 +694,7 @@ function TPreprocessor.ProcessPreprocCommand(Command: TPreprocessorCommand;
       else
       begin
         VarIndex := -1;
-        const IndexSpecified = PeekAtNextToken = tkOpenBracket;
+        IndexSpecified := PeekAtNextToken = tkOpenBracket;
         if IndexSpecified then
         begin
           NextToken;
@@ -852,16 +864,23 @@ function TPreprocessor.ProcessPreprocCommand(Command: TPreprocessorCommand;
   function DoFile(FileName: string): string;
 
     function GetTempFileName(const Original: string): string;
+    {$IFDEF MSWINDOWS}
     var
       Path: string;
     begin
       SetLength(Path, MAX_PATH);
-      SetLength(Path, GetTempPath(MAX_PATH, PChar(Path)));
+      SetLength(Path, GetTempPathW(MAX_PATH, PWideChar(Path)));
       SetLength(Result, MAX_PATH);
-      if Windows.GetTempFileName(PChar(Path), PChar(UpperCase(Original)), 0, PChar(Result)) <> 0 then
+      if Windows.GetTempFileNameW(PWideChar(Path), PWideChar(UpperCase(Original)), 0, PWideChar(Result)) <> 0 then
         SetLength(Result, StrLen(PChar(Result)))
       else
         RaiseLastOSError;
+    {$ELSE}
+    begin
+      Result := UTF8Decode(SysUtils.GetTempFileName('', 'isp'));
+      if Result = '' then
+        RaiseLastOSError;
+    {$ENDIF}
     end;
 
   var
@@ -871,7 +890,7 @@ function TPreprocessor.ProcessPreprocCommand(Command: TPreprocessorCommand;
     NewOptions: TIsppOptions;
   begin
     FileName := PrependDirName(FileName, FSourcePath);
-    if FileExists(FileName) then
+    if FileExists({$IFDEF MSWINDOWS}FileName{$ELSE}UTF8Encode(FileName){$ENDIF}) then
     begin
       Result := GetTempFileName(PathExtractName(FileName));
       QueueFileForDeletion(Result);
@@ -897,7 +916,7 @@ function TPreprocessor.ProcessPreprocCommand(Command: TPreprocessorCommand;
       end;
     end
     else
-      RaiseError(Format(SFileNotFound, [FileName]));
+      RaiseError(InnoFormat(SFileNotFound, [FileName]));
   end;
 
   procedure ParseFor(Parser: TParserAccess);
@@ -931,7 +950,7 @@ function TPreprocessor.ProcessPreprocCommand(Command: TPreprocessorCommand;
   procedure BeginInsert(LineNo: Integer);
   begin
     if LineNo > FOutput.Count then
-      RaiseError(Format(SInsertLineNoTooBig, [LineNo]));
+      RaiseError(InnoFormat(SInsertLineNoTooBig, [LineNo]));
     FInsertionPoint := LineNo;
     VerboseMsg(2, SChangingInsertionPointToLine, [FInsertionPoint]);
   end;
@@ -952,7 +971,7 @@ function TPreprocessor.ProcessPreprocCommand(Command: TPreprocessorCommand;
     Parser.NextTokenExpect([tkIdent]);
     ProcName := Parser.TokenString;
     Parser.EndOfExpr;
-    FProcs.AddObject(ProcName, TStringList.Create);
+    FProcs.AddObject(ToNativeText(ProcName), TStringList.Create);
     EmitDestination.Add('#define private');
   end;
 
@@ -1001,7 +1020,7 @@ begin
           EndOfExpr;
         end;
       pcIfExist, pcIfNExist:
-        Result := FileExists(PrependDirName(StrExpr(False), FSourcePath)) xor (Command = pcIfNExist);
+        Result := FileExists({$IFNDEF MSWINDOWS}UTF8Encode({$ENDIF}PrependDirName(StrExpr(False), FSourcePath){$IFNDEF MSWINDOWS}){$ENDIF}) xor (Command = pcIfNExist);
       pcDefine: ParseDefine(Parser);
       pcDim: ParseDim(Parser, False);
       pcReDim: ParseDim(Parser, True);
@@ -1010,7 +1029,7 @@ begin
       pcErrorDir:
         begin
           { Also see ErrorFunc in IsppFuncs }
-          Params := Params.Trim;
+          Params := Trim(Params);
           if Params = '' then Params := 'Error';
           RaiseError(Params);
         end;
@@ -1041,6 +1060,7 @@ function TPreprocessor.InternalQueueLine(const LineRead: string;
   FileIndex, LineNo: Integer): Integer; //how many just been added
 var
   L: Integer;
+  QueuedLine: String;
 begin
   L := Length(LineRead);
   if (L >= 2) and (LineRead[L] = FOptions.SpanSymbol) and (LineRead[L - 1] <= #32) then
@@ -1053,7 +1073,7 @@ begin
     if FQueuedLineCount > 0 then
     begin
       { Clear the queue before adding the line because adding it may reenter }
-      const QueuedLine = FQueuedLine + TrimLeft(LineRead);
+      QueuedLine := FQueuedLine + TrimLeft(LineRead);
       Result := FQueuedLineCount + 1;
       FQueuedLine := '';
       FQueuedLineCount := 0;
@@ -1072,10 +1092,12 @@ begin
 end;
 
 procedure TPreprocessor.InternalFlushQueuedLine(FileIndex, LineNo: Integer);
+var
+  QueuedLine: String;
 begin
   if FQueuedLineCount > 0 then
   begin
-    const QueuedLine = FQueuedLine; { See above }
+    QueuedLine := FQueuedLine; { See above }
     FQueuedLine := '';
     FQueuedLineCount := 0;
     InternalAddLine(QueuedLine, FileIndex, LineNo);
@@ -1093,19 +1115,28 @@ begin
 end;
 
 procedure TPreprocessor.SaveToFile(const FileName: string);
+var
+  OldWriteBOM: Boolean;
 begin
-  var OldWriteBOM := FOutput.WriteBOM;
+  OldWriteBOM := FOutput.WriteBOM;
   try
     FOutput.WriteBOM := False;
-    FOutput.SaveToFile(FileName, TEncoding.UTF8);
+    FOutput.SaveToFile(ToNativeText(FileName), TEncoding.UTF8);
   finally
     FOutput.WriteBOM := OldWriteBOM;
   end;
 end;
 
+{$IFNDEF MSWINDOWS}
+function PathExpand(const Filename: String): String;
+begin
+  Result := UTF8Decode(ExpandFileName(UTF8Encode(Filename)));
+end;
+{$ENDIF}
+
 function TPreprocessor.CheckFile(const FileName: string): Boolean;
 begin
-  Result := FFileStack.IndexOf(PathExpand(FileName)) < 0;
+  Result := FFileStack.IndexOf(ToNativeText(PathExpand(FileName))) < 0;
 end;
 
 procedure TPreprocessor.PopFile;
@@ -1115,7 +1146,7 @@ end;
 
 procedure TPreprocessor.PushFile(const FileName: string);
 begin
-  FFileStack.AddObject(PathExpand(FileName), TObject(dsPublic));
+  FFileStack.AddObject(ToNativeText(PathExpand(FileName)), TObject(dsPublic));
 end;
 
 procedure TPreprocessor.CallIdleProc;
@@ -1132,7 +1163,7 @@ end;
 procedure TPreprocessor.VerboseMsg(Level: Integer; const Msg: string;
   const Args: array of const);
 begin
-  VerboseMsg(Level, Format(Msg, Args));
+  VerboseMsg(Level, InnoFormat(Msg, Args));
 end;
 
 procedure TPreprocessor.StatusMsg(const Msg: string);
@@ -1142,7 +1173,7 @@ end;
 
 procedure TPreprocessor.StatusMsg(const Msg: string; const Args: array of const);
 begin
-  StatusMsg(Format(Msg, Args));
+  StatusMsg(InnoFormat(Msg, Args));
 end;
 
 procedure TPreprocessor.WarningMsg(const Msg: string);
@@ -1152,7 +1183,7 @@ end;
 
 procedure TPreprocessor.WarningMsg(const Msg: string; const Args: array of const);
 begin
-  WarningMsg(Format(Msg, Args));
+  WarningMsg(InnoFormat(Msg, Args));
 end;
 
 procedure TPreprocessor.SendMsg(Msg: string; Typ: TIsppMessageType);
@@ -1160,16 +1191,17 @@ const
   MsgPrefixes: array[TIsppMessageType] of string = ('', 'Warning: ');
 var
   FileName: String;
+  LineNumber: Integer;
 begin
   Msg := MsgPrefixes[Typ] + Msg;
 
-  const LineNumber = GetLineNumber(-1);
+  LineNumber := GetLineNumber(-1);
   if LineNumber <> 0 then begin
     FileName := GetFileName(-1);
     if FileName <> '' then
-      Msg := Format('Line %d of %s: %s', [LineNumber, PathExtractName(FileName), Msg])
+      Msg := InnoFormat('Line %d of %s: %s', [LineNumber, PathExtractName(FileName), Msg])
     else
-      Msg := Format('Line %d: %s', [LineNumber, Msg]);
+      Msg := InnoFormat('Line %d: %s', [LineNumber, Msg]);
   end;
 
   FCompilerParams.StatusProc(FCompilerParams.CompilerData, PChar(Msg), Typ = imtWarning);
@@ -1191,10 +1223,11 @@ end;
 procedure TPreprocessor.ExecProc(Body: TStrings);
 var
   I: Integer;
+  PackedLocation: NativeUInt;
 begin
   for I := 0 to Body.Count - 1 do begin
-    const PackedLocation = NativeUInt(Body.Objects[I]);
-    InternalAddLine(Body[I], Integer(PackedLocation and $FFFF),
+    PackedLocation := NativeUInt(Body.Objects[I]);
+    InternalAddLine(FromNativeText(Body[I]), Integer(PackedLocation and $FFFF),
       Integer(PackedLocation shr 16) - 1);
   end;
 end;
@@ -1268,6 +1301,8 @@ begin
 end;
 
 function TConditionalTranslationStack.Include: Boolean;
+var
+  I: Integer;
 begin
   if FCacheValid then
     Result := FCache
@@ -1276,7 +1311,7 @@ begin
     if Count > 0 then begin
       Result := False;
       FCache := False;
-      for var I := Count - 1 downto 0 do
+      for I := Count - 1 downto 0 do
         if not TConditionalBlockInfo(List[I]).BlockState then
           Exit;
     end;
@@ -1286,8 +1321,10 @@ begin
 end;
 
 function TConditionalTranslationStack.OuterInclude: Boolean;
+var
+  I: Integer;
 begin
-  for var I := Count - 2 downto 0 do
+  for I := Count - 2 downto 0 do
     if not TConditionalBlockInfo(List[I]).BlockState then
       Exit(False);
   Result := True;
@@ -1340,7 +1377,7 @@ begin
   Result := -1;
 end;
 
-function TPreprocessor.QueryInterface(const IID: TGUID; out Obj): HRESULT;
+function TPreprocessor.QueryInterface({$IFDEF FPC}constref{$ELSE}const{$ENDIF} IID: TGUID; out Obj): HRESULT;
 begin
   if GetInterface(IID, Obj) then Result := 0 else Result := E_NOINTERFACE
 end;
@@ -1405,6 +1442,7 @@ end;
 
 function TCounterCallContext.Call: TIsppVariant;
 begin
+  Result := NULL;
   MakeInt(Result, FCounter^);
   Inc(FCounter^);
 end;
@@ -1441,7 +1479,7 @@ var
 begin
   Result := True;
   for I := Low(AlwaysDefined) to High(AlwaysDefined) do
-    if CompareText(AlwaysDefined[I], Name) = 0 then Exit;
+    if InnoCompareText(AlwaysDefined[I], Name) = 0 then Exit;
   Result := False;
 end;
 
@@ -1451,7 +1489,7 @@ const
 function TPreprocessor.Defined(const Name: String): Boolean;
 begin
   Result := LookupAlwaysDefined(Name) or LookupPredefined(Name, nil) or
-    (CompareText(Name, SCounter) = 0) or FIdentManager.Defined(Name);
+    (InnoCompareText(Name, SCounter) = 0) or FIdentManager.Defined(Name);
 end;
 
 function TPreprocessor.GetIdent(const Name: String;
@@ -1461,7 +1499,7 @@ var
   I: Integer;
 begin
   Result := itVariable;
-  I := FProcs.IndexOf(Name);
+  I := FProcs.IndexOf(ToNativeText(Name));
   if I >= 0 then
   begin
     Result := itFunc;
@@ -1474,7 +1512,7 @@ begin
       if LookupPredefined(Name, @V) then
         CallContext := TPredefinedVarCallContext.Create(V)
       else
-        if CompareText(Name, SCounter) = 0 then
+        if InnoCompareText(Name, SCounter) = 0 then
           CallContext := TCounterCallContext.Create(@FCounter)
         else
           Result := FIdentManager.GetIdent(Name, CallContext)
@@ -1495,7 +1533,7 @@ begin
         Result := TYPE_NULL
       end
     else
-      if CompareText(Name, SCounter) = 0 then
+      if InnoCompareText(Name, SCounter) = 0 then
         Result := TYPE_INTEGER
       else
         Result := FIdentManager.TypeOf(Name)
@@ -1508,15 +1546,15 @@ begin
   Name := UpperCase(Name);
   if (Name = '__FILENAME__') or (Name = '__FILE__') then
   begin
-    if Value <> nil then MakeStr(Value^, PathExtractName(FIncludes[FCurrentFile]))
+    if Value <> nil then MakeStr(Value^, PathExtractName(FromNativeText(FIncludes[FCurrentFile])))
   end
   else if Name = '__PATHFILENAME__' then
   begin
-    if Value <> nil then MakeStr(Value^, FIncludes[FCurrentFile])
+    if Value <> nil then MakeStr(Value^, FromNativeText(FIncludes[FCurrentFile]))
   end
   else if Name = '__DIR__' then
   begin
-    if Value <> nil then MakeStr(Value^, PathExtractDir(FIncludes[FCurrentFile]))
+    if Value <> nil then MakeStr(Value^, PathExtractDir(FromNativeText(FIncludes[FCurrentFile])))
   end
   else if Name = '__LINE__' then
   begin
@@ -1560,10 +1598,12 @@ begin
 end;
 
 procedure TPreprocessor.UncollectGarbage(Item: Pointer);
+var
+  I: Integer;
 begin
   if FGarbageCollection = nil then
     Exit;
-  for var I := 0 to FGarbageCollection.Count div 2 - 1 do
+  for I := 0 to FGarbageCollection.Count div 2 - 1 do
     if FGarbageCollection.Items[I * 2] = Item then begin
       FGarbageCollection.Items[I * 2] := nil;
       FGarbageCollection.Items[I * 2 + 1] := nil;
@@ -1577,10 +1617,11 @@ procedure TPreprocessor.DropGarbage;
 var
   Proc: TDropGarbageProc;
   Item: Pointer;
+  I: Integer;
 begin
   if FGarbageCollection <> nil then
   try
-    for var I := 0 to FGarbageCollection.Count div 2 - 1 do begin
+    for I := 0 to FGarbageCollection.Count div 2 - 1 do begin
       Item := FGarbageCollection.Items[I * 2];
       Proc := FGarbageCollection.Items[I * 2 + 1];
       try
@@ -1595,7 +1636,7 @@ begin
             try
               TObject(Item).Free
             except
-              try Dispose(Item) except end;
+              try FreeMem(Item) except end;
             end;
           end;
       finally
@@ -1644,15 +1685,42 @@ procedure TPreprocessor.IncludeFile(FileName: string;
   end;
 
   function DoSearch(const SearchDirs: String): String;
+  {$IFDEF MSWINDOWS}
+  var
+    {$IFNDEF FPC}FilePart: PWideChar;{$ENDIF}
+    Res: DWORD;
   begin
     SetLength(Result, MAX_PATH);
-    var FilePart: PChar;
-    var Res: DWORD;
     repeat
       { SearchPath was tested to support extended-length paths }
-      Res := SearchPath(PChar(SearchDirs), PChar(FileName), nil, ULength(Result),
-        PChar(Result), FilePart);
+      Res := SearchPathW(PWideChar(SearchDirs), PWideChar(FileName), nil, ULength(Result),
+        PWideChar(Result), {$IFDEF FPC}nil{$ELSE}FilePart{$ENDIF});
     until AdjustLength(Result, Res);
+  {$ELSE}
+  var
+    Remaining, Candidate, Directory: String;
+    Separator: Integer;
+  begin
+    Result := '';
+    if (FileName <> '') and (FileName[1] = '/') then begin
+      if FileExists(UTF8Encode(FileName)) then
+        Result := FileName;
+      Exit;
+    end;
+    Remaining := SearchDirs;
+    while Remaining <> '' do begin
+      Separator := Pos(';', Remaining);
+      if Separator = 0 then
+        Separator := Length(Remaining) + 1;
+      Directory := Copy(Remaining, 1, Separator - 1);
+      Delete(Remaining, 1, Separator);
+      if Directory <> '' then begin
+        Candidate := UTF8Decode(IncludeTrailingPathDelimiter(UTF8Encode(Directory))) + FileName;
+        if FileExists(UTF8Encode(Candidate)) then
+          Exit(Candidate);
+      end;
+    end;
+  {$ENDIF}
   end;
 
 var
@@ -1661,6 +1729,7 @@ var
   FileIndex: Integer;
   LineText: PChar;
   LineTextStr: string;
+  I, J: Integer;
 begin
   if ResetCurrentFile then begin
     FCurrentFile := 0;
@@ -1674,7 +1743,7 @@ begin
   begin
     { Make filenames beginning with '.\' and '..\' relative to the directory
       containing the current file }
-    CurPath := PathExtractPath(FIncludes[FCurrentFile]);
+    CurPath := PathExtractPath(FromNativeText(FIncludes[FCurrentFile]));
     if CurPath = '' then
       CurPath := FSourcePath;
     FileName := PathCombine(CurPath, FileName);
@@ -1683,10 +1752,10 @@ begin
   begin
     if not UseIncludePathOnly then
     begin
-      for var I := FFileStack.Count - 1 downto 0 do
-        AddToPath(SearchDirs, PathExtractDir(FFileStack[I]));
-      if FIncludes[0] <> '' then
-        AddToPath(SearchDirs, PathExtractDir(FIncludes[0]));
+      for I := FFileStack.Count - 1 downto 0 do
+        AddToPath(SearchDirs, PathExtractDir(FromNativeText(FFileStack[I])));
+      if Length(FIncludes[0]) <> 0 then
+        AddToPath(SearchDirs, PathExtractDir(FromNativeText(FIncludes[0])));
       AddToPath(SearchDirs, RemoveBackslashUnlessRoot(FSourcePath));
     end;
 
@@ -1702,7 +1771,7 @@ begin
   if FullFileName <> '' then
   begin
     if not CheckFile(FullFileName) then
-      RaiseError(Format(SFileIsAlreadyBeingIncluded, [FullFileName]));
+      RaiseError(InnoFormat(SFileIsAlreadyBeingIncluded, [FullFileName]));
     if not Builtins then
       StatusMsg(SIncludingFile, [FullFileName]);
     PushFile(FullFileName);
@@ -1711,11 +1780,11 @@ begin
         PChar(FullFileName), PChar(GetFileName(-1)), GetLineNumber(-1), 0);
       if FileHandle < 0 then
         RaiseError('LoadFileProc failed');
-      FileIndex := FIncludes.Add(FullFileName);
+      FileIndex := FIncludes.Add(ToNativeText(FullFileName));
       FIdentManager.BeginLocal;
       try
-        var I := 0;
-        var J := 0;
+        I := 0;
+        J := 0;
         while True do
         begin
           LineText := FCompilerParams.LineInProc(FCompilerParams.CompilerData,
@@ -1735,7 +1804,7 @@ begin
     end;
   end
   else
-    RaiseError(Format(SFileNotFound, [FileName]));
+    RaiseError(InnoFormat(SFileNotFound, [FileName]));
 end;
 
 // ParseFormalParams
@@ -1758,6 +1827,9 @@ function TPreprocessor.ParseFormalParams(Parser: TParser;
     FillChar(ParamList^[Result], NewCapacity - OldCapacity, 0)
   end;
 
+var
+  Param: TIsppMacroParam;
+  Ident: String;
 begin
   with Parser do
   begin
@@ -1766,10 +1838,10 @@ begin
     try
       while not (PeekAtNextToken in [tkEOF, tkCloseParen]) do
       begin
-        var Param := Default(TIsppMacroParam);
+        Param := Default(TIsppMacroParam);
         if NextTokenExpect([tkIdent, opMul]) = tkIdent then
         begin
-          var Ident := TokenString;
+          Ident := TokenString;
           if not (PeekAtNextToken in [tkEOF, tkComma, tkCloseParen, opAssign]) then
           begin
             Ident := UpperCase(Ident);
@@ -1782,7 +1854,7 @@ begin
             end else if Ident = 'ARRAY' then begin
               Param.DefValue.Typ := evCallContext;
               Include(Param.ParamFlags, pfArray)
-            end else RaiseError(Format(SInvalidTypeId, [Ident]));
+            end else RaiseError(InnoFormat(SInvalidTypeId, [Ident]));
             if Param.DefValue.Typ <> evSpecial then
               Include(Param.ParamFlags, pfTypeDefined);
             if NextTokenExpect([tkIdent, opMul]) = opMul then
@@ -1797,7 +1869,7 @@ begin
           Include(Param.ParamFlags, pfByRef);
           NextTokenExpect([tkIdent]);
         end;
-        const Ident = TokenString;
+        Ident := TokenString;
         Param.Name := CheckReservedIdent(Ident);
         if PeekAtNextToken = opAssign then
         begin
@@ -1843,9 +1915,11 @@ begin
 end;
 
 function TProcCallContext.Call: TIsppVariant;
+var
+  SavedScope: TDefineScope;
 begin
   EnsureLocals;
-  const SavedScope = FPreproc.GetDefaultScope;
+  SavedScope := FPreproc.GetDefaultScope;
   try
     FPreproc.ExecProc(FBody);
   finally
@@ -1881,10 +1955,12 @@ begin
 end;
 
 procedure TProcCallContext.EnsureLocals;
+var
+  ReDim: Boolean;
 begin
   if not FLocalsEnsured then begin
     FPreproc.FIdentManager.BeginLocal;
-    var ReDim := False;
+    ReDim := False;
     FPreproc.FIdentManager.DimVariable(SLocal, 16, dsPrivate, ReDim);
     FLocalsEnsured := True;
   end;

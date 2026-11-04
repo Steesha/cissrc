@@ -20,7 +20,7 @@ implementation
 
 uses
   Windows,
-  Forms, SysUtils, Classes, Graphics, ActiveX, Generics.Collections, Math,
+  Forms, {$IFDEF FPC}Controls,{$ENDIF} SysUtils, Classes, Graphics, ActiveX, Generics.Collections, Math,
   uPSUtils, PathFunc, ISSigFunc, BrowseFunc, MD5, SHA1, SHA256, BitmapButton, BitmapImage,
   PSStackHelper, UnsignedFunc,
   Shared.Struct, Setup.WizardForm.CustomPages, Setup.MainFunc, Shared.CommonFunc.Vcl,
@@ -34,7 +34,7 @@ uses
   Setup.DebugClient, Shared.ScriptFunc, Setup.ScriptFunc.HelperFunc, Setup.PathRedir;
 
 type
-  TScriptFunc = reference to procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+  TScriptFunc = procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
 
   TScriptFuncTyp = (sfNormal, sfNoUninstall, sfOnlyUninstall);
 
@@ -91,11 +91,2412 @@ end;
 
 { Called by ROPS }
 function ScriptFuncPSProc(Caller: TPSExec; Proc: TPSExternalProcRec; Global, Stack: TPSStack): Boolean;
+var
+  ScriptFuncEx: TScriptFuncEx;
 begin
-  var ScriptFuncEx: TScriptFuncEx;
   Result := ScriptFuncs.TryGetValue(Proc.Name, ScriptFuncEx);
   if Result then
     ScriptFuncEx.Run(Caller, Stack);
+end;
+
+procedure ScriptPageFromID(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetClass(PStart, GetWizardForm.PageFromID(Stack.GetInt(PStart-1)));
+end;
+
+procedure ScriptPageIndexFromID(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetNativeInt(PStart, GetWizardForm.PageIndexFromID(Stack.GetInt(PStart-1)));
+end;
+
+procedure ScriptCreateCustomPage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewPage: TWizardPage;
+begin
+  NewPage := TWizardPage.Create(GetWizardForm);
+  try
+    NewPage.Caption := Stack.GetString(PStart-2);
+    NewPage.Description := Stack.GetString(PStart-3);
+    GetWizardForm.AddPage(NewPage, Stack.GetInt(PStart-1));
+  except
+    NewPage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewPage);
+end;
+
+procedure ScriptCreateInputQueryPage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewInputQueryPage: TInputQueryWizardPage;
+begin
+  NewInputQueryPage := TInputQueryWizardPage.Create(GetWizardForm);
+  try
+    NewInputQueryPage.Caption := Stack.GetString(PStart-2);
+    NewInputQueryPage.Description := Stack.GetString(PStart-3);
+    GetWizardForm.AddPage(NewInputQueryPage, Stack.GetInt(PStart-1));
+    NewInputQueryPage.Initialize(Stack.GetString(PStart-4));
+  except
+    NewInputQueryPage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewInputQueryPage);
+end;
+
+procedure ScriptCreateInputOptionPage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewInputOptionPage: TInputOptionWizardPage;
+begin
+  NewInputOptionPage := TInputOptionWizardPage.Create(GetWizardForm);
+  try
+    NewInputOptionPage.Caption := Stack.GetString(PStart-2);
+    NewInputOptionPage.Description := Stack.GetString(PStart-3);
+    GetWizardForm.AddPage(NewInputOptionPage, Stack.GetInt(PStart-1));
+    NewInputOptionPage.Initialize(Stack.GetString(PStart-4),
+      Stack.GetBool(PStart-5), Stack.GetBool(PStart-6));
+  except
+    NewInputOptionPage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewInputOptionPage);
+end;
+
+procedure ScriptCreateInputDirPage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewInputDirPage: TInputDirWizardPage;
+begin
+  NewInputDirPage := TInputDirWizardPage.Create(GetWizardForm);
+  try
+    NewInputDirPage.Caption := Stack.GetString(PStart-2);
+    NewInputDirPage.Description := Stack.GetString(PStart-3);
+    GetWizardForm.AddPage(NewInputDirPage, Stack.GetInt(PStart-1));
+    NewInputDirPage.Initialize(Stack.GetString(PStart-4), Stack.GetBool(PStart-5),
+       Stack.GetString(PStart-6));
+  except
+    NewInputDirPage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewInputDirPage);
+end;
+
+procedure ScriptCreateInputFilePage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewInputFilePage: TInputFileWizardPage;
+begin
+  NewInputFilePage := TInputFileWizardPage.Create(GetWizardForm);
+  try
+    NewInputFilePage.Caption := Stack.GetString(PStart-2);
+    NewInputFilePage.Description := Stack.GetString(PStart-3);
+    GetWizardForm.AddPage(NewInputFilePage, Stack.GetInt(PStart-1));
+    NewInputFilePage.Initialize(Stack.GetString(PStart-4));
+  except
+    NewInputFilePage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewInputFilePage);
+end;
+
+procedure ScriptCreateOutputMsgPage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewOutputMsgPage: TOutputMsgWizardPage;
+begin
+  NewOutputMsgPage := TOutputMsgWizardPage.Create(GetWizardForm);
+  try
+    NewOutputMsgPage.Caption := Stack.GetString(PStart-2);
+    NewOutputMsgPage.Description := Stack.GetString(PStart-3);
+    GetWizardForm.AddPage(NewOutputMsgPage, Stack.GetInt(PStart-1));
+    NewOutputMsgPage.Initialize(Stack.GetString(PStart-4));
+  except
+    NewOutputMsgPage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewOutputMsgPage);
+end;
+
+procedure ScriptCreateOutputMsgMemoPage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewOutputMsgMemoPage: TOutputMsgMemoWizardPage;
+begin
+  NewOutputMsgMemoPage := TOutputMsgMemoWizardPage.Create(GetWizardForm);
+  try
+    NewOutputMsgMemoPage.Caption := Stack.GetString(PStart-2);
+    NewOutputMsgMemoPage.Description := Stack.GetString(PStart-3);
+    GetWizardForm.AddPage(NewOutputMsgMemoPage, Stack.GetInt(PStart-1));
+    NewOutputMsgMemoPage.Initialize(Stack.GetString(PStart-4),
+       Stack.GetAnsiString(PStart-5));
+  except
+    NewOutputMsgMemoPage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewOutputMsgMemoPage);
+end;
+
+procedure ScriptCreateOutputProgressPage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewOutputProgressPage: TOutputProgressWizardPage;
+begin
+  NewOutputProgressPage := TOutputProgressWizardPage.Create(GetWizardForm);
+  try
+    NewOutputProgressPage.Caption := Stack.GetString(PStart-1);
+    NewOutputProgressPage.Description := Stack.GetString(PStart-2);
+    GetWizardForm.AddPage(NewOutputProgressPage, -1);
+    NewOutputProgressPage.Initialize;
+  except
+    NewOutputProgressPage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewOutputProgressPage);
+end;
+
+procedure ScriptCreateOutputMarqueeProgressPage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewOutputMarqueeProgressPage: TOutputMarqueeProgressWizardPage;
+begin
+  NewOutputMarqueeProgressPage := TOutputMarqueeProgressWizardPage.Create(GetWizardForm);
+  try
+    NewOutputMarqueeProgressPage.Caption := Stack.GetString(PStart-1);
+    NewOutputMarqueeProgressPage.Description := Stack.GetString(PStart-2);
+    GetWizardForm.AddPage(NewOutputMarqueeProgressPage, -1);
+    NewOutputMarqueeProgressPage.Initialize;
+  except
+    NewOutputMarqueeProgressPage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewOutputMarqueeProgressPage);
+end;
+
+procedure ScriptCreateDownloadPage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewDownloadPage: TDownloadWizardPage;
+begin
+  NewDownloadPage := TDownloadWizardPage.Create(GetWizardForm);
+  try
+    NewDownloadPage.Caption := Stack.GetString(PStart-1);
+    NewDownloadPage.Description := Stack.GetString(PStart-2);
+    GetWizardForm.AddPage(NewDownloadPage, -1);
+    NewDownloadPage.Initialize;
+    NewDownloadPage.OnDownloadProgress := TOnDownloadProgress(Stack.GetProc(PStart-3, Caller));
+  except
+    NewDownloadPage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewDownloadPage);
+end;
+
+procedure ScriptCreateExtractionPage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewExtractionPage: TExtractionWizardPage;
+begin
+  NewExtractionPage := TExtractionWizardPage.Create(GetWizardForm);
+  try
+    NewExtractionPage.Caption := Stack.GetString(PStart-1);
+    NewExtractionPage.Description := Stack.GetString(PStart-2);
+    GetWizardForm.AddPage(NewExtractionPage, -1);
+    NewExtractionPage.Initialize;
+    NewExtractionPage.OnExtractionProgress := TOnExtractionProgress(Stack.GetProc(PStart-3, Caller));
+  except
+    NewExtractionPage.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewExtractionPage);
+end;
+
+procedure ScriptSCALEX(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  InitializeScaleBaseUnits;
+  Stack.SetInt(PStart, TSetupForm.ScalePixelsX(OrigScaleBaseUnitX, ScaleBaseUnitX, Stack.GetInt(PStart-1)));
+end;
+
+procedure ScriptSCALEY(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  InitializeScaleBaseUnits;
+  Stack.SetInt(PStart, TSetupForm.ScalePixelsY(OrigScaleBaseUnitY, ScaleBaseUnitY, Stack.GetInt(PStart-1)));
+end;
+
+procedure ScriptCREATECUSTOMFORM(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  NewSetupForm: TSetupForm;
+begin
+  NewSetupForm := TSetupForm.CreateNew(nil);
+  try
+    NewSetupForm.PopupMode := pmAuto;
+    NewSetupForm.AutoScroll := False;
+    NewSetupForm.BorderStyle := {$IFDEF FPC}Controls.{$ENDIF}bsDialog;
+    NewSetupForm.ClientWidth := Stack.GetInt(PStart-1);
+    NewSetupForm.ClientHeight := Stack.GetInt(PStart-2);
+    NewSetupForm.InitializeFont(Stack.GetBool(PStart-3), Stack.GetBool(PStart-4));
+  except
+    NewSetupForm.Free;
+    raise;
+  end;
+  Stack.SetClass(PStart, NewSetupForm);
+end;
+
+procedure ScriptSELECTDISK(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: String;
+begin
+  S := Stack.GetString(PStart-3);
+  Stack.SetBool(PStart, SelectDisk(Stack.GetInt(PStart-1), Stack.GetString(PStart-2), S));
+  Stack.SetString(PStart-3, S);
+end;
+
+procedure ScriptBROWSEFORFOLDER(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: String;
+begin
+  S := Stack.GetString(PStart-2);
+  Stack.SetBool(PStart, BrowseForFolder(Stack.GetString(PStart-1), S, GetOwnerWndForMessageBox));
+  Stack.SetString(PStart-2, S);
+end;
+
+procedure ScriptGETOPENFILENAME(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: String;
+begin
+  S := Stack.GetString(PStart-2);
+  Stack.SetBool(PStart, NewGetOpenFileName(Stack.GetString(PStart-1), S, Stack.GetString(PStart-3), Stack.GetString(PStart-4), Stack.GetString(PStart-5), GetOwnerWndForMessageBox));
+  Stack.SetString(PStart-2, S);
+end;
+
+procedure ScriptGETOPENFILENAMEMULTI(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, NewGetOpenFileNameMulti(Stack.GetString(PStart-1), TStrings(Stack.GetClass(PStart-2)), Stack.GetString(PStart-3), Stack.GetString(PStart-4), Stack.GetString(PStart-5), GetOwnerWndForMessageBox));
+end;
+
+procedure ScriptGETSAVEFILENAME(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: String;
+begin
+  S := Stack.GetString(PStart-2);
+  Stack.SetBool(PStart, NewGetSaveFileName(Stack.GetString(PStart-1), S, Stack.GetString(PStart-3), Stack.GetString(PStart-4), Stack.GetString(PStart-5), GetOwnerWndForMessageBox));
+  Stack.SetString(PStart-2, S);
+end;
+
+procedure ScriptMINIMIZEPATHNAME(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, MinimizePathName(Stack.GetString(PStart-1), TFont(Stack.GetClass(PStart-2)), Stack.GetInt(PStart-3)));
+end;
+
+procedure ScriptFILEEXISTS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, NewFileExists(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptDIREXISTS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, DirExists(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptFILEORDIREXISTS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, FileOrDirExists(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptGETINISTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetIniString(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetString(PStart-3), Stack.GetString(PStart-4)));
+end;
+
+procedure ScriptGETINIINT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, GetIniInt(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetInt(PStart-3), Stack.GetInt(PStart-4), Stack.GetInt(PStart-5), Stack.GetString(PStart-6)));
+end;
+
+procedure ScriptGETINIBOOL(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, GetIniBool(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetBool(PStart-3), Stack.GetString(PStart-4)));
+end;
+
+procedure ScriptINIKEYEXISTS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IniKeyExists(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetString(PStart-3)));
+end;
+
+procedure ScriptISINISECTIONEMPTY(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsIniSectionEmpty(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptSETINISTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SetIniString(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetString(PStart-3), Stack.GetString(PStart-4)));
+end;
+
+procedure ScriptSETINIINT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SetIniInt(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetInt(PStart-3), Stack.GetString(PStart-4)));
+end;
+
+procedure ScriptSETINIBOOL(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SetIniBool(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetBool(PStart-3), Stack.GetString(PStart-4)));
+end;
+
+procedure ScriptDELETEINIENTRY(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  DeleteIniEntry(Stack.GetString(PStart), Stack.GetString(PStart-1), Stack.GetString(PStart-2));
+end;
+
+procedure ScriptDELETEINISECTION(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  DeleteIniSection(Stack.GetString(PStart), Stack.GetString(PStart-1));
+end;
+
+procedure ScriptGETENV(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetEnv(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptGETCMDTAIL(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetCmdTail);
+end;
+
+procedure ScriptPARAMCOUNT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  if NewParamsForCode.Count = 0 then
+    InternalError('NewParamsForCode not set');
+  Stack.SetInt(PStart, NewParamsForCode.Count-1);
+end;
+
+procedure ScriptPARAMSTR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  I: Integer;
+begin
+  I := Stack.GetInt(PStart-1);
+  if (I >= 0) and (I < NewParamsForCode.Count) then
+    Stack.SetString(PStart, NewParamsForCode[I])
+  else
+    Stack.SetString(PStart, '');
+end;
+
+procedure ScriptADDQUOTES(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, AddQuotes(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptREMOVEQUOTES(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, RemoveQuotes(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptGETSHORTNAME(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetShortName(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptGETWINDIR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetWinDir);
+end;
+
+procedure ScriptGETSYSTEMDIR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetSystemDir);
+end;
+
+procedure ScriptGETSYSWOW64DIR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetSysWow64Dir);
+end;
+
+procedure ScriptGETSYSNATIVEDIR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetSysNativeDir(IsWin64));
+end;
+
+procedure ScriptGETTEMPDIR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetTempDir);
+end;
+
+procedure ScriptSTRINGCHANGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: String;
+begin
+  S := Stack.GetString(PStart-1);
+  Stack.SetInt(PStart, StringChange(S, Stack.GetString(PStart-2), Stack.GetString(PStart-3)));
+  Stack.SetString(PStart-1, S);
+end;
+
+procedure ScriptSTRINGCHANGEEX(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: String;
+begin
+  S := Stack.GetString(PStart-1);
+  Stack.SetInt(PStart, StringChangeEx(S, Stack.GetString(PStart-2), Stack.GetString(PStart-3), Stack.GetBool(PStart-4)));
+  Stack.SetString(PStart-1, S);
+end;
+
+procedure ScriptUSINGWINNT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, True);
+end;
+
+procedure ScriptCOPYFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  ExistingFilename: String;
+begin
+  ExistingFilename := Stack.GetString(PStart-1);
+  if not IsProtectedSrcExe(ExistingFilename) then
+    Stack.SetBool(PStart, CopyFileW(PChar(ExistingFilename), PChar(Stack.GetString(PStart-2)), Stack.GetBool(PStart-3)))
+  else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptCONVERTPERCENTSTR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: String;
+begin
+  S := Stack.GetString(PStart-1);
+  Stack.SetBool(PStart, ConvertPercentStr(S));
+  Stack.SetString(PStart-1, S);
+end;
+
+procedure ScriptREGKEYEXISTS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  SubKeyName: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
+    Stack.SetBool(PStart, True);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGVALUEEXISTS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  SubKeyName: String;
+  ValueName: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    Stack.SetBool(PStart, RegValueExists(K, PChar(ValueName)));
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGDELETEKEYINCLUDINGSUBKEYS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  SubKey: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKey := Stack.GetString(PStart-2);
+  Stack.SetBool(PStart, RegDeleteKeyIncludingSubkeys(RegView, RootKey, PChar(SubKey)) = ERROR_SUCCESS);
+end;
+
+procedure ScriptREGDELETEKEYIFEMPTY(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  SubKeyName: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  Stack.SetBool(PStart, RegDeleteKeyIfEmpty(RegView, RootKey, PChar(SubKeyName)) = ERROR_SUCCESS);
+end;
+
+procedure ScriptREGDELETEVALUE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  SubKeyName: String;
+  ValueName: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_SET_VALUE, K) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    Stack.SetBool(PStart, RegDeleteValueW(K, PChar(ValueName)) = ERROR_SUCCESS);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGGETSUBKEYNAMES(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  Stack.SetBool(PStart, GetSubkeyOrValueNames(RegView, RootKey,
+    Stack.GetString(PStart-2), Stack, PStart-3, True));
+end;
+
+procedure ScriptREGGETVALUENAMES(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  Stack.SetBool(PStart, GetSubkeyOrValueNames(RegView, RootKey,
+    Stack.GetString(PStart-2), Stack, PStart-3, False));
+end;
+
+procedure ScriptREGQUERYSTRINGVALUE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  SubKeyName: String;
+  ValueName: String;
+  S: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    S := Stack.GetString(PStart-4);
+    Stack.SetBool(PStart, RegQueryStringValue(K, PChar(ValueName), S));
+    Stack.SetString(PStart-4, S);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGQUERYMULTISTRINGVALUE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  SubKeyName: String;
+  ValueName: String;
+  S: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    S := Stack.GetString(PStart-4);
+    Stack.SetBool(PStart, RegQueryMultiStringValue(K, PChar(ValueName), S));
+    Stack.SetString(PStart-4, S);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGQUERYDWORDVALUE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  Typ: DWORD;
+  Data: DWORD;
+  Size: DWORD;
+  SubKeyName: String;
+  ValueName: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    Size := SizeOf(Data);
+    if (RegQueryValueExW(K, PChar(ValueName), nil, @Typ, PByte(@Data), @Size) = ERROR_SUCCESS) and (Typ = REG_DWORD) then begin
+      Stack.SetInt(PStart-4, Integer(Data));
+      Stack.SetBool(PStart, True);
+    end else
+      Stack.SetBool(PStart, False);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGQUERYBINARYVALUE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  Typ: DWORD;
+  Size: DWORD;
+  Data: AnsiString;
+  SubKeyName: String;
+  ValueName: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    if RegQueryValueExW(K, PChar(ValueName), nil, @Typ, nil, @Size) = ERROR_SUCCESS then begin
+      SetLength(Data, Size);
+      if RegQueryValueExW(K, PChar(ValueName), nil, @Typ, PByte(@Data[1]), @Size) = ERROR_SUCCESS then begin
+        Stack.SetAnsiString(PStart-4, Data);
+        Stack.SetBool(PStart, True);
+      end else
+        Stack.SetBool(PStart, False);
+    end else
+      Stack.SetBool(PStart, False);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGWRITESTRINGVALUE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  Typ: DWORD;
+  ExistingTyp: DWORD;
+  SubKeyName: String;
+  ValueName: String;
+  Data: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegCreateKeyExView(RegView, RootKey, PChar(SubKeyName), 0, nil, REG_OPTION_NON_VOLATILE, KEY_QUERY_VALUE or KEY_SET_VALUE, nil, K, nil) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    Data := Stack.GetString(PStart-4);
+    if (RegQueryValueExW(K, PChar(ValueName), nil, @ExistingTyp, nil, nil) = ERROR_SUCCESS) and (ExistingTyp = REG_EXPAND_SZ) then
+      Typ := REG_EXPAND_SZ
+    else
+      Typ := REG_SZ;
+    if RegSetValueExW(K, PChar(ValueName), 0, Typ, PChar(Data), (ULength(Data)+1)*SizeOf(Data[1])) = ERROR_SUCCESS then
+      Stack.SetBool(PStart, True)
+    else
+      Stack.SetBool(PStart, False);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGWRITEEXPANDSTRINGVALUE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  SubKeyName: String;
+  ValueName: String;
+  Data: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegCreateKeyExView(RegView, RootKey, PChar(SubKeyName), 0, nil, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nil, K, nil) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    Data := Stack.GetString(PStart-4);
+    if RegSetValueExW(K, PChar(ValueName), 0, REG_EXPAND_SZ, PByte(PWideChar(Data)), (ULength(Data)+1)*SizeOf(Data[1])) = ERROR_SUCCESS then
+      Stack.SetBool(PStart, True)
+    else
+      Stack.SetBool(PStart, False);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGWRITEMULTISTRINGVALUE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  SubKeyName: String;
+  ValueName: String;
+  Data: String;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegCreateKeyExView(RegView, RootKey, PChar(SubKeyName), 0, nil, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nil, K, nil) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    Data := Stack.GetString(PStart-4);
+    { Multi-string data requires two null terminators: one after the last
+      string, and one to mark the end.
+      Delphi's String type is implicitly null-terminated, so only one null
+      needs to be added to the end. }
+    if (Data <> '') and (Data[Length(Data)] <> #0) then
+      Data := Data + #0;
+    if RegSetValueExW(K, PChar(ValueName), 0, REG_MULTI_SZ, PByte(PWideChar(Data)), (ULength(Data)+1)*SizeOf(Data[1])) = ERROR_SUCCESS then
+      Stack.SetBool(PStart, True)
+    else
+      Stack.SetBool(PStart, False);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGWRITEDWORDVALUE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  SubKeyName: String;
+  ValueName: String;
+  Data: Cardinal;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegCreateKeyExView(RegView, RootKey, PChar(SubKeyName), 0, nil, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nil, K, nil) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    Data := Stack.GetUInt(PStart-4);
+    if RegSetValueExW(K, PChar(ValueName), 0, REG_DWORD, @Data, SizeOf(Data)) = ERROR_SUCCESS then
+      Stack.SetBool(PStart, True)
+    else
+      Stack.SetBool(PStart, False);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptREGWRITEBINARYVALUE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  RegView: TRegView;
+  RootKey: HKEY;
+  K: HKEY;
+  SubKeyName: String;
+  ValueName: String;
+  Data: AnsiString;
+begin
+  CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
+  SubKeyName := Stack.GetString(PStart-2);
+  if RegCreateKeyExView(RegView, RootKey, PChar(SubKeyName), 0, nil, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nil, K, nil) = ERROR_SUCCESS then begin
+    ValueName := Stack.GetString(PStart-3);
+    Data := Stack.GetAnsiString(PStart-4);
+    if RegSetValueExW(K, PChar(ValueName), 0, REG_BINARY, @Data[1], ULength(Data)) = ERROR_SUCCESS then
+      Stack.SetBool(PStart, True)
+    else
+      Stack.SetBool(PStart, False);
+    RegCloseKey(K);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptISADMIN(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsAdmin);
+end;
+
+procedure ScriptISPOWERUSERLOGGEDON(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsPowerUserLoggedOn);
+end;
+
+procedure ScriptISADMININSTALLMODE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsAdminInstallMode);
+end;
+
+procedure ScriptFONTEXISTS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, FontExists(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptGETUILANGUAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, GetUILanguage);
+end;
+
+procedure ScriptADDPERIOD(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, AddPeriod(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptSETNTFSCOMPRESSION(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SetNTFSCompression(Stack.GetString(PStart-1), Stack.GetBool(PStart-2)));
+end;
+
+procedure ScriptISWILDCARD(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsWildcard(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptWILDCARDMATCH(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: String;
+  N: String;
+begin
+  S := Stack.GetString(PStart-1);
+  N := Stack.GetString(PStart-2);
+  Stack.SetBool(PStart, WildcardMatch(PChar(S), PChar(N)));
+end;
+
+procedure ScriptHighContrastActive(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, HighContrastActive);
+end;
+
+procedure ScriptAddBackslash(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, AddBackslash(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptRemoveBackslash(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, RemoveBackslash(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptRemoveBackslashUnlessRoot(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, RemoveBackslashUnlessRoot(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptPathCombine(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathCombine(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptPathHasInvalidCharacters(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, PathHasInvalidCharacters(Stack.GetString(PStart-1), Stack.GetBool(PStart-2)));
+end;
+
+procedure ScriptPathIsRooted(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, PathIsRooted(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptPathNormalizeSlashes(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathNormalizeSlashes(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptPathSame(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, PathSame(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptPathStartsWith(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, PathStartsWith(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetBool(PStart-3)));
+end;
+
+procedure ScriptPathEndsWith(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, PathEndsWith(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetBool(PStart-3)));
+end;
+
+procedure ScriptPathConvertNormalToSuper(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathConvertNormalToSuper(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptPathConvertSuperToNormal(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathConvertSuperToNormal(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptCHARLENGTH(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, 1);
+end;
+
+procedure ScriptEXPANDFILENAME(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathExpand(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptEXTRACTFILEDIR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathExtractDir(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptEXTRACTFILEDRIVE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathExtractDrive(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptEXTRACTFILEEXT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathExtractExt(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptEXTRACTFILENAME(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathExtractName(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptEXTRACTFILEPATH(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathExtractPath(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptCHANGEFILEEXT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, PathChangeExt(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptExtractTemporaryFile(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  ExtractTemporaryFile(Stack.GetString(PStart));
+end;
+
+procedure ScriptExtractTemporaryFiles(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, ExtractTemporaryFiles(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptDownloadTemporaryFile(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Url: String;
+  ISSigUrl: String;
+  BaseName: String;
+  RequiredSHA256OfFile: String;
+  ISSigAllowedKeys: AnsiString;
+  OnDownloadProgress: TOnDownloadProgress;
+  ISSigVerify: Boolean;
+  Verification: TSetupFileVerification;
+  Throttler: TProgressThrottler;
+begin
+  ISSigVerify := OrgName = 'DownloadTemporaryFileWithISSigVerify';
+
+  if ISSigVerify then begin
+    Url := Stack.GetString(PStart-1);
+    ISSigUrl := Stack.GetString(PStart-2);
+    BaseName := Stack.GetString(PStart-3);
+    ISSigAllowedKeys := ConvertAllowedKeysRuntimeIDsToISSigAllowedKeys(TStringList(Stack.GetClass(PStart-4)));
+    OnDownloadProgress := TOnDownloadProgress(Stack.GetProc(PStart-5, Caller));
+  end else begin
+    Url := Stack.GetString(PStart-1);
+    BaseName := Stack.GetString(PStart-2);
+    RequiredSHA256OfFile := Stack.GetString(PStart-3);
+    OnDownloadProgress := TOnDownloadProgress(Stack.GetProc(PStart-4, Caller));
+  end;
+
+  Verification := NoVerification;
+  if RequiredSHA256OfFile <> '' then begin
+    Verification.Typ := fvHash;
+    Verification.Hash := SHA256DigestFromString(RequiredSHA256OfFile)
+  end else if ISSigVerify then begin
+    Verification.Typ := fvISSig;
+    Verification.ISSigAllowedKeys := ISSigAllowedKeys
+  end;
+
+  Throttler := TProgressThrottler.Create(OnDownloadProgress);
+  try
+    { Also see Setup.WizardForm.CustomPages TDownloadWizardPage.AddExWithISSigVerify }
+    if ISSigVerify then
+      DownloadTemporaryFile(GetISSigUrl(Url, ISSigUrl), BaseName + ISSigExt, NoVerification, Throttler.OnDownloadProgress, nil);
+    Throttler.Reset;
+    Stack.SetInt64(PStart, DownloadTemporaryFile(Url, BaseName, Verification, Throttler.OnDownloadProgress, nil));
+  finally
+    Throttler.Free;
+  end;
+end;
+
+procedure ScriptDownloadTemporaryFileSize(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt64(PStart, DownloadTemporaryFileSize(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptDownloadTemporaryFileDate(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, DownloadTemporaryFileDate(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptSetDownloadCredentials(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  SetDownloadTemporaryFileCredentials(Stack.GetString(PStart),Stack.GetString(PStart-1));
+end;
+
+procedure ScriptCHECKFORMUTEXES(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, CheckForMutexes(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptDECREMENTSHAREDCOUNT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, DecrementSharedCount(Stack.GetBool(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptDELAYDELETEFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  DelayDeleteFile(Stack.GetString(PStart), Stack.GetInt(PStart-1), 250, 250);
+end;
+
+procedure ScriptDELTREE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, DelTree(Stack.GetString(PStart-1), Stack.GetBool(PStart-2), True, Stack.GetBool(PStart-3), Stack.GetBool(PStart-4), False, nil, nil, nil));
+end;
+
+procedure ScriptGENERATEUNIQUENAME(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GenerateUniqueName(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptGETCOMPUTERNAMESTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetComputerNameString);
+end;
+
+procedure ScriptGETMD5OFFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, MD5DigestToString(GetMD5OfFile(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptGETMD5OFSTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, MD5DigestToString(GetMD5OfAnsiString(Stack.GetAnsiString(PStart-1))));
+end;
+
+procedure ScriptGETMD5OFUNICODESTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, MD5DigestToString(GetMD5OfUnicodeString(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptGETSHA1OFFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, SHA1DigestToString(GetSHA1OfFile(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptGETSHA1OFSTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, SHA1DigestToString(GetSHA1OfAnsiString(Stack.GetAnsiString(PStart-1))));
+end;
+
+procedure ScriptGETSHA1OFUNICODESTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, SHA1DigestToString(GetSHA1OfUnicodeString(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptGETSHA256OFFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, SHA256DigestToString(GetSHA256OfFile(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptGETSHA256OFSTREAM(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, SHA256DigestToString(ISSigCalcStreamHash(TStream(Stack.GetClass(PStart-1)))));
+end;
+
+procedure ScriptGETSHA256OFSTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, SHA256DigestToString(GetSHA256OfAnsiString(Stack.GetAnsiString(PStart-1))));
+end;
+
+procedure ScriptGETSHA256OFUNICODESTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, SHA256DigestToString(GetSHA256OfUnicodeString(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptGETSPACEONDISK(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  FreeBytes: Int64;
+  TotalBytes: Int64;
+  MaxBytes: Integer;
+begin
+  if GetSpaceOnDisk(Stack.GetString(PStart-1), FreeBytes, TotalBytes) then begin
+    if Stack.GetBool(PStart-2) then begin
+      FreeBytes := FreeBytes div (1024*1024);
+      TotalBytes := TotalBytes div (1024*1024);
+    end;
+    { Cap at 2 GB, as GetSpaceOnDisk doesn't use 64-bit integers }
+    MaxBytes := High(Int32);
+    if FreeBytes > MaxBytes then
+      FreeBytes := MaxBytes;
+    if TotalBytes > MaxBytes then
+      TotalBytes := MaxBytes;
+    Stack.SetUInt(PStart-3, Cardinal(FreeBytes));
+    Stack.SetUInt(PStart-4, Cardinal(TotalBytes));
+    Stack.SetBool(PStart, True);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptGETSPACEONDISK64(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  FreeBytes: Int64;
+  TotalBytes: Int64;
+begin
+  if GetSpaceOnDisk(Stack.GetString(PStart-1), FreeBytes, TotalBytes) then begin
+    Stack.SetInt64(PStart-2, FreeBytes);
+    Stack.SetInt64(PStart-3, TotalBytes);
+    Stack.SetBool(PStart, True);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptGETUSERNAMESTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetUserNameString);
+end;
+
+procedure ScriptINCREMENTSHAREDCOUNT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  IncrementSharedCount(Stack.GetBool(PStart), Stack.GetString(PStart-1),
+    Stack.GetBool(PStart-2));
+end;
+
+procedure ScriptExec(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Method: TMethod;
+  OutputReader: TCreateProcessOutputReader;
+  ResultCode: DWORD;
+  RunAsOriginalUser: Boolean;
+  S: String;
+  LogOutput: Boolean;
+  CaptureOutput: Boolean;
+  LogOrCaptureOutput: Boolean;
+  WithNativeSysDir: Boolean;
+  ExecWait: TExecWait;
+  Filename: String;
+  WindowDisabler: TWindowDisabler;
+begin
+  RunAsOriginalUser := OrgName = 'ExecAsOriginalUser';
+  if IsUninstaller and RunAsOriginalUser then
+    NoUninstallFuncError(OrgName);
+
+  S := String(OrgName);
+  LogOutput := Pos('LogOutput', S) <> 0;
+  CaptureOutput := Pos('CaptureOutput', S) <> 0;
+  LogOrCaptureOutput := LogOutput or CaptureOutput;
+  WithNativeSysDir := Pos('WithNativeSysDir', S) <> 0;
+
+ { Must stay alive until OutputReader is freed }
+  OutputReader := nil;
+  try
+    if LogOutput then begin
+      Method := Stack.GetProc(PStart-7, Caller);
+      if Method.Code <> nil then
+        OutputReader := TCreateProcessOutputReader.Create(ExecAndLogOutputLogCustom, NativeInt(@Method))
+      else if GetLogActive then
+        OutputReader := TCreateProcessOutputReader.Create(ExecAndLogOutputLog, 0);
+    end else if CaptureOutput then
+      OutputReader := TCreateProcessOutputReader.Create(ExecAndLogOutputLog, 0, omCapture);
+    ExecWait := TExecWait(Stack.GetInt(PStart-5));
+    if LogOrCaptureOutput and (ExecWait <> ewWaitUntilTerminated) then
+      InternalError(Format('Must call "%s" function with Wait = ewWaitUntilTerminated', [OrgName]));
+
+    Filename := Stack.GetString(PStart-1);
+    if not IsProtectedSrcExe(Filename) then begin
+      { Disable windows so the user can't utilize our UI during the InstExec
+        call }
+      WindowDisabler := TWindowDisabler.Create;
+      try
+        Stack.SetBool(PStart, InstExecEx(RunAsOriginalUser,
+          IsWin64 and WithNativeSysDir, Filename, Stack.GetString(PStart-2),
+          Stack.GetString(PStart-3), ExecWait,
+          Stack.GetInt(PStart-4), LogOrCaptureOutput, ProcessMessagesProc, OutputReader, ResultCode));
+      finally
+        WindowDisabler.Free;
+      end;
+      Stack.SetInt(PStart-6, Integer(ResultCode));
+      if CaptureOutput then begin
+        { Set the three TExecOutput fields }
+        Stack.SetArray(PStart-7, OutputReader.CaptureOutList, 0);
+        Stack.SetArray(PStart-7, OutputReader.CaptureErrList, 1);
+        Stack.SetInt(PStart-7, OutputReader.CaptureError.ToInteger, 2);
+      end;
+    end else begin
+      Stack.SetBool(PStart, False);
+      Stack.SetInt(PStart-6, ERROR_ACCESS_DENIED);
+    end;
+  finally
+    OutputReader.Free;
+  end;
+end;
+
+procedure ScriptShellExec(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  ErrorCode: DWORD;
+  RunAsOriginalUser: Boolean;
+  Filename: String;
+  WindowDisabler: TWindowDisabler;
+begin
+  RunAsOriginalUser := OrgName = 'ShellExecAsOriginalUser';
+  if IsUninstaller and RunAsOriginalUser then
+    NoUninstallFuncError(OrgName);
+  Filename := Stack.GetString(PStart-2);
+  if not IsProtectedSrcExe(Filename) then begin
+    { Disable windows so the user can't utilize our UI during the
+      InstShellExec call }
+    WindowDisabler := TWindowDisabler.Create;
+    try
+      Stack.SetBool(PStart, InstShellExecEx(RunAsOriginalUser,
+        Stack.GetString(PStart-1), Filename, Stack.GetString(PStart-3),
+        Stack.GetString(PStart-4), TExecWait(Stack.GetInt(PStart-6)),
+        Stack.GetInt(PStart-5), ProcessMessagesProc, ErrorCode));
+    finally
+      WindowDisabler.Free;
+    end;
+    Stack.SetInt(PStart-7, Integer(ErrorCode));
+  end else begin
+    Stack.SetBool(PStart, False);
+    Stack.SetInt(PStart-7, ERROR_ACCESS_DENIED);
+  end;
+end;
+
+procedure ScriptISPROTECTEDSYSTEMFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsProtectedSystemFile(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptMAKEPENDINGFILERENAMEOPERATIONSCHECKSUM(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, SHA256DigestToString(MakePendingFileRenameOperationsChecksum));
+end;
+
+procedure ScriptMODIFYPIFFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, ModifyPifFile(Stack.GetString(PStart-1), Stack.GetBool(PStart-2)));
+end;
+
+procedure ScriptREGISTERSERVER(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  RegisterServer(False, Stack.GetBool(PStart), Stack.GetString(PStart-1));
+end;
+
+procedure ScriptUNREGISTERSERVER(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  try
+    RegisterServer(True, Stack.GetBool(PStart-1), Stack.GetString(PStart-2));
+    Stack.SetBool(PStart, True);
+  except
+    Stack.SetBool(PStart, False);
+  end;
+end;
+
+procedure ScriptUNREGISTERFONT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  UnregisterFont(Stack.GetString(PStart), Stack.GetString(PStart-1), Stack.GetBool(PStart-2));
+end;
+
+procedure ScriptRESTARTREPLACE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  RestartReplace(Stack.GetString(PStart), Stack.GetString(PStart-1));
+end;
+
+procedure ScriptFORCEDIRECTORIES(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, NewForceDirectories(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptCREATESHELLLINK(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, CreateShellLink(Stack.GetString(PStart-1),
+    Stack.GetString(PStart-2), Stack.GetString(PStart-3),
+    Stack.GetString(PStart-4), Stack.GetString(PStart-5),
+    Stack.GetString(PStart-6), Stack.GetInt(PStart-7),
+    Stack.GetInt(PStart-8), 0, '', nil, False, False));
+end;
+
+procedure ScriptREGISTERTYPELIBRARY(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Is64Bit: Boolean;
+begin
+  Is64Bit := Stack.GetBool(PStart);
+  {$IFDEF WIN64}
+  if not Is64Bit then
+    InternalError('Cannot register 32-bit type libraries on this version of Setup');
+  {$ELSE}
+  if Is64Bit then
+    InternalError('Cannot register 64-bit type libraries on this version of Setup');
+  {$ENDIF}
+  RegisterTypeLibrary(Stack.GetString(PStart-1));
+end;
+
+procedure ScriptUNREGISTERTYPELIBRARY(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Is64Bit: Boolean;
+begin
+  Is64Bit := Stack.GetBool(PStart-1);
+  {$IFDEF WIN64}
+  if not Is64Bit then
+    InternalError('Cannot unregister 32-bit type libraries on this version of Setup');
+  {$ELSE}
+  if Is64Bit then
+    InternalError('Cannot unregister 64-bit type libraries on this version of Setup');
+  {$ENDIF}
+  try
+    UnregisterTypeLibrary(Stack.GetString(PStart-2));
+    Stack.SetBool(PStart, True);
+  except
+    Stack.SetBool(PStart, False);
+  end;
+end;
+
+procedure ScriptUNPINSHELLLINK(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, UnpinShellLink(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptACTIVELANGUAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, ExpandConst('{language}'));
+end;
+
+procedure ScriptEXPANDCONSTANT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, ExpandConst(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptEXPANDCONSTANTEX(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, ExpandConstEx(Stack.GetString(PStart-1), [Stack.GetString(PStart-2), Stack.GetString(PStart-3)]));
+end;
+
+procedure ScriptEXITSETUPMSGBOX(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, ExitSetupMsgBox);
+end;
+
+procedure ScriptGETSHELLFOLDERBYCSIDL(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetShellFolderByCSIDL(Stack.GetInt(PStart-1), Stack.GetBool(PStart-2)));
+end;
+
+procedure ScriptINSTALLONTHISVERSION(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  MinVersion: TSetupVersionData;
+  OnlyBelowVersion: TSetupVersionData;
+begin
+  if not StrToSetupVersionData(Stack.GetString(PStart-1), MinVersion) then
+    InternalError(Format('%s: Invalid MinVersion string', [OrgName]))
+  else if not StrToSetupVersionData(Stack.GetString(PStart-2), OnlyBelowVersion) then
+    InternalError(Format('%s: Invalid OnlyBelowVersion string', [OrgName]))
+  else
+    Stack.SetBool(PStart, (InstallOnThisVersion(MinVersion, OnlyBelowVersion) = irInstall));
+end;
+
+procedure ScriptGETWINDOWSVERSION(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetUInt(PStart, WindowsVersion);
+end;
+
+procedure ScriptGETWINDOWSVERSIONSTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, Format('%u.%.2u.%u', [WindowsVersion shr 24,
+    (WindowsVersion shr 16) and $FF, WindowsVersion and $FFFF]));
+end;
+
+procedure ScriptMsgBox(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Suppressible: Boolean;
+  Default: Integer;
+begin
+  if OrgName = 'MsgBox' then begin
+    Suppressible := False;
+    Default := 0;
+  end else begin
+    Suppressible := True;
+    Default := Stack.GetInt(PStart-4);
+  end;
+  Stack.SetInt(PStart, LoggedMsgBox(Stack.GetString(PStart-1), '', TMsgBoxType(Stack.GetInt(PStart-2)), Cardinal(Stack.GetInt(PStart-3)), Suppressible, Default));
+end;
+
+procedure ScriptTaskDialogMsgBox(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Suppressible: Boolean;
+  Default: Integer;
+  ButtonLabels: TPSStackHelper.TArrayOfString;
+begin
+  if OrgName = 'TaskDialogMsgBox' then begin
+    Suppressible := False;
+    Default := 0;
+  end else begin
+    Suppressible := True;
+    Default := Stack.GetInt(PStart-7);
+  end;
+  ButtonLabels := Stack.GetStringArray(PStart-5);
+  Stack.SetInt(PStart, LoggedTaskDialogMsgBox('', Stack.GetString(PStart-1), Stack.GetString(PStart-2), '', TMsgBoxType(Stack.GetInt(PStart-3)), Cardinal(Stack.GetInt(PStart-4)), ButtonLabels, Stack.GetInt(PStart-6), Suppressible, Default));
+end;
+
+procedure ScriptISWIN64(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsWin64);
+end;
+
+procedure ScriptIS64BITINSTALLMODE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, Is64BitInstallMode);
+end;
+
+procedure ScriptIsWinDark(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsWinDark);
+end;
+
+procedure ScriptIsDarkInstallMode(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsDarkInstallMode);
+end;
+
+procedure ScriptPROCESSORARCHITECTURE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, Integer(ProcessorArchitecture));
+end;
+
+procedure ScriptIsArm32Compatible(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  ArchitectureIdentifier: String;
+begin
+  ArchitectureIdentifier := LowerCase(Copy(String(OrgName), 3, MaxInt));
+  Stack.SetBool(PStart, EvalArchitectureIdentifier(ArchitectureIdentifier));
+end;
+
+procedure ScriptIsCurrentProcess64Bit(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsCurrentProcess64Bit);
+end;
+
+procedure ScriptCUSTOMMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, CustomMessage(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptRMSESSIONSTARTED(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, RmSessionStarted);
+end;
+
+procedure ScriptREGISTEREXTRACLOSEAPPLICATIONSRESOURCE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, CodeRegisterExtraCloseApplicationsResource(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptGETWIZARDFORM(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetClass(PStart, GetWizardForm);
+end;
+
+procedure ScriptWizardIsComponentSelected(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  StringList: TStringList;
+  Components: Boolean;
+  S: String;
+begin
+  StringList := TStringList.Create;
+  try
+    Components := (OrgName = 'WizardIsComponentSelected') or (OrgName = 'IsComponentSelected');
+    if Components then
+      GetWizardForm.GetSelectedComponents(StringList, False, False)
+    else
+      GetWizardForm.GetSelectedTasks(StringList, False, False, False);
+    S := Stack.GetString(PStart-1);
+    StringChange(S, '/', '\');
+    if Components then
+      Stack.SetBool(PStart, ShouldProcessEntry(StringList, nil, S, '', '', ''))
+    else
+      Stack.SetBool(PStart, ShouldProcessEntry(nil, StringList, '', S, '', ''));
+  finally
+    StringList.Free;
+  end;
+end;
+
+procedure ScriptSETUPMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, SetupMessages[TSetupMessageID(Stack.GetInt(PStart-1))]);
+end;
+
+procedure ScriptRANDOM(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, Integer(TStrongRandom.GenerateUInt32Range(UInt32(Stack.GetInt(PStart-1)))));
+end;
+
+procedure ScriptFILESIZE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  F: TFile;
+begin
+  try
+    F := TFile.Create(Stack.GetString(PStart-1), fdOpenExisting, faRead, fsReadWrite);
+    try
+      Stack.SetInt(PStart-2, Integer(F.CappedSize)); { Even though CappedSize returns Cardinal, it's capped at High(Int32) }
+      Stack.SetBool(PStart, True);
+    finally
+      F.Free;
+    end;
+  except
+    Stack.SetBool(PStart, False);
+  end;
+end;
+
+procedure ScriptFILESIZE64(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  F: TFile;
+begin
+  try
+    F := TFile.Create(Stack.GetString(PStart-1), fdOpenExisting, faRead, fsReadWrite);
+    try
+      Stack.SetInt64(PStart-2, F.Size);
+      Stack.SetBool(PStart, True);
+    finally
+      F.Free;
+    end;
+  except
+    Stack.SetBool(PStart, False);
+  end;
+end;
+
+procedure ScriptSET8087CW(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Set8087CW(Word(Stack.GetInt(PStart)));
+end;
+
+procedure ScriptGET8087CW(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, Get8087CW);
+end;
+
+procedure ScriptUTF8ENCODE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetAnsiString(PStart, Utf8Encode(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptUTF8DECODE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, UTF8ToString(Stack.GetAnsiString(PStart-1)));
+end;
+
+procedure ScriptBEEP(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Beep;
+end;
+
+procedure ScriptTRIMLEFT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, TrimLeft(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptTRIMRIGHT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, TrimRight(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptGETCURRENTDIR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetCurrentDir);
+end;
+
+procedure ScriptSETCURRENTDIR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SetCurrentDir(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptEXPANDUNCFILENAME(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, ExpandUNCFileName(Stack.GetString(PStart-1)));
+end;
+
+procedure ScriptEXTRACTRELATIVEPATH(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, NewExtractRelativePath(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptFILESEARCH(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, NewFileSearch(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptRENAMEFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  OldName: String;
+begin
+  OldName := Stack.GetString(PStart-1);
+  if not IsProtectedSrcExe(OldName) then
+    Stack.SetBool(PStart, MoveFileW(PChar(OldName), PChar(Stack.GetString(PStart-2))))
+  else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptDELETEFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, Windows.DeleteFileW(PChar(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptCREATEDIR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, CreateDirectoryW(PChar(Stack.GetString(PStart-1)), nil));
+end;
+
+procedure ScriptREMOVEDIR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, RemoveDirectoryW(PChar(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptCOMPARESTR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, CompareStr(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptCOMPARETEXT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, CompareText(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptSAMESTR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, CompareStr(Stack.GetString(PStart-1), Stack.GetString(PStart-2)) = 0);
+end;
+
+procedure ScriptSAMETEXT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, CompareText(Stack.GetString(PStart-1), Stack.GetString(PStart-2)) = 0);
+end;
+
+procedure ScriptGETDATETIMESTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  OldDateSeparator: Char;
+  OldTimeSeparator: Char;
+  NewDateSeparator: Char;
+  NewTimeSeparator: Char;
+begin
+  OldDateSeparator := FormatSettings.DateSeparator;
+  OldTimeSeparator := FormatSettings.TimeSeparator;
+  try
+    NewDateSeparator := Stack.GetChar(PStart-2);
+    NewTimeSeparator := Stack.GetChar(PStart-3);
+    if NewDateSeparator <> #0 then
+      FormatSettings.DateSeparator := NewDateSeparator;
+    if NewTimeSeparator <> #0 then
+      FormatSettings.TimeSeparator := NewTimeSeparator;
+    Stack.SetString(PStart, FormatDateTime(Stack.GetString(PStart-1), Now));
+  finally
+    FormatSettings.TimeSeparator := OldTimeSeparator;
+    FormatSettings.DateSeparator := OldDateSeparator;
+  end;
+end;
+
+procedure ScriptSYSERRORMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, Win32ErrorString(Stack.GetUInt(PStart-1)));
+end;
+
+procedure ScriptGETVERSIONNUMBERS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  VersionNumbers: TFileVersionNumbers;
+begin
+  if GetVersionNumbers(Stack.GetString(PStart-1), VersionNumbers) then begin
+    Stack.SetUInt(PStart-2, VersionNumbers.MS);
+    Stack.SetUInt(PStart-3, VersionNumbers.LS);
+    Stack.SetBool(PStart, True);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptGETVERSIONCOMPONENTS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  VersionNumbers: TFileVersionNumbers;
+begin
+  if GetVersionNumbers(Stack.GetString(PStart-1), VersionNumbers) then begin
+    Stack.SetUInt(PStart-2, VersionNumbers.MS shr 16);
+    Stack.SetUInt(PStart-3, VersionNumbers.MS and $FFFF);
+    Stack.SetUInt(PStart-4, VersionNumbers.LS shr 16);
+    Stack.SetUInt(PStart-5, VersionNumbers.LS and $FFFF);
+    Stack.SetBool(PStart, True);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptGETVERSIONNUMBERSSTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  VersionNumbers: TFileVersionNumbers;
+begin
+  if GetVersionNumbers(Stack.GetString(PStart-1), VersionNumbers) then begin
+    Stack.SetString(PStart-2, Format('%u.%u.%u.%u', [VersionNumbers.MS shr 16,
+      VersionNumbers.MS and $FFFF, VersionNumbers.LS shr 16, VersionNumbers.LS and $FFFF]));
+    Stack.SetBool(PStart, True);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptGETPACKEDVERSION(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  VersionNumbers: TFileVersionNumbers;
+begin
+  if GetVersionNumbers(Stack.GetString(PStart-1), VersionNumbers) then begin
+    Stack.SetInt64(PStart-2, VersionNumbersToInt64(VersionNumbers));
+    Stack.SetBool(PStart, True);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptPACKVERSIONNUMBERS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  VersionMS: Cardinal;
+  VersionLS: Cardinal;
+begin
+  VersionMS := Stack.GetUInt(PStart-1);
+  VersionLS := Stack.GetUInt(PStart-2);
+  Stack.SetInt64(PStart, HighLowToInt64(VersionMS, VersionLS));
+end;
+
+procedure ScriptPACKVERSIONCOMPONENTS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  VersionNumbers: TFileVersionNumbers;
+begin
+  VersionNumbers.MS := (Stack.GetUInt(PStart-1) shl 16) or (Stack.GetUInt(PStart-2) and $FFFF);
+  VersionNumbers.LS := (Stack.GetUInt(PStart-3) shl 16) or (Stack.GetUInt(PStart-4) and $FFFF);
+  Stack.SetInt64(PStart, VersionNumbersToInt64(VersionNumbers));
+end;
+
+procedure ScriptCOMPAREPACKEDVERSION(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, CompareUInt64(UInt64(Stack.GetInt64(PStart-1)), UInt64(Stack.GetInt64(PStart-2))));
+end;
+
+procedure ScriptSAMEPACKEDVERSION(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, Stack.GetInt64(PStart-1) = Stack.GetInt64(PStart-2));
+end;
+
+procedure ScriptUNPACKVERSIONNUMBERS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  VersionNumbers: TFileVersionNumbers;
+begin
+  VersionNumbers.MS := UInt32(UInt64(Stack.GetInt64(PStart)) shr 32);
+  VersionNumbers.LS := UInt32(UInt64(Stack.GetInt64(PStart)) and $FFFFFFFF);
+  Stack.SetUInt(PStart-1, VersionNumbers.MS);
+  Stack.SetUInt(PStart-2, VersionNumbers.LS);
+end;
+
+procedure ScriptUNPACKVERSIONCOMPONENTS(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  VersionNumbers: TFileVersionNumbers;
+begin
+  VersionNumbers.MS := UInt32(UInt64(Stack.GetInt64(PStart)) shr 32);
+  VersionNumbers.LS := UInt32(UInt64(Stack.GetInt64(PStart)) and $FFFFFFFF);
+  Stack.SetUInt(PStart-1, VersionNumbers.MS shr 16);
+  Stack.SetUInt(PStart-2, VersionNumbers.MS and $FFFF);
+  Stack.SetUInt(PStart-3, VersionNumbers.LS shr 16);
+  Stack.SetUInt(PStart-4, VersionNumbers.LS and $FFFF);
+end;
+
+procedure ScriptVERSIONTOSTR(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  VersionNumbers: TFileVersionNumbers;
+begin
+  VersionNumbers.MS := UInt32(UInt64(Stack.GetInt64(PStart-1)) shr 32);
+  VersionNumbers.LS := UInt32(UInt64(Stack.GetInt64(PStart-1)) and $FFFFFFFF);
+  Stack.SetString(PStart, Format('%u.%u.%u.%u', [VersionNumbers.MS shr 16,
+    VersionNumbers.MS and $FFFF, VersionNumbers.LS shr 16, VersionNumbers.LS and $FFFF]));
+end;
+
+procedure ScriptSTRTOVERSION(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  VersionNumbers: TFileVersionNumbers;
+begin
+  if StrToVersionNumbers(Stack.GetString(PStart-1), VersionNumbers) then begin
+    Stack.SetInt64(PStart-2, VersionNumbersToInt64(VersionNumbers));
+    Stack.SetBool(PStart, True);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptSLEEP(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Sleep(Stack.GetUInt(PStart));
+end;
+
+procedure ScriptFINDWINDOWBYCLASSNAME(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetNativeUInt(PStart, FindWindowW(PChar(Stack.GetString(PStart-1)), nil));
+end;
+
+procedure ScriptFINDWINDOWBYWINDOWNAME(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetNativeUInt(PStart, FindWindowW(nil, PChar(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptSENDMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetNativeInt(PStart, SendMessage(Stack.GetNativeUInt(PStart-1), Stack.GetUInt(PStart-2), Stack.GetNativeUInt(PStart-3), Stack.GetNativeInt(PStart-4)));
+end;
+
+procedure ScriptPOSTMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, PostMessage(Stack.GetNativeUInt(PStart-1), Stack.GetUInt(PStart-2), Stack.GetNativeUInt(PStart-3), Stack.GetNativeInt(PStart-4)));
+end;
+
+procedure ScriptSENDNOTIFYMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SendNotifyMessage(Stack.GetNativeUInt(PStart-1), Stack.GetUInt(PStart-2), Stack.GetNativeUInt(PStart-3), Stack.GetNativeInt(PStart-4)));
+end;
+
+procedure ScriptREGISTERWINDOWMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetUInt(PStart, RegisterWindowMessageW(PChar(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptSENDBROADCASTMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetNativeInt(PStart, SendMessage(HWND_BROADCAST, Stack.GetUInt(PStart-1), Stack.GetNativeUInt(PStart-2), Stack.GetNativeInt(PStart-3)));
+end;
+
+procedure ScriptPOSTBROADCASTMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, PostMessage(HWND_BROADCAST, Stack.GetUInt(PStart-1), Stack.GetNativeUInt(PStart-2), Stack.GetNativeInt(PStart-3)));
+end;
+
+procedure ScriptSENDBROADCASTNOTIFYMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SendNotifyMessage(HWND_BROADCAST, Stack.GetUInt(PStart-1), Stack.GetNativeUInt(PStart-2), Stack.GetNativeInt(PStart-3)));
+end;
+
+procedure ScriptLOADDLL(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  DllHandle: HMODULE;
+begin
+  DllHandle := SafeLoadLibrary(Stack.GetString(PStart-1), SEM_NOOPENFILEERRORBOX);
+  if DllHandle <> 0 then
+    Stack.SetInt(PStart-2, 0)
+  else
+    Stack.SetInt(PStart-2, Integer(GetLastError));
+  Stack.SetNativeUInt(PStart, DllHandle);
+end;
+
+procedure ScriptCALLDLLPROC(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+type
+  TDllProc = function(const Param1, Param2: NativeInt): NativeInt; stdcall;
+var
+  DllProc: TDllProc;
+begin
+  DllProc := TDllProc(GetProcAddress(Stack.GetNativeUInt(PStart-1), PAnsiChar(Stack.GetAnsiString(PStart-2))));
+  if Assigned(DllProc) then begin
+    Stack.SetNativeInt(PStart-5, DllProc(Stack.GetNativeInt(PStart-3), Stack.GetNativeInt(PStart-4)));
+    Stack.SetBool(PStart, True);
+  end else
+    Stack.SetBool(PStart, False);
+end;
+
+procedure ScriptFREEDLL(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, FreeLibrary(Stack.GetNativeUInt(PStart-1)));
+end;
+
+procedure ScriptCREATEMUTEX(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Windows.CreateMutexW(nil, False, PWideChar(Stack.GetString(PStart)));
+end;
+
+procedure ScriptOEMTOCHARBUFF(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: AnsiString;
+begin
+  S := Stack.GetAnsiString(PStart);
+  UniqueString(S);
+  OemToCharBuffA(PAnsiChar(S), PAnsiChar(S), ULength(S));
+  Stack.SetAnsiString(PStart, S);
+end;
+
+procedure ScriptCHARTOOEMBUFF(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: AnsiString;
+begin
+  S := Stack.GetAnsiString(PStart);
+  UniqueString(S);
+  CharToOemBuffA(PAnsiChar(S), PAnsiChar(S), ULength(S));
+  Stack.SetAnsiString(PStart, S);
+end;
+
+procedure ScriptCOFREEUNUSEDLIBRARIES(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  CoFreeUnusedLibraries;
+end;
+
+procedure ScriptLOG(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Log(Stack.GetString(PStart));
+end;
+
+procedure ScriptBRINGTOFRONTANDRESTORE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  { Must be in this order to work around VCL bug }
+  Application.Restore;
+  Application.BringToFront;
+end;
+
+procedure ScriptWizardDirValue(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, RemoveBackslashUnlessRoot(GetWizardForm.DirEdit.Text));
+end;
+
+procedure ScriptWizardGroupValue(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, RemoveBackslashUnlessRoot(GetWizardForm.GroupEdit.Text));
+end;
+
+procedure ScriptWizardNoIcons(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, GetWizardForm.NoIconsCheck.Checked);
+end;
+
+procedure ScriptWizardSetupType(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  TypeEntry: PSetupTypeEntry;
+begin
+  TypeEntry := GetWizardForm.GetSetupType;
+  if TypeEntry <> nil then begin
+    if Stack.GetBool(PStart-1) then
+      Stack.SetString(PStart, ExpandConst(TypeEntry.Description))
+    else
+      Stack.SetString(PStart, TypeEntry.Name);
+  end
+  else
+    Stack.SetString(PStart, '');
+end;
+
+procedure ScriptWizardSelectedComponents(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  StringList: TStringList;
+begin
+  StringList := TStringList.Create;
+  try
+    if OrgName = 'WizardSelectedComponents' then
+      GetWizardForm.GetSelectedComponents(StringList, Stack.GetBool(PStart-1), False)
+    else
+      GetWizardForm.GetSelectedTasks(StringList, Stack.GetBool(PStart-1), False, False);
+    Stack.SetString(PStart, StringsToCommaString(StringList));
+  finally
+    StringList.Free;
+  end;
+end;
+
+procedure ScriptWizardSelectComponents(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  StringList: TStringList;
+  S: String;
+begin
+  StringList := TStringList.Create;
+  try
+    S := Stack.GetString(PStart);
+    StringChange(S, '/', '\');
+    SetStringsFromCommaString(StringList, S);
+    if OrgName = 'WizardSelectComponents' then
+      GetWizardForm.SelectComponents(StringList)
+    else
+      GetWizardForm.SelectTasks(StringList);
+  finally
+    StringList.Free;
+  end;
+end;
+
+procedure ScriptWizardSetBackImage(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Form: TSetupForm;
+  WizardImages: TWizardImages;
+  BackImages: TPSStackHelper.TArrayOfObject;
+  BackImage: TObject;
+begin
+  WizardImages := TWizardImages.Create(False);
+  try
+    BackImages := Stack.GetClassArray(PStart);
+    for BackImage in BackImages do
+      WizardImages.Add(TGraphic(BackImage));
+    if IsUninstaller then
+      Form := GetUninstallProgressForm
+    else
+      Form := GetWizardForm;
+    Form.SetBackImage(WizardImages, Stack.GetBool(PStart-1) , Stack.GetBool(PStart-2), Byte(Stack.GetInt(PStart-3)), True);
+  finally
+    WizardImages.Free;
+  end;
+end;
+
+procedure ScriptWizardSilent(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, InstallMode <> imNormal);
+end;
+
+procedure ScriptISUNINSTALLER(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsUninstaller);
+end;
+
+procedure ScriptUninstallSilent(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, UninstallSilent);
+end;
+
+procedure ScriptCurrentFilename(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  if CheckOrInstallCurrentFilename <> '' then
+    Stack.SetString(PStart, CheckOrInstallCurrentFilename)
+  else
+    InternalError(Format('An attempt was made to call the "%s" function from outside a "Check", "BeforeInstall" or "AfterInstall" event function belonging to a "[Files]" entry', [OrgName]));
+end;
+
+procedure ScriptCurrentSourceFilename(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  if CheckOrInstallCurrentSourceFilename <> '' then
+    Stack.SetString(PStart, CheckOrInstallCurrentSourceFilename)
+  else
+    InternalError(Format('An attempt was made to call the "%s" function from outside a "Check", "BeforeInstall" or "AfterInstall" event function belonging to a "[Files]" entry with flag "external"', [OrgName]));
+end;
+
+procedure ScriptCASTSTRINGTOINTEGER(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetNativeInt(PStart, NativeInt(PChar(Stack.GetString(PStart-1))));
+end;
+
+procedure ScriptCASTINTEGERTOSTRING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, String(PChar(Stack.GetNativeInt(PStart-1))));
+end;
+
+procedure ScriptABORT(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Abort;
+end;
+
+procedure ScriptGETEXCEPTIONMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetString(PStart, GetExceptionMessage(Caller));
+end;
+
+procedure ScriptRAISEEXCEPTION(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  raise Exception.Create(Stack.GetString(PStart));
+end;
+
+procedure ScriptSHOWEXCEPTIONMESSAGE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  ShowExceptionMsgText(AddPeriod(GetExceptionMessage(Caller)));
+end;
+
+procedure ScriptTERMINATED(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, Application.Terminated);
+end;
+
+procedure ScriptGETPREVIOUSDATA(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  if IsUninstaller then
+    Stack.SetString(PStart, GetCodePreviousData(UninstallExpandedAppId, Stack.GetString(PStart-1), Stack.GetString(PStart-2)))
+  else
+    Stack.SetString(PStart, GetCodePreviousData(ExpandConst(SetupHeader.AppId), Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
+end;
+
+procedure ScriptSETPREVIOUSDATA(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SetCodePreviousData(HKEY(UInt32(Stack.GetInt(PStart-1))), Stack.GetString(PStart-2), Stack.GetString(PStart-3)));
+end;
+
+procedure ScriptLOADSTRINGFROMFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: AnsiString;
+begin
+  S := Stack.GetAnsiString(PStart-2);
+  Stack.SetBool(PStart, LoadStringFromFile(Stack.GetString(PStart-1), S, fsRead));
+  Stack.SetAnsiString(PStart-2, S);
+end;
+
+procedure ScriptLOADSTRINGFROMLOCKEDFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  S: AnsiString;
+begin
+  S := Stack.GetAnsiString(PStart-2);
+  Stack.SetBool(PStart, LoadStringFromFile(Stack.GetString(PStart-1), S, fsReadWrite));
+  Stack.SetAnsiString(PStart-2, S);
+end;
+
+procedure ScriptLOADSTRINGSFROMFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, LoadStringsFromFile(Stack.GetString(PStart-1), Stack, PStart-2, fsRead));
+end;
+
+procedure ScriptLOADSTRINGSFROMLOCKEDFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, LoadStringsFromFile(Stack.GetString(PStart-1), Stack, PStart-2, fsReadWrite));
+end;
+
+procedure ScriptSAVESTRINGTOFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SaveStringToFile(Stack.GetString(PStart-1), Stack.GetAnsiString(PStart-2), Stack.GetBool(PStart-3)));
+end;
+
+procedure ScriptSAVESTRINGSTOFILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SaveStringsToFile(Stack.GetString(PStart-1), Stack, PStart-2, Stack.GetBool(PStart-3), False, False));
+end;
+
+procedure ScriptSAVESTRINGSTOUTF8FILE(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SaveStringsToFile(Stack.GetString(PStart-1), Stack, PStart-2, Stack.GetBool(PStart-3), True, False));
+end;
+
+procedure ScriptSAVESTRINGSTOUTF8FILEWITHOUTBOM(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, SaveStringsToFile(Stack.GetString(PStart-1), Stack, PStart-2, Stack.GetBool(PStart-3), True, True));
+end;
+
+procedure ScriptGETUNINSTALLPROGRESSFORM(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetClass(PStart, GetUninstallProgressForm);
+end;
+
+procedure ScriptCREATECALLBACK(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetNativeInt(PStart, CreateCallback(Caller, PPSVariantProcPtr(Stack.Items[PStart-1])));
+end;
+
+procedure ScriptISDOTNETINSTALLED(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, IsDotNetInstalled(InstallDefaultRegView, TDotNetVersion(Stack.GetInt(PStart-1)), Stack.GetUInt(PStart-2)));
+end;
+
+procedure ScriptISMSIPRODUCTINSTALLED(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  ErrorCode: Cardinal;
+begin
+  Stack.SetBool(PStart, IsMsiProductInstalled(Stack.GetString(PStart-1), Stack.GetInt64(PStart-2), ErrorCode));
+  if ErrorCode <> 0 then
+    raise Exception.Create(Win32ErrorString(ErrorCode));
+end;
+
+procedure ScriptINITIALIZEBITMAPBUTTONFROMICON(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  AscendingTrySizes: TPSStackHelper.TArrayOfInteger;
+begin
+  AscendingTrySizes := Stack.GetIntArray(PStart-4);
+  Stack.SetBool(PStart, TBitmapButton(Stack.GetClass(PStart-1)).InitializeFromIcon(0, PChar(Stack.GetString(PStart-2)), Stack.GetInt(PStart-3), AscendingTrySizes));
+end;
+
+procedure ScriptINITIALIZEBITMAPIMAGEFROMICON(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  AscendingTrySizes: TPSStackHelper.TArrayOfInteger;
+begin
+  AscendingTrySizes := Stack.GetIntArray(PStart-4);
+  Stack.SetBool(PStart, TBitmapImage(Stack.GetClass(PStart-1)).InitializeFromIcon(0, PChar(Stack.GetString(PStart-2)), Stack.GetInt(PStart-3), AscendingTrySizes));
+end;
+
+procedure ScriptInitializeBitmapButtonFromStockIcon(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  AscendingTrySizes: TPSStackHelper.TArrayOfInteger;
+begin
+  AscendingTrySizes := Stack.GetIntArray(PStart-4);
+  Stack.SetBool(PStart, TBitmapButton(Stack.GetClass(PStart-1)).InitializeFromStockIcon(Stack.GetInt(PStart-2), Stack.GetInt(PStart-3), AscendingTrySizes));
+end;
+
+procedure ScriptInitializeBitmapImageFromStockIcon(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  AscendingTrySizes: TPSStackHelper.TArrayOfInteger;
+begin
+  AscendingTrySizes := Stack.GetIntArray(PStart-4);
+  Stack.SetBool(PStart, TBitmapImage(Stack.GetClass(PStart-1)).InitializeFromStockIcon(Stack.GetInt(PStart-2), Stack.GetInt(PStart-3), AscendingTrySizes));
+end;
+
+procedure ScriptExtract7ZipArchive(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Password: String;
+  FullDirsItemNo: Longint;
+  Throttler: TProgressThrottler;
+begin
+  if OrgName = 'Extract7ZipArchive' then begin
+    Password := '';
+    FullDirsItemNo := PStart-2;
+  end else begin
+    Password := Stack.GetString(PStart-2);
+    FullDirsItemNo := PStart-3;
+  end;
+
+  Throttler := TProgressThrottler.Create(TOnExtractionProgress(Stack.GetProc(FullDirsItemNo-1, Caller)));
+  try
+    try
+      if SetupHeader.SevenZipLibraryName <> '' then
+        ExtractArchive(Stack.GetString(PStart), Stack.GetString(PStart-1),
+          Password, Stack.GetBool(FullDirsItemNo), Throttler.OnExtractionProgress)
+      else
+        Extract7ZipArchive(Stack.GetString(PStart), Stack.GetString(PStart-1),
+          Password, Stack.GetBool(FullDirsItemNo), Throttler.OnExtractionProgress);
+    except
+      on E: EAbort do
+        raise Exception.Create(SetupMessages[msgErrorExtractionAborted])
+      else
+        raise Exception.Create(FmtSetupMessage1(msgErrorExtractionFailed, GetExceptMessage));
+    end;
+  finally
+    Throttler.Free;
+  end;
+end;
+
+procedure ScriptMapArchiveExtensions(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  if SetupHeader.SevenZipLibraryName <> '' then
+    MapArchiveExtensions(Stack.GetString(PStart), Stack.GetString(PStart-1));
+end;
+
+procedure ScriptDEBUGGING(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetBool(PStart, Debugging);
+end;
+
+procedure ScriptStringJoin(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Values: TPSStackHelper.TArrayOfString;
+  Separator, Joined: String;
+  I: Integer;
+begin
+  Values := Stack.GetStringArray(PStart-2);
+  Separator := Stack.GetString(PStart-1);
+  Joined := '';
+  for I := 0 to High(Values) do begin
+    if I > 0 then
+      Joined := Joined + Separator;
+    Joined := Joined + Values[I];
+  end;
+  Stack.SetString(PStart, Joined);
+end;
+
+{$IFDEF FPC}
+function SplitScriptString(const S: String; const Separators: array of String;
+  const Quote: Char; const Options: TStringSplitOptions): TArray<String>;
+var
+  Start, Position, Count, SeparatorLength: Integer;
+  Separator: String;
+  Quoted: Boolean;
+
+  procedure AddPart(const Last: Boolean);
+  var
+    Part: String;
+  begin
+    Part := Copy(S, Start, Position - Start);
+    if (Part = '') and ((Options = TStringSplitOptions.ExcludeEmpty) or
+       (Last and (Options = TStringSplitOptions.ExcludeLastEmpty))) then
+      Exit;
+    if Count = Length(Result) then
+      SetLength(Result, Count * 2 + 8);
+    Result[Count] := Part;
+    Inc(Count);
+  end;
+
+begin
+  Result := nil;
+  Count := 0;
+  Start := 1;
+  Position := 1;
+  Quoted := False;
+  while Position <= Length(S) do begin
+    SeparatorLength := 0;
+    if (Quote <> #0) and (S[Position] = Quote) then
+      Quoted := not Quoted
+    else if not Quoted then begin
+      for Separator in Separators do
+        if (Separator <> '') and (Copy(S, Position, Length(Separator)) = Separator) then begin
+          SeparatorLength := Length(Separator);
+          Break;
+        end;
+    end;
+    if SeparatorLength > 0 then begin
+      AddPart(False);
+      Inc(Position, SeparatorLength);
+      Start := Position;
+    end else
+      Inc(Position);
+  end;
+  AddPart(True);
+  SetLength(Result, Count);
+end;
+{$ENDIF}
+
+procedure ScriptStringSplit(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Parts: TArray<String>;
+  Separators: TPSStackHelper.TArrayOfString;
+  Quote: Char;
+begin
+  Separators := Stack.GetStringArray(PStart-2);
+  if OrgName = 'StringSplitEx' then begin
+    Quote := Stack.GetChar(PStart-3);
+    {$IFDEF FPC}
+    Parts := SplitScriptString(Stack.GetString(PStart-1), Separators, Quote, TStringSplitOptions(Stack.GetInt(PStart-4)))
+    {$ELSE}
+    Parts := Stack.GetString(PStart-1).Split(Separators, Quote, Quote, TStringSplitOptions(Stack.GetInt(PStart-4)))
+    {$ENDIF}
+  end else
+    {$IFDEF FPC}
+    Parts := SplitScriptString(Stack.GetString(PStart-1), Separators, #0, TStringSplitOptions(Stack.GetInt(PStart-3)));
+    {$ELSE}
+    Parts := Stack.GetString(PStart-1).Split(Separators, TStringSplitOptions(Stack.GetInt(PStart-3)));
+    {$ENDIF}
+  Stack.SetArray(PStart, Parts);
+end;
+
+procedure ScriptISSigVerify(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  ExpectedFileHash: TSHA256Digest;
+  ISSigAllowedKeys: AnsiString;
+  Filename: String;
+  VerifyFilename: Boolean;
+  KeepOpen: Boolean;
+  F: TFileStream;
+  ActualFileHash: TSHA256Digest;
+begin
+  ISSigAllowedKeys := ConvertAllowedKeysRuntimeIDsToISSigAllowedKeys(TStringList(Stack.GetClass(PStart-1)));
+  Filename := Stack.GetString(PStart-2);
+  VerifyFilename := Stack.GetBool(PStart-3);
+  KeepOpen := Stack.GetBool(PStart-4);
+
+  { Verify signature & file, keeping open afterwards if requested
+    Also see TrustFunc's CheckFileTrust which can also keep open afterwards }
+  F := TFileStream.Create(Filename, fmOpenRead or fmShareDenyWrite);
+  try
+    DoISSigVerify(nil, F, Filename, VerifyFilename, ISSigAllowedKeys, ExpectedFileHash);
+     { Couldn't get the SHA-256 while downloading so need to get and check it now }
+    ActualFileHash := ISSigCalcStreamHash(F);
+    if not SHA256DigestsEqual(ActualFileHash, ExpectedFileHash) then
+      VerificationError(veFileHashIncorrect);
+  except
+    FreeAndNil(F);
+    raise;
+  end;
+  if not KeepOpen then
+    FreeAndNil(F);
+
+  Stack.SetClass(PStart, F);
+end;
+
+procedure ScriptRound(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  SaveRoundMode: TFPURoundingMode;
+begin
+  SaveRoundMode := GetRoundMode;
+  try
+    SetRoundMode(rmNearest);
+    Stack.SetInt64(PStart, Round(Stack.GetReal(PStart-1)));
+  finally
+    SetRoundMode(SaveRoundMode);
+  end;
+end;
+
+procedure ScriptTrunc(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt64(PStart, Trunc(Stack.GetReal(PStart-1)));
+end;
+
+procedure ScriptMulDiv(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, MulDiv(Stack.GetInt(PStart-1), Stack.GetInt(PStart-2), Stack.GetInt(PStart-3)));
+end;
+
+procedure ScriptStrToColor(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  Hex: String;
+begin
+  Hex := Stack.GetString(PStart-1);
+  if (Length(Hex) = 7) and (Hex[1] = '#') then
+    Hex := '$' + Copy(Hex, 6, 2)  + Copy(Hex, 4, 2) + Copy(Hex, 2, 2);
+  Stack.SetInt(PStart, SysUtils.StrToInt(Hex));
+end;
+
+procedure ScriptRPos(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+begin
+  Stack.SetInt(PStart, Stack.GetString(PStart-2).LastIndexOf(Stack.GetString(PStart-1)) + 1);
+end;
+
+procedure ScriptApplyPathRedirRules(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer);
+var
+  TargetProcess: TPathRedirTargetProcess;
+  Path: String;
+begin
+  if OrgName = 'ApplyPathRedirRulesForCurrentProcess' then
+    TargetProcess := tpCurrent
+  else
+    TargetProcess := TPathRedirTargetProcess(Stack.GetInt(PStart-3));
+  Path := Stack.GetString(PStart-2);
+  if Path = '' then
+    InternalError(Format('%s: Path must not be empty', [OrgName]));
+  Stack.SetString(PStart, ApplyPathRedirRules(Stack.GetBool(PStart-1),
+    Path, TargetProcess));
 end;
 
 procedure ScriptFuncLibraryRegister_R(ScriptInterpreter: TPSExec);
@@ -114,8 +2515,10 @@ var
   end;
 
   procedure RegisterScriptFunc(const Names: array of AnsiString; const ScriptFuncTyp: TScriptFuncTyp; const ScriptFunc: TScriptFunc); overload;
+  var
+    Name: AnsiString;
   begin
-    for var Name in Names do
+    for Name in Names do
       RegisterScriptFunc(Name, ScriptFuncTyp, ScriptFunc);
   end;
 
@@ -125,1936 +2528,352 @@ var
   end;
 
   procedure RegisterScriptFunc(const Names: array of AnsiString; const ScriptFunc: TScriptFunc); overload;
+  var
+    Name: AnsiString;
   begin
-    for var Name in Names do
+    for Name in Names do
       RegisterScriptFunc(Name, ScriptFunc);
   end;
 
   procedure RegisterScriptDlgScriptFuncs;
   begin
-    RegisterScriptFunc('PageFromID', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetClass(PStart, GetWizardForm.PageFromID(Stack.GetInt(PStart-1)));
-    end);
-    RegisterScriptFunc('PageIndexFromID', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetNativeInt(PStart, GetWizardForm.PageIndexFromID(Stack.GetInt(PStart-1)));
-    end);
-    RegisterScriptFunc('CreateCustomPage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewPage := TWizardPage.Create(GetWizardForm);
-      try
-        NewPage.Caption := Stack.GetString(PStart-2);
-        NewPage.Description := Stack.GetString(PStart-3);
-        GetWizardForm.AddPage(NewPage, Stack.GetInt(PStart-1));
-      except
-        NewPage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewPage);
-    end);
-    RegisterScriptFunc('CreateInputQueryPage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewInputQueryPage := TInputQueryWizardPage.Create(GetWizardForm);
-      try
-        NewInputQueryPage.Caption := Stack.GetString(PStart-2);
-        NewInputQueryPage.Description := Stack.GetString(PStart-3);
-        GetWizardForm.AddPage(NewInputQueryPage, Stack.GetInt(PStart-1));
-        NewInputQueryPage.Initialize(Stack.GetString(PStart-4));
-      except
-        NewInputQueryPage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewInputQueryPage);
-    end);
-    RegisterScriptFunc('CreateInputOptionPage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewInputOptionPage := TInputOptionWizardPage.Create(GetWizardForm);
-      try
-        NewInputOptionPage.Caption := Stack.GetString(PStart-2);
-        NewInputOptionPage.Description := Stack.GetString(PStart-3);
-        GetWizardForm.AddPage(NewInputOptionPage, Stack.GetInt(PStart-1));
-        NewInputOptionPage.Initialize(Stack.GetString(PStart-4),
-          Stack.GetBool(PStart-5), Stack.GetBool(PStart-6));
-      except
-        NewInputOptionPage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewInputOptionPage);
-    end);
-    RegisterScriptFunc('CreateInputDirPage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewInputDirPage := TInputDirWizardPage.Create(GetWizardForm);
-      try
-        NewInputDirPage.Caption := Stack.GetString(PStart-2);
-        NewInputDirPage.Description := Stack.GetString(PStart-3);
-        GetWizardForm.AddPage(NewInputDirPage, Stack.GetInt(PStart-1));
-        NewInputDirPage.Initialize(Stack.GetString(PStart-4), Stack.GetBool(PStart-5),
-           Stack.GetString(PStart-6));
-      except
-        NewInputDirPage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewInputDirPage);
-    end);
-    RegisterScriptFunc('CreateInputFilePage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewInputFilePage := TInputFileWizardPage.Create(GetWizardForm);
-      try
-        NewInputFilePage.Caption := Stack.GetString(PStart-2);
-        NewInputFilePage.Description := Stack.GetString(PStart-3);
-        GetWizardForm.AddPage(NewInputFilePage, Stack.GetInt(PStart-1));
-        NewInputFilePage.Initialize(Stack.GetString(PStart-4));
-      except
-        NewInputFilePage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewInputFilePage);
-    end);
-    RegisterScriptFunc('CreateOutputMsgPage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewOutputMsgPage := TOutputMsgWizardPage.Create(GetWizardForm);
-      try
-        NewOutputMsgPage.Caption := Stack.GetString(PStart-2);
-        NewOutputMsgPage.Description := Stack.GetString(PStart-3);
-        GetWizardForm.AddPage(NewOutputMsgPage, Stack.GetInt(PStart-1));
-        NewOutputMsgPage.Initialize(Stack.GetString(PStart-4));
-      except
-        NewOutputMsgPage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewOutputMsgPage);
-    end);
-    RegisterScriptFunc('CreateOutputMsgMemoPage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewOutputMsgMemoPage := TOutputMsgMemoWizardPage.Create(GetWizardForm);
-      try
-        NewOutputMsgMemoPage.Caption := Stack.GetString(PStart-2);
-        NewOutputMsgMemoPage.Description := Stack.GetString(PStart-3);
-        GetWizardForm.AddPage(NewOutputMsgMemoPage, Stack.GetInt(PStart-1));
-        NewOutputMsgMemoPage.Initialize(Stack.GetString(PStart-4),
-           Stack.GetAnsiString(PStart-5));
-      except
-        NewOutputMsgMemoPage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewOutputMsgMemoPage);
-    end);
-    RegisterScriptFunc('CreateOutputProgressPage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewOutputProgressPage := TOutputProgressWizardPage.Create(GetWizardForm);
-      try
-        NewOutputProgressPage.Caption := Stack.GetString(PStart-1);
-        NewOutputProgressPage.Description := Stack.GetString(PStart-2);
-        GetWizardForm.AddPage(NewOutputProgressPage, -1);
-        NewOutputProgressPage.Initialize;
-      except
-        NewOutputProgressPage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewOutputProgressPage);
-    end);
-    RegisterScriptFunc('CreateOutputMarqueeProgressPage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewOutputMarqueeProgressPage := TOutputMarqueeProgressWizardPage.Create(GetWizardForm);
-      try
-        NewOutputMarqueeProgressPage.Caption := Stack.GetString(PStart-1);
-        NewOutputMarqueeProgressPage.Description := Stack.GetString(PStart-2);
-        GetWizardForm.AddPage(NewOutputMarqueeProgressPage, -1);
-        NewOutputMarqueeProgressPage.Initialize;
-      except
-        NewOutputMarqueeProgressPage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewOutputMarqueeProgressPage);
-    end);
-    RegisterScriptFunc('CreateDownloadPage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewDownloadPage := TDownloadWizardPage.Create(GetWizardForm);
-      try
-        NewDownloadPage.Caption := Stack.GetString(PStart-1);
-        NewDownloadPage.Description := Stack.GetString(PStart-2);
-        GetWizardForm.AddPage(NewDownloadPage, -1);
-        NewDownloadPage.Initialize;
-        NewDownloadPage.OnDownloadProgress := TOnDownloadProgress(Stack.GetProc(PStart-3, Caller));
-      except
-        NewDownloadPage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewDownloadPage);
-    end);
-    RegisterScriptFunc('CreateExtractionPage', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewExtractionPage := TExtractionWizardPage.Create(GetWizardForm);
-      try
-        NewExtractionPage.Caption := Stack.GetString(PStart-1);
-        NewExtractionPage.Description := Stack.GetString(PStart-2);
-        GetWizardForm.AddPage(NewExtractionPage, -1);
-        NewExtractionPage.Initialize;
-        NewExtractionPage.OnExtractionProgress := TOnExtractionProgress(Stack.GetProc(PStart-3, Caller));
-      except
-        NewExtractionPage.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewExtractionPage);
-    end);
-    RegisterScriptFunc('SCALEX', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      InitializeScaleBaseUnits;
-      Stack.SetInt(PStart, TSetupForm.ScalePixelsX(OrigScaleBaseUnitX, ScaleBaseUnitX, Stack.GetInt(PStart-1)));
-    end);
-    RegisterScriptFunc('SCALEY', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      InitializeScaleBaseUnits;
-      Stack.SetInt(PStart, TSetupForm.ScalePixelsY(OrigScaleBaseUnitY, ScaleBaseUnitY, Stack.GetInt(PStart-1)));
-    end);
-    RegisterScriptFunc('CREATECUSTOMFORM', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var NewSetupForm := TSetupForm.CreateNew(nil);
-      try
-        NewSetupForm.PopupMode := pmAuto;
-        NewSetupForm.AutoScroll := False;
-        NewSetupForm.BorderStyle := bsDialog;
-        NewSetupForm.ClientWidth := Stack.GetInt(PStart-1);
-        NewSetupForm.ClientHeight := Stack.GetInt(PStart-2);
-        NewSetupForm.InitializeFont(Stack.GetBool(PStart-3), Stack.GetBool(PStart-4));
-      except
-        NewSetupForm.Free;
-        raise;
-      end;
-      Stack.SetClass(PStart, NewSetupForm);
-    end);
+    RegisterScriptFunc('PageFromID', sfNoUninstall, ScriptPageFromID);
+    RegisterScriptFunc('PageIndexFromID', sfNoUninstall, ScriptPageIndexFromID);
+    RegisterScriptFunc('CreateCustomPage', sfNoUninstall, ScriptCreateCustomPage);
+    RegisterScriptFunc('CreateInputQueryPage', sfNoUninstall, ScriptCreateInputQueryPage);
+    RegisterScriptFunc('CreateInputOptionPage', sfNoUninstall, ScriptCreateInputOptionPage);
+    RegisterScriptFunc('CreateInputDirPage', sfNoUninstall, ScriptCreateInputDirPage);
+    RegisterScriptFunc('CreateInputFilePage', sfNoUninstall, ScriptCreateInputFilePage);
+    RegisterScriptFunc('CreateOutputMsgPage', sfNoUninstall, ScriptCreateOutputMsgPage);
+    RegisterScriptFunc('CreateOutputMsgMemoPage', sfNoUninstall, ScriptCreateOutputMsgMemoPage);
+    RegisterScriptFunc('CreateOutputProgressPage', sfNoUninstall, ScriptCreateOutputProgressPage);
+    RegisterScriptFunc('CreateOutputMarqueeProgressPage', sfNoUninstall, ScriptCreateOutputMarqueeProgressPage);
+    RegisterScriptFunc('CreateDownloadPage', sfNoUninstall, ScriptCreateDownloadPage);
+    RegisterScriptFunc('CreateExtractionPage', sfNoUninstall, ScriptCreateExtractionPage);
+    RegisterScriptFunc('SCALEX', ScriptSCALEX);
+    RegisterScriptFunc('SCALEY', ScriptSCALEY);
+    RegisterScriptFunc('CREATECUSTOMFORM', ScriptCREATECUSTOMFORM);
   end;
 
   procedure RegisterNewDiskFormScriptFuncs;
   begin
-    RegisterScriptFunc('SELECTDISK', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetString(PStart-3);
-      Stack.SetBool(PStart, SelectDisk(Stack.GetInt(PStart-1), Stack.GetString(PStart-2), S));
-      Stack.SetString(PStart-3, S);
-    end);
+    RegisterScriptFunc('SELECTDISK', ScriptSELECTDISK);
   end;
 
   procedure RegisterBrowseFuncScriptFuncs;
   begin
-    RegisterScriptFunc('BROWSEFORFOLDER', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetString(PStart-2);
-      Stack.SetBool(PStart, BrowseForFolder(Stack.GetString(PStart-1), S, GetOwnerWndForMessageBox));
-      Stack.SetString(PStart-2, S);
-    end);
-    RegisterScriptFunc('GETOPENFILENAME', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetString(PStart-2);
-      Stack.SetBool(PStart, NewGetOpenFileName(Stack.GetString(PStart-1), S, Stack.GetString(PStart-3), Stack.GetString(PStart-4), Stack.GetString(PStart-5), GetOwnerWndForMessageBox));
-      Stack.SetString(PStart-2, S);
-    end);
-    RegisterScriptFunc('GETOPENFILENAMEMULTI', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, NewGetOpenFileNameMulti(Stack.GetString(PStart-1), TStrings(Stack.GetClass(PStart-2)), Stack.GetString(PStart-3), Stack.GetString(PStart-4), Stack.GetString(PStart-5), GetOwnerWndForMessageBox));
-    end);
-    RegisterScriptFunc('GETSAVEFILENAME', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetString(PStart-2);
-      Stack.SetBool(PStart, NewGetSaveFileName(Stack.GetString(PStart-1), S, Stack.GetString(PStart-3), Stack.GetString(PStart-4), Stack.GetString(PStart-5), GetOwnerWndForMessageBox));
-      Stack.SetString(PStart-2, S);
-    end);
+    RegisterScriptFunc('BROWSEFORFOLDER', ScriptBROWSEFORFOLDER);
+    RegisterScriptFunc('GETOPENFILENAME', ScriptGETOPENFILENAME);
+    RegisterScriptFunc('GETOPENFILENAMEMULTI', ScriptGETOPENFILENAMEMULTI);
+    RegisterScriptFunc('GETSAVEFILENAME', ScriptGETSAVEFILENAME);
   end;
 
   procedure RegisterCommonFuncVclScriptFuncs;
   begin
-    RegisterScriptFunc('MINIMIZEPATHNAME', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, MinimizePathName(Stack.GetString(PStart-1), TFont(Stack.GetClass(PStart-2)), Stack.GetInt(PStart-3)));
-    end);
+    RegisterScriptFunc('MINIMIZEPATHNAME', ScriptMINIMIZEPATHNAME);
   end;
 
   procedure RegisterCommonFuncScriptFuncs;
   begin
-    RegisterScriptFunc('FILEEXISTS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, NewFileExists(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('DIREXISTS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, DirExists(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('FILEORDIREXISTS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, FileOrDirExists(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('GETINISTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetIniString(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetString(PStart-3), Stack.GetString(PStart-4)));
-    end);
-    RegisterScriptFunc('GETINIINT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, GetIniInt(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetInt(PStart-3), Stack.GetInt(PStart-4), Stack.GetInt(PStart-5), Stack.GetString(PStart-6)));
-    end);
-    RegisterScriptFunc('GETINIBOOL', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, GetIniBool(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetBool(PStart-3), Stack.GetString(PStart-4)));
-    end);
-    RegisterScriptFunc('INIKEYEXISTS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IniKeyExists(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetString(PStart-3)));
-    end);
-    RegisterScriptFunc('ISINISECTIONEMPTY', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsIniSectionEmpty(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
-    end);
-    RegisterScriptFunc('SETINISTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SetIniString(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetString(PStart-3), Stack.GetString(PStart-4)));
-    end);
-    RegisterScriptFunc('SETINIINT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SetIniInt(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetInt(PStart-3), Stack.GetString(PStart-4)));
-    end);
-    RegisterScriptFunc('SETINIBOOL', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SetIniBool(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetBool(PStart-3), Stack.GetString(PStart-4)));
-    end);
-    RegisterScriptFunc('DELETEINIENTRY', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      DeleteIniEntry(Stack.GetString(PStart), Stack.GetString(PStart-1), Stack.GetString(PStart-2));
-    end);
-    RegisterScriptFunc('DELETEINISECTION', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      DeleteIniSection(Stack.GetString(PStart), Stack.GetString(PStart-1));
-    end);
-    RegisterScriptFunc('GETENV', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetEnv(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('GETCMDTAIL', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetCmdTail);
-    end);
-    RegisterScriptFunc('PARAMCOUNT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      if NewParamsForCode.Count = 0 then
-        InternalError('NewParamsForCode not set');
-      Stack.SetInt(PStart, NewParamsForCode.Count-1);
-    end);
-    RegisterScriptFunc('PARAMSTR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var I := Stack.GetInt(PStart-1);
-      if (I >= 0) and (I < NewParamsForCode.Count) then
-        Stack.SetString(PStart, NewParamsForCode[I])
-      else
-        Stack.SetString(PStart, '');
-    end);
-    RegisterScriptFunc('ADDQUOTES', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, AddQuotes(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('REMOVEQUOTES', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, RemoveQuotes(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('GETSHORTNAME', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetShortName(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('GETWINDIR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetWinDir);
-    end);
-    RegisterScriptFunc('GETSYSTEMDIR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetSystemDir);
-    end);
-    RegisterScriptFunc('GETSYSWOW64DIR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetSysWow64Dir);
-    end);
-    RegisterScriptFunc('GETSYSNATIVEDIR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetSysNativeDir(IsWin64));
-    end);
-    RegisterScriptFunc('GETTEMPDIR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetTempDir);
-    end);
-    RegisterScriptFunc('STRINGCHANGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetString(PStart-1);
-      Stack.SetInt(PStart, StringChange(S, Stack.GetString(PStart-2), Stack.GetString(PStart-3)));
-      Stack.SetString(PStart-1, S);
-    end);
-    RegisterScriptFunc('STRINGCHANGEEX', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetString(PStart-1);
-      Stack.SetInt(PStart, StringChangeEx(S, Stack.GetString(PStart-2), Stack.GetString(PStart-3), Stack.GetBool(PStart-4)));
-      Stack.SetString(PStart-1, S);
-    end);
-    RegisterScriptFunc('USINGWINNT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, True);
-    end);
-    RegisterScriptFunc(['COPYFILE', 'FILECOPY'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var ExistingFilename := Stack.GetString(PStart-1);
-      if not IsProtectedSrcExe(ExistingFilename) then
-        Stack.SetBool(PStart, CopyFile(PChar(ExistingFilename), PChar(Stack.GetString(PStart-2)), Stack.GetBool(PStart-3)))
-      else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('CONVERTPERCENTSTR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetString(PStart-1);
-      Stack.SetBool(PStart, ConvertPercentStr(S));
-      Stack.SetString(PStart-1, S);
-    end);
-    RegisterScriptFunc('REGKEYEXISTS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
-        Stack.SetBool(PStart, True);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGVALUEEXISTS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        Stack.SetBool(PStart, RegValueExists(K, PChar(ValueName)));
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGDELETEKEYINCLUDINGSUBKEYS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKey := Stack.GetString(PStart-2);
-      Stack.SetBool(PStart, RegDeleteKeyIncludingSubkeys(RegView, RootKey, PChar(SubKey)) = ERROR_SUCCESS);
-    end);
-    RegisterScriptFunc('REGDELETEKEYIFEMPTY', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      Stack.SetBool(PStart, RegDeleteKeyIfEmpty(RegView, RootKey, PChar(SubKeyName)) = ERROR_SUCCESS);
-    end);
-    RegisterScriptFunc('REGDELETEVALUE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_SET_VALUE, K) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        Stack.SetBool(PStart, RegDeleteValue(K, PChar(ValueName)) = ERROR_SUCCESS);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGGETSUBKEYNAMES', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      Stack.SetBool(PStart, GetSubkeyOrValueNames(RegView, RootKey,
-        Stack.GetString(PStart-2), Stack, PStart-3, True));
-    end);
-    RegisterScriptFunc('REGGETVALUENAMES', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      Stack.SetBool(PStart, GetSubkeyOrValueNames(RegView, RootKey,
-        Stack.GetString(PStart-2), Stack, PStart-3, False));
-    end);
-    RegisterScriptFunc('REGQUERYSTRINGVALUE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        var S := Stack.GetString(PStart-4);
-        Stack.SetBool(PStart, RegQueryStringValue(K, PChar(ValueName), S));
-        Stack.SetString(PStart-4, S);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGQUERYMULTISTRINGVALUE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        var S := Stack.GetString(PStart-4);
-        Stack.SetBool(PStart, RegQueryMultiStringValue(K, PChar(ValueName), S));
-        Stack.SetString(PStart-4, S);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGQUERYDWORDVALUE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        var Typ, Data: DWORD;
-        var Size: DWORD := SizeOf(Data);
-        if (RegQueryValueEx(K, PChar(ValueName), nil, @Typ, PByte(@Data), @Size) = ERROR_SUCCESS) and (Typ = REG_DWORD) then begin
-          Stack.SetInt(PStart-4, Integer(Data));
-          Stack.SetBool(PStart, True);
-        end else
-          Stack.SetBool(PStart, False);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGQUERYBINARYVALUE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        var Typ, Size: DWORD;
-        if RegQueryValueEx(K, PChar(ValueName), nil, @Typ, nil, @Size) = ERROR_SUCCESS then begin
-          var Data: AnsiString;
-          SetLength(Data, Size);
-          if RegQueryValueEx(K, PChar(ValueName), nil, @Typ, PByte(@Data[1]), @Size) = ERROR_SUCCESS then begin
-            Stack.SetAnsiString(PStart-4, Data);
-            Stack.SetBool(PStart, True);
-          end else
-            Stack.SetBool(PStart, False);
-        end else
-          Stack.SetBool(PStart, False);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGWRITESTRINGVALUE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegCreateKeyExView(RegView, RootKey, PChar(SubKeyName), 0, nil, REG_OPTION_NON_VOLATILE, KEY_QUERY_VALUE or KEY_SET_VALUE, nil, K, nil) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        var Data := Stack.GetString(PStart-4);
-        var Typ, ExistingTyp: DWORD;
-        if (RegQueryValueEx(K, PChar(ValueName), nil, @ExistingTyp, nil, nil) = ERROR_SUCCESS) and (ExistingTyp = REG_EXPAND_SZ) then
-          Typ := REG_EXPAND_SZ
-        else
-          Typ := REG_SZ;
-        if RegSetValueEx(K, PChar(ValueName), 0, Typ, PChar(Data), (ULength(Data)+1)*SizeOf(Data[1])) = ERROR_SUCCESS then
-          Stack.SetBool(PStart, True)
-        else
-          Stack.SetBool(PStart, False);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGWRITEEXPANDSTRINGVALUE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegCreateKeyExView(RegView, RootKey, PChar(SubKeyName), 0, nil, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nil, K, nil) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        var Data := Stack.GetString(PStart-4);
-        if RegSetValueEx(K, PChar(ValueName), 0, REG_EXPAND_SZ, PChar(Data), (ULength(Data)+1)*SizeOf(Data[1])) = ERROR_SUCCESS then
-          Stack.SetBool(PStart, True)
-        else
-          Stack.SetBool(PStart, False);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGWRITEMULTISTRINGVALUE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegCreateKeyExView(RegView, RootKey, PChar(SubKeyName), 0, nil, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nil, K, nil) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        var Data := Stack.GetString(PStart-4);
-        { Multi-string data requires two null terminators: one after the last
-          string, and one to mark the end.
-          Delphi's String type is implicitly null-terminated, so only one null
-          needs to be added to the end. }
-        if (Data <> '') and (Data[Length(Data)] <> #0) then
-          Data := Data + #0;
-        if RegSetValueEx(K, PChar(ValueName), 0, REG_MULTI_SZ, PChar(Data), (ULength(Data)+1)*SizeOf(Data[1])) = ERROR_SUCCESS then
-          Stack.SetBool(PStart, True)
-        else
-          Stack.SetBool(PStart, False);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGWRITEDWORDVALUE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegCreateKeyExView(RegView, RootKey, PChar(SubKeyName), 0, nil, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nil, K, nil) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        var Data := Stack.GetUInt(PStart-4);
-        if RegSetValueEx(K, PChar(ValueName), 0, REG_DWORD, @Data, SizeOf(Data)) = ERROR_SUCCESS then
-          Stack.SetBool(PStart, True)
-        else
-          Stack.SetBool(PStart, False);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('REGWRITEBINARYVALUE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RegView: TRegView;
-      var RootKey: HKEY;
-      CrackCodeRootKey(UInt32(Stack.GetNativeUInt(PStart-1)), RegView, RootKey);
-      var SubKeyName := Stack.GetString(PStart-2);
-      var K: HKEY;
-      if RegCreateKeyExView(RegView, RootKey, PChar(SubKeyName), 0, nil, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nil, K, nil) = ERROR_SUCCESS then begin
-        var ValueName := Stack.GetString(PStart-3);
-        var Data := Stack.GetAnsiString(PStart-4);
-        if RegSetValueEx(K, PChar(ValueName), 0, REG_BINARY, @Data[1], ULength(Data)) = ERROR_SUCCESS then
-          Stack.SetBool(PStart, True)
-        else
-          Stack.SetBool(PStart, False);
-        RegCloseKey(K);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc(['ISADMIN', 'ISADMINLOGGEDON'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsAdmin);
-    end);
-    RegisterScriptFunc('ISPOWERUSERLOGGEDON', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsPowerUserLoggedOn);
-    end);
-    RegisterScriptFUnc('ISADMININSTALLMODE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsAdminInstallMode);
-    end);
-    RegisterScriptFunc('FONTEXISTS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, FontExists(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('GETUILANGUAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, GetUILanguage);
-    end);
-    RegisterScriptFunc('ADDPERIOD', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, AddPeriod(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('SETNTFSCOMPRESSION', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SetNTFSCompression(Stack.GetString(PStart-1), Stack.GetBool(PStart-2)));
-    end);
-    RegisterScriptFunc('ISWILDCARD', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsWildcard(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('WILDCARDMATCH', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetString(PStart-1);
-      var N := Stack.GetString(PStart-2);
-      Stack.SetBool(PStart, WildcardMatch(PChar(S), PChar(N)));
-    end);
-    RegisterScriptFunc('HighContrastActive', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, HighContrastActive);
-    end);
+    RegisterScriptFunc('FILEEXISTS', ScriptFILEEXISTS);
+    RegisterScriptFunc('DIREXISTS', ScriptDIREXISTS);
+    RegisterScriptFunc('FILEORDIREXISTS', ScriptFILEORDIREXISTS);
+    RegisterScriptFunc('GETINISTRING', ScriptGETINISTRING);
+    RegisterScriptFunc('GETINIINT', ScriptGETINIINT);
+    RegisterScriptFunc('GETINIBOOL', ScriptGETINIBOOL);
+    RegisterScriptFunc('INIKEYEXISTS', ScriptINIKEYEXISTS);
+    RegisterScriptFunc('ISINISECTIONEMPTY', ScriptISINISECTIONEMPTY);
+    RegisterScriptFunc('SETINISTRING', ScriptSETINISTRING);
+    RegisterScriptFunc('SETINIINT', ScriptSETINIINT);
+    RegisterScriptFunc('SETINIBOOL', ScriptSETINIBOOL);
+    RegisterScriptFunc('DELETEINIENTRY', ScriptDELETEINIENTRY);
+    RegisterScriptFunc('DELETEINISECTION', ScriptDELETEINISECTION);
+    RegisterScriptFunc('GETENV', ScriptGETENV);
+    RegisterScriptFunc('GETCMDTAIL', ScriptGETCMDTAIL);
+    RegisterScriptFunc('PARAMCOUNT', ScriptPARAMCOUNT);
+    RegisterScriptFunc('PARAMSTR', ScriptPARAMSTR);
+    RegisterScriptFunc('ADDQUOTES', ScriptADDQUOTES);
+    RegisterScriptFunc('REMOVEQUOTES', ScriptREMOVEQUOTES);
+    RegisterScriptFunc('GETSHORTNAME', ScriptGETSHORTNAME);
+    RegisterScriptFunc('GETWINDIR', ScriptGETWINDIR);
+    RegisterScriptFunc('GETSYSTEMDIR', ScriptGETSYSTEMDIR);
+    RegisterScriptFunc('GETSYSWOW64DIR', ScriptGETSYSWOW64DIR);
+    RegisterScriptFunc('GETSYSNATIVEDIR', ScriptGETSYSNATIVEDIR);
+    RegisterScriptFunc('GETTEMPDIR', ScriptGETTEMPDIR);
+    RegisterScriptFunc('STRINGCHANGE', ScriptSTRINGCHANGE);
+    RegisterScriptFunc('STRINGCHANGEEX', ScriptSTRINGCHANGEEX);
+    RegisterScriptFunc('USINGWINNT', ScriptUSINGWINNT);
+    RegisterScriptFunc(['COPYFILE', 'FILECOPY'], ScriptCOPYFILE);
+    RegisterScriptFunc('CONVERTPERCENTSTR', ScriptCONVERTPERCENTSTR);
+    RegisterScriptFunc('REGKEYEXISTS', ScriptREGKEYEXISTS);
+    RegisterScriptFunc('REGVALUEEXISTS', ScriptREGVALUEEXISTS);
+    RegisterScriptFunc('REGDELETEKEYINCLUDINGSUBKEYS', ScriptREGDELETEKEYINCLUDINGSUBKEYS);
+    RegisterScriptFunc('REGDELETEKEYIFEMPTY', ScriptREGDELETEKEYIFEMPTY);
+    RegisterScriptFunc('REGDELETEVALUE', ScriptREGDELETEVALUE);
+    RegisterScriptFunc('REGGETSUBKEYNAMES', ScriptREGGETSUBKEYNAMES);
+    RegisterScriptFunc('REGGETVALUENAMES', ScriptREGGETVALUENAMES);
+    RegisterScriptFunc('REGQUERYSTRINGVALUE', ScriptREGQUERYSTRINGVALUE);
+    RegisterScriptFunc('REGQUERYMULTISTRINGVALUE', ScriptREGQUERYMULTISTRINGVALUE);
+    RegisterScriptFunc('REGQUERYDWORDVALUE', ScriptREGQUERYDWORDVALUE);
+    RegisterScriptFunc('REGQUERYBINARYVALUE', ScriptREGQUERYBINARYVALUE);
+    RegisterScriptFunc('REGWRITESTRINGVALUE', ScriptREGWRITESTRINGVALUE);
+    RegisterScriptFunc('REGWRITEEXPANDSTRINGVALUE', ScriptREGWRITEEXPANDSTRINGVALUE);
+    RegisterScriptFunc('REGWRITEMULTISTRINGVALUE', ScriptREGWRITEMULTISTRINGVALUE);
+    RegisterScriptFunc('REGWRITEDWORDVALUE', ScriptREGWRITEDWORDVALUE);
+    RegisterScriptFunc('REGWRITEBINARYVALUE', ScriptREGWRITEBINARYVALUE);
+    RegisterScriptFunc(['ISADMIN', 'ISADMINLOGGEDON'], ScriptISADMIN);
+    RegisterScriptFunc('ISPOWERUSERLOGGEDON', ScriptISPOWERUSERLOGGEDON);
+    RegisterScriptFunc('ISADMININSTALLMODE', ScriptISADMININSTALLMODE);
+    RegisterScriptFunc('FONTEXISTS', ScriptFONTEXISTS);
+    RegisterScriptFunc('GETUILANGUAGE', ScriptGETUILANGUAGE);
+    RegisterScriptFunc('ADDPERIOD', ScriptADDPERIOD);
+    RegisterScriptFunc('SETNTFSCOMPRESSION', ScriptSETNTFSCOMPRESSION);
+    RegisterScriptFunc('ISWILDCARD', ScriptISWILDCARD);
+    RegisterScriptFunc('WILDCARDMATCH', ScriptWILDCARDMATCH);
+    RegisterScriptFunc('HighContrastActive', ScriptHighContrastActive);
   end;
 
   procedure RegisterPathFuncScriptFuncs;
   begin
-    RegisterScriptFunc('AddBackslash', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, AddBackslash(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('RemoveBackslash', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, RemoveBackslash(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('RemoveBackslashUnlessRoot', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, RemoveBackslashUnlessRoot(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('PathCombine', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathCombine(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
-    end);
-    RegisterScriptFunc('PathHasInvalidCharacters', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, PathHasInvalidCharacters(Stack.GetString(PStart-1), Stack.GetBool(PStart-2)));
-    end);
-    RegisterScriptFunc('PathIsRooted', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, PathIsRooted(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('PathNormalizeSlashes', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathNormalizeSlashes(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('PathSame', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, PathSame(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
-    end);
-    RegisterScriptFunc('PathStartsWith', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, PathStartsWith(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetBool(PStart-3)));
-    end);
-    RegisterScriptFunc('PathEndsWith', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, PathEndsWith(Stack.GetString(PStart-1), Stack.GetString(PStart-2), Stack.GetBool(PStart-3)));
-    end);
-    RegisterScriptFunc('PathConvertNormalToSuper', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathConvertNormalToSuper(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('PathConvertSuperToNormal', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathConvertSuperToNormal(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('CHARLENGTH', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, 1);
-    end);
-    RegisterScriptFunc('EXPANDFILENAME', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathExpand(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('EXTRACTFILEDIR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathExtractDir(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('EXTRACTFILEDRIVE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathExtractDrive(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('EXTRACTFILEEXT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathExtractExt(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('EXTRACTFILENAME', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathExtractName(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('EXTRACTFILEPATH', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathExtractPath(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('CHANGEFILEEXT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, PathChangeExt(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
-    end);
+    RegisterScriptFunc('AddBackslash', ScriptAddBackslash);
+    RegisterScriptFunc('RemoveBackslash', ScriptRemoveBackslash);
+    RegisterScriptFunc('RemoveBackslashUnlessRoot', ScriptRemoveBackslashUnlessRoot);
+    RegisterScriptFunc('PathCombine', ScriptPathCombine);
+    RegisterScriptFunc('PathHasInvalidCharacters', ScriptPathHasInvalidCharacters);
+    RegisterScriptFunc('PathIsRooted', ScriptPathIsRooted);
+    RegisterScriptFunc('PathNormalizeSlashes', ScriptPathNormalizeSlashes);
+    RegisterScriptFunc('PathSame', ScriptPathSame);
+    RegisterScriptFunc('PathStartsWith', ScriptPathStartsWith);
+    RegisterScriptFunc('PathEndsWith', ScriptPathEndsWith);
+    RegisterScriptFunc('PathConvertNormalToSuper', ScriptPathConvertNormalToSuper);
+    RegisterScriptFunc('PathConvertSuperToNormal', ScriptPathConvertSuperToNormal);
+    RegisterScriptFunc('CHARLENGTH', ScriptCHARLENGTH);
+    RegisterScriptFunc('EXPANDFILENAME', ScriptEXPANDFILENAME);
+    RegisterScriptFunc('EXTRACTFILEDIR', ScriptEXTRACTFILEDIR);
+    RegisterScriptFunc('EXTRACTFILEDRIVE', ScriptEXTRACTFILEDRIVE);
+    RegisterScriptFunc('EXTRACTFILEEXT', ScriptEXTRACTFILEEXT);
+    RegisterScriptFunc('EXTRACTFILENAME', ScriptEXTRACTFILENAME);
+    RegisterScriptFunc('EXTRACTFILEPATH', ScriptEXTRACTFILEPATH);
+    RegisterScriptFunc('CHANGEFILEEXT', ScriptCHANGEFILEEXT);
   end;
 
   procedure RegisterInstallScriptFuncs;
   begin
-    RegisterScriptFunc('ExtractTemporaryFile', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      ExtractTemporaryFile(Stack.GetString(PStart));
-    end);
-    RegisterScriptFunc('ExtractTemporaryFiles', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, ExtractTemporaryFiles(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc(['DownloadTemporaryFile', 'DownloadTemporaryFileWithISSigVerify'], sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      const ISSigVerify = OrgName = 'DownloadTemporaryFileWithISSigVerify';
-      var Url, ISSigUrl, BaseName, RequiredSHA256OfFile: String;
-      var ISSigAllowedKeys: AnsiString;
-      var OnDownloadProgress: TOnDownloadProgress;
-
-      if ISSigVerify then begin
-        Url := Stack.GetString(PStart-1);
-        ISSigUrl := Stack.GetString(PStart-2);
-        BaseName := Stack.GetString(PStart-3);
-        ISSigAllowedKeys := ConvertAllowedKeysRuntimeIDsToISSigAllowedKeys(TStringList(Stack.GetClass(PStart-4)));
-        OnDownloadProgress := TOnDownloadProgress(Stack.GetProc(PStart-5, Caller));
-      end else begin
-        Url := Stack.GetString(PStart-1);
-        BaseName := Stack.GetString(PStart-2);
-        RequiredSHA256OfFile := Stack.GetString(PStart-3);
-        OnDownloadProgress := TOnDownloadProgress(Stack.GetProc(PStart-4, Caller));
-      end;
-
-      var Verification := NoVerification;
-      if RequiredSHA256OfFile <> '' then begin
-        Verification.Typ := fvHash;
-        Verification.Hash := SHA256DigestFromString(RequiredSHA256OfFile)
-      end else if ISSigVerify then begin
-        Verification.Typ := fvISSig;
-        Verification.ISSigAllowedKeys := ISSigAllowedKeys
-      end;
-
-      const Throttler = TProgressThrottler.Create(OnDownloadProgress);
-      try
-        { Also see Setup.WizardForm.CustomPages TDownloadWizardPage.AddExWithISSigVerify }
-        if ISSigVerify then
-          DownloadTemporaryFile(GetISSigUrl(Url, ISSigUrl), BaseName + ISSigExt, NoVerification, Throttler.OnDownloadProgress, nil);
-        Throttler.Reset;
-        Stack.SetInt64(PStart, DownloadTemporaryFile(Url, BaseName, Verification, Throttler.OnDownloadProgress, nil));
-      finally
-        Throttler.Free;
-      end;
-    end);
-    RegisterScriptFunc('DownloadTemporaryFileSize', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt64(PStart, DownloadTemporaryFileSize(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('DownloadTemporaryFileDate', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, DownloadTemporaryFileDate(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('SetDownloadCredentials', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      SetDownloadTemporaryFileCredentials(Stack.GetString(PStart),Stack.GetString(PStart-1));
-    end);
+    RegisterScriptFunc('ExtractTemporaryFile', sfNoUninstall, ScriptExtractTemporaryFile);
+    RegisterScriptFunc('ExtractTemporaryFiles', sfNoUninstall, ScriptExtractTemporaryFiles);
+    RegisterScriptFunc(['DownloadTemporaryFile', 'DownloadTemporaryFileWithISSigVerify'], sfNoUninstall, ScriptDownloadTemporaryFile);
+    RegisterScriptFunc('DownloadTemporaryFileSize', sfNoUninstall, ScriptDownloadTemporaryFileSize);
+    RegisterScriptFunc('DownloadTemporaryFileDate', sfNoUninstall, ScriptDownloadTemporaryFileDate);
+    RegisterScriptFunc('SetDownloadCredentials', sfNoUninstall, ScriptSetDownloadCredentials);
   end;
 
   procedure RegisterInstFuncScriptFuncs;
   begin
-    RegisterScriptFunc('CHECKFORMUTEXES', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, CheckForMutexes(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('DECREMENTSHAREDCOUNT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, DecrementSharedCount(Stack.GetBool(PStart-1), Stack.GetString(PStart-2)));
-    end);
-    RegisterScriptFunc('DELAYDELETEFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      DelayDeleteFile(Stack.GetString(PStart), Stack.GetInt(PStart-1), 250, 250);
-    end);
-    RegisterScriptFunc('DELTREE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, DelTree(Stack.GetString(PStart-1), Stack.GetBool(PStart-2), True, Stack.GetBool(PStart-3), Stack.GetBool(PStart-4), False, nil, nil, nil));
-    end);
-    RegisterScriptFunc('GENERATEUNIQUENAME', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GenerateUniqueName(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
-    end);
-    RegisterScriptFunc('GETCOMPUTERNAMESTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetComputerNameString);
-    end);
-    RegisterScriptFunc('GETMD5OFFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, MD5DigestToString(GetMD5OfFile(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('GETMD5OFSTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, MD5DigestToString(GetMD5OfAnsiString(Stack.GetAnsiString(PStart-1))));
-    end);
-    RegisterScriptFunc('GETMD5OFUNICODESTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, MD5DigestToString(GetMD5OfUnicodeString(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('GETSHA1OFFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, SHA1DigestToString(GetSHA1OfFile(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('GETSHA1OFSTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, SHA1DigestToString(GetSHA1OfAnsiString(Stack.GetAnsiString(PStart-1))));
-    end);
-    RegisterScriptFunc('GETSHA1OFUNICODESTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, SHA1DigestToString(GetSHA1OfUnicodeString(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('GETSHA256OFFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, SHA256DigestToString(GetSHA256OfFile(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('GETSHA256OFSTREAM', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, SHA256DigestToString(ISSigCalcStreamHash(TStream(Stack.GetClass(PStart-1)))));
-    end);
-    RegisterScriptFunc('GETSHA256OFSTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, SHA256DigestToString(GetSHA256OfAnsiString(Stack.GetAnsiString(PStart-1))));
-    end);
-    RegisterScriptFunc('GETSHA256OFUNICODESTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, SHA256DigestToString(GetSHA256OfUnicodeString(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('GETSPACEONDISK', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var FreeBytes, TotalBytes: Int64;
-      if GetSpaceOnDisk(Stack.GetString(PStart-1), FreeBytes, TotalBytes) then begin
-        if Stack.GetBool(PStart-2) then begin
-          FreeBytes := FreeBytes div (1024*1024);
-          TotalBytes := TotalBytes div (1024*1024);
-        end;
-        { Cap at 2 GB, as GetSpaceOnDisk doesn't use 64-bit integers }
-        const MaxBytes = High(Int32);
-        if FreeBytes > MaxBytes then
-          FreeBytes := MaxBytes;
-        if TotalBytes > MaxBytes then
-          TotalBytes := MaxBytes;
-        Stack.SetUInt(PStart-3, Cardinal(FreeBytes));
-        Stack.SetUInt(PStart-4, Cardinal(TotalBytes));
-        Stack.SetBool(PStart, True);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('GETSPACEONDISK64', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var FreeBytes, TotalBytes: Int64;
-      if GetSpaceOnDisk(Stack.GetString(PStart-1), FreeBytes, TotalBytes) then begin
-        Stack.SetInt64(PStart-2, FreeBytes);
-        Stack.SetInt64(PStart-3, TotalBytes);
-        Stack.SetBool(PStart, True);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('GETUSERNAMESTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetUserNameString);
-    end);
-    RegisterScriptFunc('INCREMENTSHAREDCOUNT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      IncrementSharedCount(Stack.GetBool(PStart), Stack.GetString(PStart-1),
-        Stack.GetBool(PStart-2));
-    end);
+    RegisterScriptFunc('CHECKFORMUTEXES', ScriptCHECKFORMUTEXES);
+    RegisterScriptFunc('DECREMENTSHAREDCOUNT', ScriptDECREMENTSHAREDCOUNT);
+    RegisterScriptFunc('DELAYDELETEFILE', ScriptDELAYDELETEFILE);
+    RegisterScriptFunc('DELTREE', ScriptDELTREE);
+    RegisterScriptFunc('GENERATEUNIQUENAME', ScriptGENERATEUNIQUENAME);
+    RegisterScriptFunc('GETCOMPUTERNAMESTRING', ScriptGETCOMPUTERNAMESTRING);
+    RegisterScriptFunc('GETMD5OFFILE', ScriptGETMD5OFFILE);
+    RegisterScriptFunc('GETMD5OFSTRING', ScriptGETMD5OFSTRING);
+    RegisterScriptFunc('GETMD5OFUNICODESTRING', ScriptGETMD5OFUNICODESTRING);
+    RegisterScriptFunc('GETSHA1OFFILE', ScriptGETSHA1OFFILE);
+    RegisterScriptFunc('GETSHA1OFSTRING', ScriptGETSHA1OFSTRING);
+    RegisterScriptFunc('GETSHA1OFUNICODESTRING', ScriptGETSHA1OFUNICODESTRING);
+    RegisterScriptFunc('GETSHA256OFFILE', ScriptGETSHA256OFFILE);
+    RegisterScriptFunc('GETSHA256OFSTREAM', ScriptGETSHA256OFSTREAM);
+    RegisterScriptFunc('GETSHA256OFSTRING', ScriptGETSHA256OFSTRING);
+    RegisterScriptFunc('GETSHA256OFUNICODESTRING', ScriptGETSHA256OFUNICODESTRING);
+    RegisterScriptFunc('GETSPACEONDISK', ScriptGETSPACEONDISK);
+    RegisterScriptFunc('GETSPACEONDISK64', ScriptGETSPACEONDISK64);
+    RegisterScriptFunc('GETUSERNAMESTRING', ScriptGETUSERNAMESTRING);
+    RegisterScriptFunc('INCREMENTSHAREDCOUNT', ScriptINCREMENTSHAREDCOUNT);
     RegisterScriptFunc(['Exec', 'ExecAndLogOutput', 'ExecAndCaptureOutput',
       'ExecWithNativeSysDir', 'ExecAndLogOutputWithNativeSysDir', 'ExecAndCaptureOutputWithNativeSysDir',
-      'ExecAsOriginalUser'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      const RunAsOriginalUser = OrgName = 'ExecAsOriginalUser';
-      if IsUninstaller and RunAsOriginalUser then
-        NoUninstallFuncError(OrgName);
-
-      const S = String(OrgName);
-      const LogOutput = S.Contains('LogOutput');
-      const CaptureOutput = S.Contains('CaptureOutput');
-      const LogOrCaptureOutput = LogOutput or CaptureOutput;
-      const WithNativeSysDir = S.Contains('WithNativeSysDir');
-
-      var Method: TMethod; { Must stay alive until OutputReader is freed }
-      var OutputReader: TCreateProcessOutputReader := nil;
-      try
-        if LogOutput then begin
-          Method := Stack.GetProc(PStart-7, Caller);
-          if Method.Code <> nil then
-            OutputReader := TCreateProcessOutputReader.Create(ExecAndLogOutputLogCustom, NativeInt(@Method))
-          else if GetLogActive then
-            OutputReader := TCreateProcessOutputReader.Create(ExecAndLogOutputLog, 0);
-        end else if CaptureOutput then
-          OutputReader := TCreateProcessOutputReader.Create(ExecAndLogOutputLog, 0, omCapture);
-        var ExecWait := TExecWait(Stack.GetInt(PStart-5));
-        if LogOrCaptureOutput and (ExecWait <> ewWaitUntilTerminated) then
-          InternalError(Format('Must call "%s" function with Wait = ewWaitUntilTerminated', [OrgName]));
-
-        var Filename := Stack.GetString(PStart-1);
-        if not IsProtectedSrcExe(Filename) then begin
-          { Disable windows so the user can't utilize our UI during the InstExec
-            call }
-          var WindowDisabler := TWindowDisabler.Create;
-          var ResultCode: DWORD;
-          try
-            Stack.SetBool(PStart, InstExecEx(RunAsOriginalUser,
-              IsWin64 and WithNativeSysDir, Filename, Stack.GetString(PStart-2),
-              Stack.GetString(PStart-3), ExecWait,
-              Stack.GetInt(PStart-4), LogOrCaptureOutput, ProcessMessagesProc, OutputReader, ResultCode));
-          finally
-            WindowDisabler.Free;
-          end;
-          Stack.SetInt(PStart-6, Integer(ResultCode));
-          if CaptureOutput then begin
-            { Set the three TExecOutput fields }
-            Stack.SetArray(PStart-7, OutputReader.CaptureOutList, 0);
-            Stack.SetArray(PStart-7, OutputReader.CaptureErrList, 1);
-            Stack.SetInt(PStart-7, OutputReader.CaptureError.ToInteger, 2);
-          end;
-        end else begin
-          Stack.SetBool(PStart, False);
-          Stack.SetInt(PStart-6, ERROR_ACCESS_DENIED);
-        end;
-      finally
-        OutputReader.Free;
-      end;
-    end);
-    RegisterScriptFunc(['ShellExec', 'ShellExecAsOriginalUser'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var RunAsOriginalUser := OrgName = 'ShellExecAsOriginalUser';
-      if IsUninstaller and RunAsOriginalUser then
-        NoUninstallFuncError(OrgName);
-      var Filename := Stack.GetString(PStart-2);
-      if not IsProtectedSrcExe(Filename) then begin
-        { Disable windows so the user can't utilize our UI during the
-          InstShellExec call }
-        var WindowDisabler := TWindowDisabler.Create;
-        var ErrorCode: DWORD;
-        try
-          Stack.SetBool(PStart, InstShellExecEx(RunAsOriginalUser,
-            Stack.GetString(PStart-1), Filename, Stack.GetString(PStart-3),
-            Stack.GetString(PStart-4), TExecWait(Stack.GetInt(PStart-6)),
-            Stack.GetInt(PStart-5), ProcessMessagesProc, ErrorCode));
-        finally
-          WindowDisabler.Free;
-        end;
-        Stack.SetInt(PStart-7, Integer(ErrorCode));
-      end else begin
-        Stack.SetBool(PStart, False);
-        Stack.SetInt(PStart-7, ERROR_ACCESS_DENIED);
-      end;
-    end);
-    RegisterScriptFunc('ISPROTECTEDSYSTEMFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsProtectedSystemFile(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('MAKEPENDINGFILERENAMEOPERATIONSCHECKSUM', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, SHA256DigestToString(MakePendingFileRenameOperationsChecksum));
-    end);
-    RegisterScriptFunc('MODIFYPIFFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, ModifyPifFile(Stack.GetString(PStart-1), Stack.GetBool(PStart-2)));
-    end);
-    RegisterScriptFunc('REGISTERSERVER', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      RegisterServer(False, Stack.GetBool(PStart), Stack.GetString(PStart-1));
-    end);
-    RegisterScriptFunc('UNREGISTERSERVER', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      try
-        RegisterServer(True, Stack.GetBool(PStart-1), Stack.GetString(PStart-2));
-        Stack.SetBool(PStart, True);
-      except
-        Stack.SetBool(PStart, False);
-      end;
-    end);
-    RegisterScriptFunc('UNREGISTERFONT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      UnregisterFont(Stack.GetString(PStart), Stack.GetString(PStart-1), Stack.GetBool(PStart-2));
-    end);
-    RegisterScriptFunc('RESTARTREPLACE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      RestartReplace(Stack.GetString(PStart), Stack.GetString(PStart-1));
-    end);
-    RegisterScriptFunc('FORCEDIRECTORIES', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, NewForceDirectories(Stack.GetString(PStart-1)));
-    end);
+      'ExecAsOriginalUser'], ScriptExec);
+    RegisterScriptFunc(['ShellExec', 'ShellExecAsOriginalUser'], ScriptShellExec);
+    RegisterScriptFunc('ISPROTECTEDSYSTEMFILE', ScriptISPROTECTEDSYSTEMFILE);
+    RegisterScriptFunc('MAKEPENDINGFILERENAMEOPERATIONSCHECKSUM', ScriptMAKEPENDINGFILERENAMEOPERATIONSCHECKSUM);
+    RegisterScriptFunc('MODIFYPIFFILE', ScriptMODIFYPIFFILE);
+    RegisterScriptFunc('REGISTERSERVER', ScriptREGISTERSERVER);
+    RegisterScriptFunc('UNREGISTERSERVER', ScriptUNREGISTERSERVER);
+    RegisterScriptFunc('UNREGISTERFONT', ScriptUNREGISTERFONT);
+    RegisterScriptFunc('RESTARTREPLACE', ScriptRESTARTREPLACE);
+    RegisterScriptFunc('FORCEDIRECTORIES', ScriptFORCEDIRECTORIES);
   end;
 
   procedure RegisterInstFuncOleScriptFuncs;
   begin
-    RegisterScriptFunc('CREATESHELLLINK', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, CreateShellLink(Stack.GetString(PStart-1),
-        Stack.GetString(PStart-2), Stack.GetString(PStart-3),
-        Stack.GetString(PStart-4), Stack.GetString(PStart-5),
-        Stack.GetString(PStart-6), Stack.GetInt(PStart-7),
-        Stack.GetInt(PStart-8), 0, '', nil, False, False));
-    end);
-    RegisterScriptFunc('REGISTERTYPELIBRARY', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      const Is64Bit = Stack.GetBool(PStart);
-      {$IFDEF WIN64}
-      if not Is64Bit then
-        InternalError('Cannot register 32-bit type libraries on this version of Setup');
-      {$ELSE}
-      if Is64Bit then
-        InternalError('Cannot register 64-bit type libraries on this version of Setup');
-      {$ENDIF}
-      RegisterTypeLibrary(Stack.GetString(PStart-1));
-    end);
-    RegisterScriptFunc('UNREGISTERTYPELIBRARY', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      const Is64Bit = Stack.GetBool(PStart-1);
-      {$IFDEF WIN64}
-      if not Is64Bit then
-        InternalError('Cannot unregister 32-bit type libraries on this version of Setup');
-      {$ELSE}
-      if Is64Bit then
-        InternalError('Cannot unregister 64-bit type libraries on this version of Setup');
-      {$ENDIF}
-      try
-        UnregisterTypeLibrary(Stack.GetString(PStart-2));
-        Stack.SetBool(PStart, True);
-      except
-        Stack.SetBool(PStart, False);
-      end;
-    end);
-    RegisterScriptFunc('UNPINSHELLLINK', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, UnpinShellLink(Stack.GetString(PStart-1)));
-    end);
+    RegisterScriptFunc('CREATESHELLLINK', ScriptCREATESHELLLINK);
+    RegisterScriptFunc('REGISTERTYPELIBRARY', ScriptREGISTERTYPELIBRARY);
+    RegisterScriptFunc('UNREGISTERTYPELIBRARY', ScriptUNREGISTERTYPELIBRARY);
+    RegisterScriptFunc('UNPINSHELLLINK', ScriptUNPINSHELLLINK);
   end;
 
   procedure RegisterMainFuncScriptFuncs;
   begin
-    RegisterScriptFunc('ACTIVELANGUAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, ExpandConst('{language}'));
-    end);
-    RegisterScriptFunc('EXPANDCONSTANT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, ExpandConst(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('EXPANDCONSTANTEX', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, ExpandConstEx(Stack.GetString(PStart-1), [Stack.GetString(PStart-2), Stack.GetString(PStart-3)]));
-    end);
-    RegisterScriptFunc('EXITSETUPMSGBOX', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, ExitSetupMsgBox);
-    end);
-    RegisterScriptFunc('GETSHELLFOLDERBYCSIDL', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetShellFolderByCSIDL(Stack.GetInt(PStart-1), Stack.GetBool(PStart-2)));
-    end);
-    RegisterScriptFunc('INSTALLONTHISVERSION', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var MinVersion, OnlyBelowVersion: TSetupVersionData;
-      if not StrToSetupVersionData(Stack.GetString(PStart-1), MinVersion) then
-        InternalError(Format('%s: Invalid MinVersion string', [OrgName]))
-      else if not StrToSetupVersionData(Stack.GetString(PStart-2), OnlyBelowVersion) then
-        InternalError(Format('%s: Invalid OnlyBelowVersion string', [OrgName]))
-      else
-        Stack.SetBool(PStart, (InstallOnThisVersion(MinVersion, OnlyBelowVersion) = irInstall));
-    end);
-    RegisterScriptFunc('GETWINDOWSVERSION', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetUInt(PStart, WindowsVersion);
-    end);
-    RegisterScriptFunc('GETWINDOWSVERSIONSTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, Format('%u.%.2u.%u', [WindowsVersion shr 24,
-        (WindowsVersion shr 16) and $FF, WindowsVersion and $FFFF]));
-    end);
-    RegisterScriptFunc(['MsgBox', 'SuppressibleMsgBox'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var Suppressible: Boolean;
-      var Default: Integer;
-      if OrgName = 'MsgBox' then begin
-        Suppressible := False;
-        Default := 0;
-      end else begin
-        Suppressible := True;
-        Default := Stack.GetInt(PStart-4);
-      end;
-      Stack.SetInt(PStart, LoggedMsgBox(Stack.GetString(PStart-1), '', TMsgBoxType(Stack.GetInt(PStart-2)), Cardinal(Stack.GetInt(PStart-3)), Suppressible, Default));
-    end);
-    RegisterScriptFunc(['TaskDialogMsgBox', 'SuppressibleTaskDialogMsgBox'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var Suppressible: Boolean;
-      var Default: Integer;
-      if OrgName = 'TaskDialogMsgBox' then begin
-        Suppressible := False;
-        Default := 0;
-      end else begin
-        Suppressible := True;
-        Default := Stack.GetInt(PStart-7);
-      end;
-      var ButtonLabels := Stack.GetStringArray(PStart-5);
-      Stack.SetInt(PStart, LoggedTaskDialogMsgBox('', Stack.GetString(PStart-1), Stack.GetString(PStart-2), '', TMsgBoxType(Stack.GetInt(PStart-3)), Cardinal(Stack.GetInt(PStart-4)), ButtonLabels, Stack.GetInt(PStart-6), Suppressible, Default));
-    end);
-    RegisterScriptFunc('ISWIN64', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsWin64);
-    end);
-    RegisterScriptFunc('IS64BITINSTALLMODE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, Is64BitInstallMode);
-    end);
-    RegisterScriptFunc('IsWinDark', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsWinDark);
-    end);
-    RegisterScriptFunc('IsDarkInstallMode', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsDarkInstallMode);
-    end);
-    RegisterScriptFunc('PROCESSORARCHITECTURE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, Integer(ProcessorArchitecture));
-    end);
-    RegisterScriptFunc(['IsArm32Compatible', 'IsArm64', 'IsX64', 'IsX64OS', 'IsX64Compatible', 'IsX86', 'IsX86OS', 'IsX86Compatible'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var ArchitectureIdentifier := LowerCase(Copy(String(OrgName), 3, MaxInt));
-      Stack.SetBool(PStart, EvalArchitectureIdentifier(ArchitectureIdentifier));
-    end);
-    RegisterScriptFunc(['IsCurrentProcess64Bit'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsCurrentProcess64Bit);
-    end);
-    RegisterScriptFunc('CUSTOMMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, CustomMessage(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('RMSESSIONSTARTED', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, RmSessionStarted);
-    end);
-    RegisterScriptFunc('REGISTEREXTRACLOSEAPPLICATIONSRESOURCE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, CodeRegisterExtraCloseApplicationsResource(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('GETWIZARDFORM', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetClass(PStart, GetWizardForm);
-    end);
-    RegisterScriptFunc(['WizardIsComponentSelected', 'IsComponentSelected', 'WizardIsTaskSelected', 'IsTaskSelected'], sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var StringList := TStringList.Create;
-      try
-        var Components := (OrgName = 'WizardIsComponentSelected') or (OrgName = 'IsComponentSelected');
-        if Components then
-          GetWizardForm.GetSelectedComponents(StringList, False, False)
-        else
-          GetWizardForm.GetSelectedTasks(StringList, False, False, False);
-        var S := Stack.GetString(PStart-1);
-        StringChange(S, '/', '\');
-        if Components then
-          Stack.SetBool(PStart, ShouldProcessEntry(StringList, nil, S, '', '', ''))
-        else
-          Stack.SetBool(PStart, ShouldProcessEntry(nil, StringList, '', S, '', ''));
-      finally
-        StringList.Free;
-      end;
-    end);
+    RegisterScriptFunc('ACTIVELANGUAGE', ScriptACTIVELANGUAGE);
+    RegisterScriptFunc('EXPANDCONSTANT', ScriptEXPANDCONSTANT);
+    RegisterScriptFunc('EXPANDCONSTANTEX', ScriptEXPANDCONSTANTEX);
+    RegisterScriptFunc('EXITSETUPMSGBOX', ScriptEXITSETUPMSGBOX);
+    RegisterScriptFunc('GETSHELLFOLDERBYCSIDL', ScriptGETSHELLFOLDERBYCSIDL);
+    RegisterScriptFunc('INSTALLONTHISVERSION', ScriptINSTALLONTHISVERSION);
+    RegisterScriptFunc('GETWINDOWSVERSION', ScriptGETWINDOWSVERSION);
+    RegisterScriptFunc('GETWINDOWSVERSIONSTRING', ScriptGETWINDOWSVERSIONSTRING);
+    RegisterScriptFunc(['MsgBox', 'SuppressibleMsgBox'], ScriptMsgBox);
+    RegisterScriptFunc(['TaskDialogMsgBox', 'SuppressibleTaskDialogMsgBox'], ScriptTaskDialogMsgBox);
+    RegisterScriptFunc('ISWIN64', ScriptISWIN64);
+    RegisterScriptFunc('IS64BITINSTALLMODE', ScriptIS64BITINSTALLMODE);
+    RegisterScriptFunc('IsWinDark', ScriptIsWinDark);
+    RegisterScriptFunc('IsDarkInstallMode', ScriptIsDarkInstallMode);
+    RegisterScriptFunc('PROCESSORARCHITECTURE', ScriptPROCESSORARCHITECTURE);
+    RegisterScriptFunc(['IsArm32Compatible', 'IsArm64', 'IsX64', 'IsX64OS', 'IsX64Compatible', 'IsX86', 'IsX86OS', 'IsX86Compatible'], ScriptIsArm32Compatible);
+    RegisterScriptFunc(['IsCurrentProcess64Bit'], ScriptIsCurrentProcess64Bit);
+    RegisterScriptFunc('CUSTOMMESSAGE', ScriptCUSTOMMESSAGE);
+    RegisterScriptFunc('RMSESSIONSTARTED', ScriptRMSESSIONSTARTED);
+    RegisterScriptFunc('REGISTEREXTRACLOSEAPPLICATIONSRESOURCE', ScriptREGISTEREXTRACLOSEAPPLICATIONSRESOURCE);
+    RegisterScriptFunc('GETWIZARDFORM', ScriptGETWIZARDFORM);
+    RegisterScriptFunc(['WizardIsComponentSelected', 'IsComponentSelected', 'WizardIsTaskSelected', 'IsTaskSelected'], sfNoUninstall, ScriptWizardIsComponentSelected);
   end;
 
   procedure RegisterMessagesScriptFuncs;
   begin
-    RegisterScriptFunc('SETUPMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, SetupMessages[TSetupMessageID(Stack.GetInt(PStart-1))]);
-    end);
+    RegisterScriptFunc('SETUPMESSAGE', ScriptSETUPMESSAGE);
   end;
 
   procedure RegisterSystemScriptFuncs;
   begin
-    RegisterScriptFunc('RANDOM', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, Integer(TStrongRandom.GenerateUInt32Range(UInt32(Stack.GetInt(PStart-1)))));
-    end);
-    RegisterScriptFunc('FILESIZE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      try
-        var F := TFile.Create(Stack.GetString(PStart-1), fdOpenExisting, faRead, fsReadWrite);
-        try
-          Stack.SetInt(PStart-2, Integer(F.CappedSize)); { Even though CappedSize returns Cardinal, it's capped at High(Int32) }
-          Stack.SetBool(PStart, True);
-        finally
-          F.Free;
-        end;
-      except
-        Stack.SetBool(PStart, False);
-      end;
-    end);
-    RegisterScriptFunc('FILESIZE64', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      try
-        var F := TFile.Create(Stack.GetString(PStart-1), fdOpenExisting, faRead, fsReadWrite);
-        try
-          Stack.SetInt64(PStart-2, F.Size);
-          Stack.SetBool(PStart, True);
-        finally
-          F.Free;
-        end;
-      except
-        Stack.SetBool(PStart, False);
-      end;
-    end);
-    RegisterScriptFunc('SET8087CW', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Set8087CW(Word(Stack.GetInt(PStart)));
-    end);
-    RegisterScriptFunc('GET8087CW', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, Get8087CW);
-    end);
-    RegisterScriptFunc('UTF8ENCODE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetAnsiString(PStart, Utf8Encode(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('UTF8DECODE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, UTF8ToString(Stack.GetAnsiString(PStart-1)));
-    end);
+    RegisterScriptFunc('RANDOM', ScriptRANDOM);
+    RegisterScriptFunc('FILESIZE', ScriptFILESIZE);
+    RegisterScriptFunc('FILESIZE64', ScriptFILESIZE64);
+    RegisterScriptFunc('SET8087CW', ScriptSET8087CW);
+    RegisterScriptFunc('GET8087CW', ScriptGET8087CW);
+    RegisterScriptFunc('UTF8ENCODE', ScriptUTF8ENCODE);
+    RegisterScriptFunc('UTF8DECODE', ScriptUTF8DECODE);
   end;
 
   procedure RegisterSysUtilsScriptFuncs;
   begin
-    RegisterScriptFunc('BEEP', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Beep;
-    end);
-    RegisterScriptFunc('TRIMLEFT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, TrimLeft(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('TRIMRIGHT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, TrimRight(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('GETCURRENTDIR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetCurrentDir);
-    end);
-    RegisterScriptFunc('SETCURRENTDIR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SetCurrentDir(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('EXPANDUNCFILENAME', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, ExpandUNCFileName(Stack.GetString(PStart-1)));
-    end);
-    RegisterScriptFunc('EXTRACTRELATIVEPATH', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, NewExtractRelativePath(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
-    end);
-    RegisterScriptFunc('FILESEARCH', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, NewFileSearch(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
-    end);
-    RegisterScriptFunc('RENAMEFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var OldName := Stack.GetString(PStart-1);
-      if not IsProtectedSrcExe(OldName) then
-        Stack.SetBool(PStart, MoveFile(PChar(OldName), PChar(Stack.GetString(PStart-2))))
-      else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('DELETEFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, Windows.DeleteFile(PChar(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('CREATEDIR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, CreateDirectory(PChar(Stack.GetString(PStart-1)), nil));
-    end);
-    RegisterScriptFunc('REMOVEDIR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, RemoveDirectory(PChar(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('COMPARESTR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, CompareStr(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
-    end);
-    RegisterScriptFunc('COMPARETEXT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, CompareText(Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
-    end);
-    RegisterScriptFunc('SAMESTR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, CompareStr(Stack.GetString(PStart-1), Stack.GetString(PStart-2)) = 0);
-    end);
-    RegisterScriptFunc('SAMETEXT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, CompareText(Stack.GetString(PStart-1), Stack.GetString(PStart-2)) = 0);
-    end);
-    RegisterScriptFunc('GETDATETIMESTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var OldDateSeparator := FormatSettings.DateSeparator;
-      var OldTimeSeparator := FormatSettings.TimeSeparator;
-      try
-        var NewDateSeparator := Stack.GetChar(PStart-2);
-        var NewTimeSeparator := Stack.GetChar(PStart-3);
-        if NewDateSeparator <> #0 then
-          FormatSettings.DateSeparator := NewDateSeparator;
-        if NewTimeSeparator <> #0 then
-          FormatSettings.TimeSeparator := NewTimeSeparator;
-        Stack.SetString(PStart, FormatDateTime(Stack.GetString(PStart-1), Now));
-      finally
-        FormatSettings.TimeSeparator := OldTimeSeparator;
-        FormatSettings.DateSeparator := OldDateSeparator;
-      end;
-    end);
-    RegisterScriptFunc('SYSERRORMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, Win32ErrorString(Stack.GetUInt(PStart-1)));
-    end);
+    RegisterScriptFunc('BEEP', ScriptBEEP);
+    RegisterScriptFunc('TRIMLEFT', ScriptTRIMLEFT);
+    RegisterScriptFunc('TRIMRIGHT', ScriptTRIMRIGHT);
+    RegisterScriptFunc('GETCURRENTDIR', ScriptGETCURRENTDIR);
+    RegisterScriptFunc('SETCURRENTDIR', ScriptSETCURRENTDIR);
+    RegisterScriptFunc('EXPANDUNCFILENAME', ScriptEXPANDUNCFILENAME);
+    RegisterScriptFunc('EXTRACTRELATIVEPATH', ScriptEXTRACTRELATIVEPATH);
+    RegisterScriptFunc('FILESEARCH', ScriptFILESEARCH);
+    RegisterScriptFunc('RENAMEFILE', ScriptRENAMEFILE);
+    RegisterScriptFunc('DELETEFILE', ScriptDELETEFILE);
+    RegisterScriptFunc('CREATEDIR', ScriptCREATEDIR);
+    RegisterScriptFunc('REMOVEDIR', ScriptREMOVEDIR);
+    RegisterScriptFunc('COMPARESTR', ScriptCOMPARESTR);
+    RegisterScriptFunc('COMPARETEXT', ScriptCOMPARETEXT);
+    RegisterScriptFunc('SAMESTR', ScriptSAMESTR);
+    RegisterScriptFunc('SAMETEXT', ScriptSAMETEXT);
+    RegisterScriptFunc('GETDATETIMESTRING', ScriptGETDATETIMESTRING);
+    RegisterScriptFunc('SYSERRORMESSAGE', ScriptSYSERRORMESSAGE);
   end;
 
   procedure RegisterVerInfoFuncScriptFuncs;
   begin
-    RegisterScriptFunc('GETVERSIONNUMBERS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var VersionNumbers: TFileVersionNumbers;
-      if GetVersionNumbers(Stack.GetString(PStart-1), VersionNumbers) then begin
-        Stack.SetUInt(PStart-2, VersionNumbers.MS);
-        Stack.SetUInt(PStart-3, VersionNumbers.LS);
-        Stack.SetBool(PStart, True);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('GETVERSIONCOMPONENTS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var VersionNumbers: TFileVersionNumbers;
-      if GetVersionNumbers(Stack.GetString(PStart-1), VersionNumbers) then begin
-        Stack.SetUInt(PStart-2, VersionNumbers.MS shr 16);
-        Stack.SetUInt(PStart-3, VersionNumbers.MS and $FFFF);
-        Stack.SetUInt(PStart-4, VersionNumbers.LS shr 16);
-        Stack.SetUInt(PStart-5, VersionNumbers.LS and $FFFF);
-        Stack.SetBool(PStart, True);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('GETVERSIONNUMBERSSTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var VersionNumbers: TFileVersionNumbers;
-      if GetVersionNumbers(Stack.GetString(PStart-1), VersionNumbers) then begin
-        Stack.SetString(PStart-2, Format('%u.%u.%u.%u', [VersionNumbers.MS shr 16,
-          VersionNumbers.MS and $FFFF, VersionNumbers.LS shr 16, VersionNumbers.LS and $FFFF]));
-        Stack.SetBool(PStart, True);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('GETPACKEDVERSION', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var VersionNumbers: TFileVersionNumbers;
-      if GetVersionNumbers(Stack.GetString(PStart-1), VersionNumbers) then begin
-        Stack.SetInt64(PStart-2, VersionNumbersToInt64(VersionNumbers));
-        Stack.SetBool(PStart, True);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('PACKVERSIONNUMBERS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      const VersionMS = Stack.GetUInt(PStart-1);
-      const VersionLS = Stack.GetUInt(PStart-2);
-      Stack.SetInt64(PStart, HighLowToInt64(VersionMS, VersionLS));
-    end);
-    RegisterScriptFunc('PACKVERSIONCOMPONENTS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var VersionNumbers: TFileVersionNumbers;
-      VersionNumbers.MS := (Stack.GetUInt(PStart-1) shl 16) or (Stack.GetUInt(PStart-2) and $FFFF);
-      VersionNumbers.LS := (Stack.GetUInt(PStart-3) shl 16) or (Stack.GetUInt(PStart-4) and $FFFF);
-      Stack.SetInt64(PStart, VersionNumbersToInt64(VersionNumbers));
-    end);
-    RegisterScriptFunc('COMPAREPACKEDVERSION', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, CompareUInt64(UInt64(Stack.GetInt64(PStart-1)), UInt64(Stack.GetInt64(PStart-2))));
-    end);
-    RegisterScriptFunc('SAMEPACKEDVERSION', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, Stack.GetInt64(PStart-1) = Stack.GetInt64(PStart-2));
-    end);
-    RegisterScriptFunc('UNPACKVERSIONNUMBERS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var VersionNumbers: TFileVersionNumbers;
-      VersionNumbers.MS := UInt32(UInt64(Stack.GetInt64(PStart)) shr 32);
-      VersionNumbers.LS := UInt32(UInt64(Stack.GetInt64(PStart)) and $FFFFFFFF);
-      Stack.SetUInt(PStart-1, VersionNumbers.MS);
-      Stack.SetUInt(PStart-2, VersionNumbers.LS);
-    end);
-    RegisterScriptFunc('UNPACKVERSIONCOMPONENTS', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var VersionNumbers: TFileVersionNumbers;
-      VersionNumbers.MS := UInt32(UInt64(Stack.GetInt64(PStart)) shr 32);
-      VersionNumbers.LS := UInt32(UInt64(Stack.GetInt64(PStart)) and $FFFFFFFF);
-      Stack.SetUInt(PStart-1, VersionNumbers.MS shr 16);
-      Stack.SetUInt(PStart-2, VersionNumbers.MS and $FFFF);
-      Stack.SetUInt(PStart-3, VersionNumbers.LS shr 16);
-      Stack.SetUInt(PStart-4, VersionNumbers.LS and $FFFF);
-    end);
-    RegisterScriptFunc('VERSIONTOSTR', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var VersionNumbers: TFileVersionNumbers;
-      VersionNumbers.MS := UInt32(UInt64(Stack.GetInt64(PStart-1)) shr 32);
-      VersionNumbers.LS := UInt32(UInt64(Stack.GetInt64(PStart-1)) and $FFFFFFFF);
-      Stack.SetString(PStart, Format('%u.%u.%u.%u', [VersionNumbers.MS shr 16,
-        VersionNumbers.MS and $FFFF, VersionNumbers.LS shr 16, VersionNumbers.LS and $FFFF]));
-    end);
-    RegisterScriptFunc('STRTOVERSION', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var VersionNumbers: TFileVersionNumbers;
-      if StrToVersionNumbers(Stack.GetString(PStart-1), VersionNumbers) then begin
-        Stack.SetInt64(PStart-2, VersionNumbersToInt64(VersionNumbers));
-        Stack.SetBool(PStart, True);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
+    RegisterScriptFunc('GETVERSIONNUMBERS', ScriptGETVERSIONNUMBERS);
+    RegisterScriptFunc('GETVERSIONCOMPONENTS', ScriptGETVERSIONCOMPONENTS);
+    RegisterScriptFunc('GETVERSIONNUMBERSSTRING', ScriptGETVERSIONNUMBERSSTRING);
+    RegisterScriptFunc('GETPACKEDVERSION', ScriptGETPACKEDVERSION);
+    RegisterScriptFunc('PACKVERSIONNUMBERS', ScriptPACKVERSIONNUMBERS);
+    RegisterScriptFunc('PACKVERSIONCOMPONENTS', ScriptPACKVERSIONCOMPONENTS);
+    RegisterScriptFunc('COMPAREPACKEDVERSION', ScriptCOMPAREPACKEDVERSION);
+    RegisterScriptFunc('SAMEPACKEDVERSION', ScriptSAMEPACKEDVERSION);
+    RegisterScriptFunc('UNPACKVERSIONNUMBERS', ScriptUNPACKVERSIONNUMBERS);
+    RegisterScriptFunc('UNPACKVERSIONCOMPONENTS', ScriptUNPACKVERSIONCOMPONENTS);
+    RegisterScriptFunc('VERSIONTOSTR', ScriptVERSIONTOSTR);
+    RegisterScriptFunc('STRTOVERSION', ScriptSTRTOVERSION);
   end;
 
-  type
-    TDllProc = function(const Param1, Param2: NativeInt): NativeInt; stdcall;
 
   procedure RegisterWindowsScriptFuncs;
   begin
-    RegisterScriptFunc('SLEEP', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Sleep(Stack.GetUInt(PStart));
-    end);
-    RegisterScriptFunc('FINDWINDOWBYCLASSNAME', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetNativeUInt(PStart, FindWindow(PChar(Stack.GetString(PStart-1)), nil));
-    end);
-    RegisterScriptFunc('FINDWINDOWBYWINDOWNAME', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetNativeUInt(PStart, FindWindow(nil, PChar(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('SENDMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetNativeInt(PStart, SendMessage(Stack.GetNativeUInt(PStart-1), Stack.GetUInt(PStart-2), Stack.GetNativeUInt(PStart-3), Stack.GetNativeInt(PStart-4)));
-    end);
-    RegisterScriptFunc('POSTMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, PostMessage(Stack.GetNativeUInt(PStart-1), Stack.GetUInt(PStart-2), Stack.GetNativeUInt(PStart-3), Stack.GetNativeInt(PStart-4)));
-    end);
-    RegisterScriptFunc('SENDNOTIFYMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SendNotifyMessage(Stack.GetNativeUInt(PStart-1), Stack.GetUInt(PStart-2), Stack.GetNativeUInt(PStart-3), Stack.GetNativeInt(PStart-4)));
-    end);
-    RegisterScriptFunc('REGISTERWINDOWMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetUInt(PStart, RegisterWindowMessage(PChar(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('SENDBROADCASTMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetNativeInt(PStart, SendMessage(HWND_BROADCAST, Stack.GetUInt(PStart-1), Stack.GetNativeUInt(PStart-2), Stack.GetNativeInt(PStart-3)));
-    end);
-    RegisterScriptFunc('POSTBROADCASTMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, PostMessage(HWND_BROADCAST, Stack.GetUInt(PStart-1), Stack.GetNativeUInt(PStart-2), Stack.GetNativeInt(PStart-3)));
-    end);
-    RegisterScriptFunc('SENDBROADCASTNOTIFYMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SendNotifyMessage(HWND_BROADCAST, Stack.GetUInt(PStart-1), Stack.GetNativeUInt(PStart-2), Stack.GetNativeInt(PStart-3)));
-    end);
-    RegisterScriptFunc('LOADDLL', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var DllHandle := SafeLoadLibrary(Stack.GetString(PStart-1), SEM_NOOPENFILEERRORBOX);
-      if DllHandle <> 0 then
-        Stack.SetInt(PStart-2, 0)
-      else
-        Stack.SetInt(PStart-2, Integer(GetLastError));
-      Stack.SetNativeUInt(PStart, DllHandle);
-    end);
-    RegisterScriptFunc('CALLDLLPROC', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var DllProc: TDllProc;
-      @DllProc := GetProcAddress(Stack.GetNativeUInt(PStart-1), PChar(Stack.GetString(PStart-2)));
-      if Assigned(DllProc) then begin
-        Stack.SetNativeInt(PStart-5, DllProc(Stack.GetNativeInt(PStart-3), Stack.GetNativeInt(PStart-4)));
-        Stack.SetBool(PStart, True);
-      end else
-        Stack.SetBool(PStart, False);
-    end);
-    RegisterScriptFunc('FREEDLL', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, FreeLibrary(Stack.GetNativeUInt(PStart-1)));
-    end);
-    RegisterScriptFunc('CREATEMUTEX', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Windows.CreateMutex(nil, False, PChar(Stack.GetString(PStart)));
-    end);
-    RegisterScriptFunc('OEMTOCHARBUFF', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetAnsiString(PStart);
-      UniqueString(S);
-      OemToCharBuffA(PAnsiChar(S), PAnsiChar(S), ULength(S));
-      Stack.SetAnsiString(PStart, S);
-    end);
-    RegisterScriptFunc('CHARTOOEMBUFF', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetAnsiString(PStart);
-      UniqueString(S);
-      CharToOemBuffA(PAnsiChar(S), PAnsiChar(S), ULength(S));
-      Stack.SetAnsiString(PStart, S);
-    end);
+    RegisterScriptFunc('SLEEP', ScriptSLEEP);
+    RegisterScriptFunc('FINDWINDOWBYCLASSNAME', ScriptFINDWINDOWBYCLASSNAME);
+    RegisterScriptFunc('FINDWINDOWBYWINDOWNAME', ScriptFINDWINDOWBYWINDOWNAME);
+    RegisterScriptFunc('SENDMESSAGE', ScriptSENDMESSAGE);
+    RegisterScriptFunc('POSTMESSAGE', ScriptPOSTMESSAGE);
+    RegisterScriptFunc('SENDNOTIFYMESSAGE', ScriptSENDNOTIFYMESSAGE);
+    RegisterScriptFunc('REGISTERWINDOWMESSAGE', ScriptREGISTERWINDOWMESSAGE);
+    RegisterScriptFunc('SENDBROADCASTMESSAGE', ScriptSENDBROADCASTMESSAGE);
+    RegisterScriptFunc('POSTBROADCASTMESSAGE', ScriptPOSTBROADCASTMESSAGE);
+    RegisterScriptFunc('SENDBROADCASTNOTIFYMESSAGE', ScriptSENDBROADCASTNOTIFYMESSAGE);
+    RegisterScriptFunc('LOADDLL', ScriptLOADDLL);
+    RegisterScriptFunc('CALLDLLPROC', ScriptCALLDLLPROC);
+    RegisterScriptFunc('FREEDLL', ScriptFREEDLL);
+    RegisterScriptFunc('CREATEMUTEX', ScriptCREATEMUTEX);
+    RegisterScriptFunc('OEMTOCHARBUFF', ScriptOEMTOCHARBUFF);
+    RegisterScriptFunc('CHARTOOEMBUFF', ScriptCHARTOOEMBUFF);
   end;
 
   procedure RegisterActiveXScriptFuncs;
   begin
-    RegisterScriptFunc('COFREEUNUSEDLIBRARIES', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      CoFreeUnusedLibraries;
-    end);
+    RegisterScriptFunc('COFREEUNUSEDLIBRARIES', ScriptCOFREEUNUSEDLIBRARIES);
   end;
 
   procedure RegisterLoggingFuncScriptFuncs;
   begin
-    RegisterScriptFunc('LOG', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Log(Stack.GetString(PStart));
-    end);
+    RegisterScriptFunc('LOG', ScriptLOG);
   end;
 
   procedure RegisterOtherScriptFuncs;
   begin
-    RegisterScriptFunc('BRINGTOFRONTANDRESTORE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      { Must be in this order to work around VCL bug }
-      Application.Restore;
-      Application.BringToFront;
-    end);
-    RegisterScriptFunc('WizardDirValue', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, RemoveBackslashUnlessRoot(GetWizardForm.DirEdit.Text));
-    end);
-    RegisterScriptFunc('WizardGroupValue', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, RemoveBackslashUnlessRoot(GetWizardForm.GroupEdit.Text));
-    end);
-    RegisterScriptFunc('WizardNoIcons', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, GetWizardForm.NoIconsCheck.Checked);
-    end);
-    RegisterScriptFunc('WizardSetupType', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var TypeEntry := GetWizardForm.GetSetupType;
-      if TypeEntry <> nil then begin
-        if Stack.GetBool(PStart-1) then
-          Stack.SetString(PStart, ExpandConst(TypeEntry.Description))
-        else
-          Stack.SetString(PStart, TypeEntry.Name);
-      end
-      else
-        Stack.SetString(PStart, '');
-    end);
-    RegisterScriptFunc(['WizardSelectedComponents', 'WizardSelectedTasks'], sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var StringList := TStringList.Create;
-      try
-        if OrgName = 'WizardSelectedComponents' then
-          GetWizardForm.GetSelectedComponents(StringList, Stack.GetBool(PStart-1), False)
-        else
-          GetWizardForm.GetSelectedTasks(StringList, Stack.GetBool(PStart-1), False, False);
-        Stack.SetString(PStart, StringsToCommaString(StringList));
-      finally
-        StringList.Free;
-      end;
-    end);
-    RegisterScriptFunc(['WizardSelectComponents', 'WizardSelectTasks'], sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var StringList := TStringList.Create;
-      try
-        var S := Stack.GetString(PStart);
-        StringChange(S, '/', '\');
-        SetStringsFromCommaString(StringList, S);
-        if OrgName = 'WizardSelectComponents' then
-          GetWizardForm.SelectComponents(StringList)
-        else
-          GetWizardForm.SelectTasks(StringList);
-      finally
-        StringList.Free;
-      end;
-    end);
-    RegisterScriptFunc('WizardSetBackImage', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      const WizardImages = TWizardImages.Create(False);
-      try
-        const BackImages = Stack.GetClassArray(PStart);
-        for var BackImage in BackImages do
-          WizardImages.Add(TGraphic(BackImage));
-        var Form: TSetupForm;
-        if IsUninstaller then
-          Form := GetUninstallProgressForm
-        else
-          Form := GetWizardForm;
-        Form.SetBackImage(WizardImages, Stack.GetBool(PStart-1) , Stack.GetBool(PStart-2), Byte(Stack.GetInt(PStart-3)), True);
-      finally
-        WizardImages.Free;
-      end;
-    end);
-    RegisterScriptFunc('WizardSilent', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, InstallMode <> imNormal);
-    end);
-    RegisterScriptFunc('ISUNINSTALLER', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsUninstaller);
-    end);
-    RegisterScriptFunc('UninstallSilent', sfOnlyUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, UninstallSilent);
-    end);
-    RegisterScriptFunc('CurrentFilename', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      if CheckOrInstallCurrentFilename <> '' then
-        Stack.SetString(PStart, CheckOrInstallCurrentFilename)
-      else
-        InternalError(Format('An attempt was made to call the "%s" function from outside a "Check", "BeforeInstall" or "AfterInstall" event function belonging to a "[Files]" entry', [OrgName]));
-    end);
-    RegisterScriptFunc('CurrentSourceFilename', sfNoUninstall, procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      if CheckOrInstallCurrentSourceFilename <> '' then
-        Stack.SetString(PStart, CheckOrInstallCurrentSourceFilename)
-      else
-        InternalError(Format('An attempt was made to call the "%s" function from outside a "Check", "BeforeInstall" or "AfterInstall" event function belonging to a "[Files]" entry with flag "external"', [OrgName]));
-    end);
-    RegisterScriptFunc('CASTSTRINGTOINTEGER', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetNativeInt(PStart, NativeInt(PChar(Stack.GetString(PStart-1))));
-    end);
-    RegisterScriptFunc('CASTINTEGERTOSTRING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, String(PChar(Stack.GetNativeInt(PStart-1))));
-    end);
-    RegisterScriptFunc('ABORT', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Abort;
-    end);
-    RegisterScriptFunc('GETEXCEPTIONMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetString(PStart, GetExceptionMessage(Caller));
-    end);
-    RegisterScriptFunc('RAISEEXCEPTION', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      raise Exception.Create(Stack.GetString(PStart));
-    end);
-    RegisterScriptFunc('SHOWEXCEPTIONMESSAGE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      ShowExceptionMsgText(AddPeriod(GetExceptionMessage(Caller)));
-    end);
-    RegisterScriptFunc('TERMINATED', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, Application.Terminated);
-    end);
-    RegisterScriptFunc('GETPREVIOUSDATA', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      if IsUninstaller then
-        Stack.SetString(PStart, GetCodePreviousData(UninstallExpandedAppId, Stack.GetString(PStart-1), Stack.GetString(PStart-2)))
-      else
-        Stack.SetString(PStart, GetCodePreviousData(ExpandConst(SetupHeader.AppId), Stack.GetString(PStart-1), Stack.GetString(PStart-2)));
-    end);
-    RegisterScriptFunc('SETPREVIOUSDATA', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SetCodePreviousData(HKEY(UInt32(Stack.GetInt(PStart-1))), Stack.GetString(PStart-2), Stack.GetString(PStart-3)));
-    end);
-    RegisterScriptFunc('LOADSTRINGFROMFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetAnsiString(PStart-2);
-      Stack.SetBool(PStart, LoadStringFromFile(Stack.GetString(PStart-1), S, fsRead));
-      Stack.SetAnsiString(PStart-2, S);
-    end);
-    RegisterScriptFunc('LOADSTRINGFROMLOCKEDFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var S := Stack.GetAnsiString(PStart-2);
-      Stack.SetBool(PStart, LoadStringFromFile(Stack.GetString(PStart-1), S, fsReadWrite));
-      Stack.SetAnsiString(PStart-2, S);
-    end);
-    RegisterScriptFunc('LOADSTRINGSFROMFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, LoadStringsFromFile(Stack.GetString(PStart-1), Stack, PStart-2, fsRead));
-    end);
-    RegisterScriptFunc('LOADSTRINGSFROMLOCKEDFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, LoadStringsFromFile(Stack.GetString(PStart-1), Stack, PStart-2, fsReadWrite));
-    end);
-    RegisterScriptFunc('SAVESTRINGTOFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SaveStringToFile(Stack.GetString(PStart-1), Stack.GetAnsiString(PStart-2), Stack.GetBool(PStart-3)));
-    end);
-    RegisterScriptFunc('SAVESTRINGSTOFILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SaveStringsToFile(Stack.GetString(PStart-1), Stack, PStart-2, Stack.GetBool(PStart-3), False, False));
-    end);
-    RegisterScriptFunc('SAVESTRINGSTOUTF8FILE', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SaveStringsToFile(Stack.GetString(PStart-1), Stack, PStart-2, Stack.GetBool(PStart-3), True, False));
-    end);
-    RegisterScriptFunc('SAVESTRINGSTOUTF8FILEWITHOUTBOM', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, SaveStringsToFile(Stack.GetString(PStart-1), Stack, PStart-2, Stack.GetBool(PStart-3), True, True));
-    end);
-    RegisterScriptFunc('GETUNINSTALLPROGRESSFORM', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetClass(PStart, GetUninstallProgressForm);
-    end);
-    RegisterScriptFunc('CREATECALLBACK', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetNativeInt(PStart, CreateCallback(Caller, PPSVariantProcPtr(Stack.Items[PStart-1])));
-    end);
-    RegisterScriptFunc('ISDOTNETINSTALLED', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, IsDotNetInstalled(InstallDefaultRegView, TDotNetVersion(Stack.GetInt(PStart-1)), Stack.GetUInt(PStart-2)));
-    end);
-    RegisterScriptFunc('ISMSIPRODUCTINSTALLED', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var ErrorCode: Cardinal;
-      Stack.SetBool(PStart, IsMsiProductInstalled(Stack.GetString(PStart-1), Stack.GetInt64(PStart-2), ErrorCode));
-      if ErrorCode <> 0 then
-        raise Exception.Create(Win32ErrorString(ErrorCode));
-    end);
-    RegisterScriptFunc('INITIALIZEBITMAPBUTTONFROMICON', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var AscendingTrySizes := Stack.GetIntArray(PStart-4);
-      Stack.SetBool(PStart, TBitmapButton(Stack.GetClass(PStart-1)).InitializeFromIcon(0, PChar(Stack.GetString(PStart-2)), Stack.GetInt(PStart-3), AscendingTrySizes));
-    end);
-    RegisterScriptFunc('INITIALIZEBITMAPIMAGEFROMICON', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var AscendingTrySizes := Stack.GetIntArray(PStart-4);
-      Stack.SetBool(PStart, TBitmapImage(Stack.GetClass(PStart-1)).InitializeFromIcon(0, PChar(Stack.GetString(PStart-2)), Stack.GetInt(PStart-3), AscendingTrySizes));
-    end);
-    RegisterScriptFunc('InitializeBitmapButtonFromStockIcon', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var AscendingTrySizes := Stack.GetIntArray(PStart-4);
-      Stack.SetBool(PStart, TBitmapButton(Stack.GetClass(PStart-1)).InitializeFromStockIcon(Stack.GetInt(PStart-2), Stack.GetInt(PStart-3), AscendingTrySizes));
-    end);
-    RegisterScriptFunc('InitializeBitmapImageFromStockIcon', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var AscendingTrySizes := Stack.GetIntArray(PStart-4);
-      Stack.SetBool(PStart, TBitmapImage(Stack.GetClass(PStart-1)).InitializeFromStockIcon(Stack.GetInt(PStart-2), Stack.GetInt(PStart-3), AscendingTrySizes));
-    end);
-    RegisterScriptFunc(['Extract7ZipArchive', 'ExtractArchive'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var Password: String;
-      var FullDirsItemNo: Longint;
-      if OrgName = 'Extract7ZipArchive' then begin
-        Password := '';
-        FullDirsItemNo := PStart-2;
-      end else begin
-        Password := Stack.GetString(PStart-2);
-        FullDirsItemNo := PStart-3;
-      end;
-
-      const Throttler = TProgressThrottler.Create(TOnExtractionProgress(Stack.GetProc(FullDirsItemNo-1, Caller)));
-      try
-        try
-          if SetupHeader.SevenZipLibraryName <> '' then
-            ExtractArchive(Stack.GetString(PStart), Stack.GetString(PStart-1),
-              Password, Stack.GetBool(FullDirsItemNo), Throttler.OnExtractionProgress)
-          else
-            Extract7ZipArchive(Stack.GetString(PStart), Stack.GetString(PStart-1),
-              Password, Stack.GetBool(FullDirsItemNo), Throttler.OnExtractionProgress);
-        except
-          on E: EAbort do
-            raise Exception.Create(SetupMessages[msgErrorExtractionAborted])
-          else
-            raise Exception.Create(FmtSetupMessage1(msgErrorExtractionFailed, GetExceptMessage));
-        end;
-      finally
-        Throttler.Free;
-      end;
-    end);
-    RegisterScriptFunc('MapArchiveExtensions', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      if SetupHeader.SevenZipLibraryName <> '' then
-        MapArchiveExtensions(Stack.GetString(PStart), Stack.GetString(PStart-1));
-    end);
-    RegisterScriptFunc('DEBUGGING', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetBool(PStart, Debugging);
-    end);
-    RegisterScriptFunc('StringJoin', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var Values := Stack.GetStringArray(PStart-2);
-      Stack.SetString(PStart, String.Join(Stack.GetString(PStart-1), Values));
-    end);
-    RegisterScriptFunc(['StringSplit', 'StringSplitEx'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var Separators := Stack.GetStringArray(PStart-2);
-      var Parts: TArray<String>;
-      if OrgName = 'StringSplitEx' then begin
-        var Quote := Stack.GetChar(PStart-3);
-        Parts := Stack.GetString(PStart-1).Split(Separators, Quote, Quote, TStringSplitOptions(Stack.GetInt(PStart-4)))
-      end else
-        Parts := Stack.GetString(PStart-1).Split(Separators, TStringSplitOptions(Stack.GetInt(PStart-3)));
-      Stack.SetArray(PStart, Parts);
-    end);
-    RegisterScriptFunc('ISSigVerify', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      const ISSigAllowedKeys = ConvertAllowedKeysRuntimeIDsToISSigAllowedKeys(TStringList(Stack.GetClass(PStart-1)));
-      const Filename = Stack.GetString(PStart-2);
-      const VerifyFilename = Stack.GetBool(PStart-3);
-      const KeepOpen = Stack.GetBool(PStart-4);
-
-      { Verify signature & file, keeping open afterwards if requested
-        Also see TrustFunc's CheckFileTrust which can also keep open afterwards }
-      var F := TFileStream.Create(Filename, fmOpenRead or fmShareDenyWrite);
-      try
-        var ExpectedFileHash: TSHA256Digest;
-        DoISSigVerify(nil, F, Filename, VerifyFilename, ISSigAllowedKeys, ExpectedFileHash);
-         { Couldn't get the SHA-256 while downloading so need to get and check it now }
-        const ActualFileHash = ISSigCalcStreamHash(F);
-        if not SHA256DigestsEqual(ActualFileHash, ExpectedFileHash) then
-          VerificationError(veFileHashIncorrect);
-      except
-        FreeAndNil(F);
-        raise;
-      end;
-      if not KeepOpen then
-        FreeAndNil(F);
-
-      Stack.SetClass(PStart, F);
-    end);
-    RegisterScriptFunc('Round', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      const SaveRoundMode = GetRoundMode;
-      try
-        SetRoundMode(rmNearest);
-        Stack.SetInt64(PStart, Round(Stack.GetReal(PStart-1)));
-      finally
-        SetRoundMode(SaveRoundMode);
-      end;
-    end);
-    RegisterScriptFunc('Trunc', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt64(PStart, Trunc(Stack.GetReal(PStart-1)));
-    end);
-    RegisterScriptFunc('MulDiv', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, MulDiv(Stack.GetInt(PStart-1), Stack.GetInt(PStart-2), Stack.GetInt(PStart-3)));
-    end);
-    RegisterScriptFunc('StrToColor', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var Hex := Stack.GetString(PStart-1);
-      if (Length(Hex) = 7) and (Hex[1] = '#') then
-        Hex := '$' + Copy(Hex, 6, 2)  + Copy(Hex, 4, 2) + Copy(Hex, 2, 2);
-      Stack.SetInt(PStart, SysUtils.StrToInt(Hex));
-    end);
-    RegisterScriptFunc('RPos', procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      Stack.SetInt(PStart, Stack.GetString(PStart-2).LastIndexOf(Stack.GetString(PStart-1)) + 1);
-    end);
-    RegisterScriptFunc(['ApplyPathRedirRules', 'ApplyPathRedirRulesForCurrentProcess'], procedure(const Caller: TPSExec; const OrgName: AnsiString; const Stack: TPSStack; const PStart: Integer)
-    begin
-      var TargetProcess: TPathRedirTargetProcess;
-      if OrgName = 'ApplyPathRedirRulesForCurrentProcess' then
-        TargetProcess := tpCurrent
-      else
-        TargetProcess := TPathRedirTargetProcess(Stack.GetInt(PStart-3));
-      const Path = Stack.GetString(PStart-2);
-      if Path = '' then
-        InternalError(Format('%s: Path must not be empty', [OrgName]));
-      Stack.SetString(PStart, ApplyPathRedirRules(Stack.GetBool(PStart-1),
-        Path, TargetProcess));
-    end);
+    RegisterScriptFunc('BRINGTOFRONTANDRESTORE', ScriptBRINGTOFRONTANDRESTORE);
+    RegisterScriptFunc('WizardDirValue', sfNoUninstall, ScriptWizardDirValue);
+    RegisterScriptFunc('WizardGroupValue', sfNoUninstall, ScriptWizardGroupValue);
+    RegisterScriptFunc('WizardNoIcons', sfNoUninstall, ScriptWizardNoIcons);
+    RegisterScriptFunc('WizardSetupType', sfNoUninstall, ScriptWizardSetupType);
+    RegisterScriptFunc(['WizardSelectedComponents', 'WizardSelectedTasks'], sfNoUninstall, ScriptWizardSelectedComponents);
+    RegisterScriptFunc(['WizardSelectComponents', 'WizardSelectTasks'], sfNoUninstall, ScriptWizardSelectComponents);
+    RegisterScriptFunc('WizardSetBackImage', ScriptWizardSetBackImage);
+    RegisterScriptFunc('WizardSilent', sfNoUninstall, ScriptWizardSilent);
+    RegisterScriptFunc('ISUNINSTALLER', ScriptISUNINSTALLER);
+    RegisterScriptFunc('UninstallSilent', sfOnlyUninstall, ScriptUninstallSilent);
+    RegisterScriptFunc('CurrentFilename', sfNoUninstall, ScriptCurrentFilename);
+    RegisterScriptFunc('CurrentSourceFilename', sfNoUninstall, ScriptCurrentSourceFilename);
+    RegisterScriptFunc('CASTSTRINGTOINTEGER', ScriptCASTSTRINGTOINTEGER);
+    RegisterScriptFunc('CASTINTEGERTOSTRING', ScriptCASTINTEGERTOSTRING);
+    RegisterScriptFunc('ABORT', ScriptABORT);
+    RegisterScriptFunc('GETEXCEPTIONMESSAGE', ScriptGETEXCEPTIONMESSAGE);
+    RegisterScriptFunc('RAISEEXCEPTION', ScriptRAISEEXCEPTION);
+    RegisterScriptFunc('SHOWEXCEPTIONMESSAGE', ScriptSHOWEXCEPTIONMESSAGE);
+    RegisterScriptFunc('TERMINATED', ScriptTERMINATED);
+    RegisterScriptFunc('GETPREVIOUSDATA', ScriptGETPREVIOUSDATA);
+    RegisterScriptFunc('SETPREVIOUSDATA', ScriptSETPREVIOUSDATA);
+    RegisterScriptFunc('LOADSTRINGFROMFILE', ScriptLOADSTRINGFROMFILE);
+    RegisterScriptFunc('LOADSTRINGFROMLOCKEDFILE', ScriptLOADSTRINGFROMLOCKEDFILE);
+    RegisterScriptFunc('LOADSTRINGSFROMFILE', ScriptLOADSTRINGSFROMFILE);
+    RegisterScriptFunc('LOADSTRINGSFROMLOCKEDFILE', ScriptLOADSTRINGSFROMLOCKEDFILE);
+    RegisterScriptFunc('SAVESTRINGTOFILE', ScriptSAVESTRINGTOFILE);
+    RegisterScriptFunc('SAVESTRINGSTOFILE', ScriptSAVESTRINGSTOFILE);
+    RegisterScriptFunc('SAVESTRINGSTOUTF8FILE', ScriptSAVESTRINGSTOUTF8FILE);
+    RegisterScriptFunc('SAVESTRINGSTOUTF8FILEWITHOUTBOM', ScriptSAVESTRINGSTOUTF8FILEWITHOUTBOM);
+    RegisterScriptFunc('GETUNINSTALLPROGRESSFORM', ScriptGETUNINSTALLPROGRESSFORM);
+    RegisterScriptFunc('CREATECALLBACK', ScriptCREATECALLBACK);
+    RegisterScriptFunc('ISDOTNETINSTALLED', ScriptISDOTNETINSTALLED);
+    RegisterScriptFunc('ISMSIPRODUCTINSTALLED', ScriptISMSIPRODUCTINSTALLED);
+    RegisterScriptFunc('INITIALIZEBITMAPBUTTONFROMICON', ScriptINITIALIZEBITMAPBUTTONFROMICON);
+    RegisterScriptFunc('INITIALIZEBITMAPIMAGEFROMICON', ScriptINITIALIZEBITMAPIMAGEFROMICON);
+    RegisterScriptFunc('InitializeBitmapButtonFromStockIcon', ScriptInitializeBitmapButtonFromStockIcon);
+    RegisterScriptFunc('InitializeBitmapImageFromStockIcon', ScriptInitializeBitmapImageFromStockIcon);
+    RegisterScriptFunc(['Extract7ZipArchive', 'ExtractArchive'], ScriptExtract7ZipArchive);
+    RegisterScriptFunc('MapArchiveExtensions', ScriptMapArchiveExtensions);
+    RegisterScriptFunc('DEBUGGING', ScriptDEBUGGING);
+    RegisterScriptFunc('StringJoin', ScriptStringJoin);
+    RegisterScriptFunc(['StringSplit', 'StringSplitEx'], ScriptStringSplit);
+    RegisterScriptFunc('ISSigVerify', ScriptISSigVerify);
+    RegisterScriptFunc('Round', ScriptRound);
+    RegisterScriptFunc('Trunc', ScriptTrunc);
+    RegisterScriptFunc('MulDiv', ScriptMulDiv);
+    RegisterScriptFunc('StrToColor', ScriptStrToColor);
+    RegisterScriptFunc('RPos', ScriptRPos);
+    RegisterScriptFunc(['ApplyPathRedirRules', 'ApplyPathRedirRulesForCurrentProcess'], ScriptApplyPathRedirRules);
   end;
 
   procedure RegisterDelphiFunction(ProcPtr: Pointer; const Name: AnsiString;
@@ -2117,6 +2936,7 @@ begin
     raise Exception.Create('Count <> Length(DelphiScriptFuncTable)');
   {$ENDIF}
 
+  {$IFNDEF FPC}
   { The following should register all functions in TestInnerfuseScriptFuncTable
     Internal, used only by Script.Test.iss }
   {$IFDEF DEBUG}
@@ -2462,6 +3282,7 @@ begin
     else if TypeName = 'TTestHandlerArrString' then Size := SizeOf(TTestHandlerArrString);
     Stack.SetInt(PStart, Size);
   end);
+  {$ENDIF}
 end;
 
 initialization

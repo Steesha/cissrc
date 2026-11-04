@@ -27,6 +27,7 @@ implementation
   - It has no loadFrom entry for sspicli.dll. Setup loads it through
     winhttp.dll, but SetupLdr doesn't load it. }
 
+{$IFNDEF INNO_SOURCE_RESOURCES}
 {$IFDEF SETUPLDRPROJ}
   {$IFNDEF WIN64}
   {$R SetupLdr.XPTheme-x86.res}
@@ -39,6 +40,7 @@ implementation
   {$ELSE}
   {$R Setup.XPTheme-x64.res}
   {$ENDIF}
+{$ENDIF}
 {$ENDIF}
 
 uses

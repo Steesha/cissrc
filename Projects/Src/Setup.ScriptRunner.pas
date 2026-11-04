@@ -137,8 +137,9 @@ end;
 procedure TScriptRunner.SetPSExecParameters(const Parameters: array of Const; Params: TPSList);
 var
   Param: PPSVariant;
+  I: Integer;
 begin
-  for var I := High(Parameters) downto Low(Parameters) do begin
+  for I := High(Parameters) downto Low(Parameters) do begin
     case Parameters[I].vType of
       vtAnsiString:
         begin
@@ -209,6 +210,7 @@ var
   I: Integer;
   ForceDelayLoad: Boolean;
   ErrorCode: LongInt;
+  DelayLoaded: Boolean;
 begin
   ScriptRunner := Sender.ID;
   ForceDelayLoad := False;
@@ -253,7 +255,6 @@ begin
   else
     ScriptRunner.Log('Skipping.'); { We're actually still going to call ProcessDllImport but this doesn't matter to the user. }
 
-  var DelayLoaded: Boolean;
   Result := ProcessDllImportEx2(Sender, p, ForceDelayLoad, DelayLoaded, ErrorCode);
 
   if DllName <> '' then begin
@@ -394,21 +395,26 @@ begin
 end;
 
 procedure WriteBackParameters(const Parameters: array of Const; const Params: TPSList);
+var
+  I: Integer;
 begin
   { Write back new Boolean values to vtPointer-type parameters }
-  for var I := 0 to High(Parameters) do
+  for I := 0 to High(Parameters) do
     if Parameters[I].vType = vtPointer then
       Boolean(Parameters[I].VPointer^) := PPSVariantU8(Params[Cardinal(High(Parameters)-I)]).Data = 1;
 end;
 
 procedure TScriptRunner.InternalRunProcedure(const Name: AnsiString; const Parameters: array of Const; const CheckNamingAttribute, MustExist: Boolean);
+var
+  ProcNos, Params: TPSList;
+  I: Cardinal;
 begin
-  const ProcNos = TPSList.Create;
+  ProcNos := TPSList.Create;
   try
     if GetProcNos(Name, CheckNamingAttribute, ProcNos) <> 0 then begin
       ScriptClassesLibraryUpdateVars(FPSExec);
-      for var I := 0 to ProcNos.Count-1 do begin
-        const Params = TPSList.Create;
+      for I := 0 to ProcNos.Count-1 do begin
+        Params := TPSList.Create;
         try
           SetPSExecParameters(Parameters, Params);
           FPSExec.RunProc(Params, Cardinal(ProcNos[I]));
@@ -439,8 +445,12 @@ begin
 end;
 
 function TScriptRunner.InternalRunBooleanFunction(const Name: AnsiString; const Parameters: array of Const; const CheckNamingAttribute: Boolean; const BreakCondition: TBreakCondition; const MustExist, Default: Boolean): Boolean;
+var
+  ProcNos, Params: TPSList;
+  I: Cardinal;
+  Res: PPSVariant;
 begin
-  const ProcNos = TPSList.Create;
+  ProcNos := TPSList.Create;
   try
     if GetProcNos(Name, CheckNamingAttribute, ProcNos) <> 0 then begin
       if not (BreakCondition in [bcNone, bcTrue, bcFalse]) or
@@ -448,11 +458,10 @@ begin
         ShowError('Internal error: InternalRunBooleanFunction: invalid BreakCondition');
       Result := True; { Silence compiler }
       ScriptClassesLibraryUpdateVars(FPSExec);
-      for var I := 0 to ProcNos.Count-1 do begin
-        const Params = TPSList.Create;
+      for I := 0 to ProcNos.Count-1 do begin
+        Params := TPSList.Create;
         try
           SetPSExecParameters(Parameters, Params);
-          var Res: PPSVariant;
           SetPSExecReturnValue(Params, btU8, Res);
           FPSExec.RunProc(Params, Cardinal(ProcNos[I]));
           WriteBackParameters(Parameters, Params);
@@ -487,8 +496,12 @@ begin
 end;
 
 function TScriptRunner.InternalRunIntegerFunction(const Name: AnsiString; const Parameters: array of Const; const CheckNamingAttribute: Boolean; const BreakCondition: TBreakCondition; const MustExist: Boolean; const Default: Integer): Integer;
+var
+  ProcNos, Params: TPSList;
+  I: Cardinal;
+  Res: PPSVariant;
 begin
-  const ProcNos = TPSList.Create;
+  ProcNos := TPSList.Create;
   try
     if GetProcNos(Name, CheckNamingAttribute, ProcNos) <> 0 then begin
       if not (BreakCondition in [bcNone, bcNonZero]) or
@@ -496,11 +509,10 @@ begin
         ShowError('Internal error: InternalRunIntegerFunction: invalid BreakCondition');
       Result := 0; { Silence compiler }
       ScriptClassesLibraryUpdateVars(FPSExec);
-      for var I := 0 to ProcNos.Count-1 do begin
-        const Params = TPSList.Create;
+      for I := 0 to ProcNos.Count-1 do begin
+        Params := TPSList.Create;
         try
           SetPSExecParameters(Parameters, Params);
-          var Res: PPSVariant;
           SetPSExecReturnValue(Params, btS32, Res);
           FPSExec.RunProc(Params, Cardinal(ProcNos[I]));
           WriteBackParameters(Parameters, Params);
@@ -534,8 +546,12 @@ begin
 end;
 
 function TScriptRunner.InternalRunStringFunction(const Name: AnsiString; const Parameters: array of Const; const CheckNamingAttribute: Boolean; const BreakCondition: TBreakCondition; const MustExist: Boolean; const Default: String): String;
+var
+  ProcNos, Params: TPSList;
+  I: Cardinal;
+  Res: PPSVariant;
 begin
-  const ProcNos = TPSList.Create;
+  ProcNos := TPSList.Create;
   try
     if GetProcNos(Name, CheckNamingAttribute, ProcNos) <> 0 then begin
       if not (BreakCondition in [bcNone, bcNonEmpty]) or
@@ -543,11 +559,10 @@ begin
         ShowError('Internal error: InternalRunStringFunction: invalid BreakCondition');
       Result := ''; { Silence compiler }
       ScriptClassesLibraryUpdateVars(FPSExec);
-      for var I := 0 to ProcNos.Count-1 do begin
-        const Params = TPSList.Create;
+      for I := 0 to ProcNos.Count-1 do begin
+        Params := TPSList.Create;
         try
           SetPSExecParameters(Parameters, Params);
-          var Res: PPSVariant;
           SetPSExecReturnValue(Params, btUnicodeString, Res);
           FPSExec.RunProc(Params, Cardinal(ProcNos[I]));
           WriteBackParameters(Parameters, Params);

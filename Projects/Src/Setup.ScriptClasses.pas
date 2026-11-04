@@ -20,7 +20,7 @@ procedure ScriptClassesLibraryUpdateVars(ScriptInterpreter: TIFPSExec);
 implementation
 
 uses
-  Windows, Controls, Forms, StdCtrls, Graphics, Imaging.pngimage, Classes,
+  Windows, Controls, Forms, StdCtrls, Graphics, {$IFDEF FPC}InnoPngImage{$ELSE}Imaging.pngimage{$ENDIF}, Classes,
   uPSR_std, uPSR_classes, uPSR_graphics, uPSR_controls, uPSR_forms,
   uPSR_stdctrls, uPSR_extctrls, uPSR_comobj,
   NewStaticText, NewCheckListBox, NewProgressBar, RichEditViewer,
@@ -125,6 +125,31 @@ begin
   Cl.Add(TNewProgressBar);
 end;
 
+{$IFDEF FPC}
+{$PUSH}
+{$PACKENUM 1}
+type
+  TScriptBevelKind = (bkNone, bkTile, bkSoft, bkFlat);
+{$POP}
+
+procedure TWinControlBevelKind_R(Self: TWinControl; var Value: TScriptBevelKind);
+begin
+  if TWinControlAccess(Self).BorderStyle = bsNone then
+    Value := bkNone
+  else
+    Value := bkFlat;
+end;
+
+procedure TWinControlBevelKind_W(Self: TWinControl; const Value: TScriptBevelKind);
+begin
+  { LCL provides a single border style for the VCL bevel variants }
+  if Value = bkNone then
+    TWinControlAccess(Self).BorderStyle := bsNone
+  else
+    TWinControlAccess(Self).BorderStyle := bsSingle;
+end;
+{$ENDIF}
+
 procedure TRichEditViewerRTFText_W(Self: TRichEditViewer; const T: AnsiString); begin Self.RTFText := T; end;
 
 procedure RegisterRichEditViewer_R(Cl: TPSRuntimeClassImporter);
@@ -132,6 +157,9 @@ begin
   with Cl.Add(TRichEditViewer) do
   begin
     RegisterPropertyHelper(nil, @TRichEditViewerRTFText_W, 'RTFText');
+    {$IFDEF FPC}
+    RegisterPropertyHelper(@TWinControlBevelKind_R, @TWinControlBevelKind_W, 'BevelKind');
+    {$ENDIF}
   end;
 end;
 
@@ -166,18 +194,22 @@ begin
   Cl.Add(TFolderTreeView);
 end;
 
+{$IFNDEF FPC}
 procedure TBitmapAlphaFormat_W(Self: TBitmap; const T: TAlphaFormat); begin Self.AlphaFormat := T; end;
 procedure TBitmapAlphaFormat_R(Self: TBitmap; var T: TAlphaFormat); begin T := Self.AlphaFormat; end;
+{$ENDIF}
 
 procedure TBitmapButtonBitmap_W(Self: TBitmapButton; const T: TBitmap); begin Self.Bitmap := T; end;
 procedure TBitmapButtonBitmap_R(Self: TBitmapButton; var T: TBitmap); begin T := Self.Bitmap; end;
 
 procedure RegisterBitmapButton_R(Cl: TPSRuntimeClassImporter);
 begin
+  {$IFNDEF FPC}
   with Cl.FindClass('TBitmap') do
   begin
     RegisterPropertyHelper(@TBitmapAlphaFormat_R, @TBitmapAlphaFormat_W, 'AlphaFormat');
   end;
+  {$ENDIF}
   with Cl.Add(TBitmapButton) do
   begin
     RegisterPropertyHelper(@TBitmapButtonBitmap_R, @TBitmapButtonBitmap_W, 'Bitmap');
@@ -195,6 +227,11 @@ begin
   end;
 end;
 
+{$IFDEF FPC}
+procedure TNewButtonCommandLinkHint_R(Self: TNewButton; var Value: String); begin Value := Self.CommandLinkHint; end;
+procedure TNewButtonCommandLinkHint_W(Self: TNewButton; const Value: String); begin Self.CommandLinkHint := Value; end;
+{$ENDIF}
+
 procedure RegisterNewCtrls_R(Cl: TPSRuntimeClassImporter);
 begin
   Cl.Add(TNewEdit);
@@ -205,6 +242,9 @@ begin
   with Cl.Add(TNewButton) do
   begin
     RegisterMethod(@TNewButton.AdjustHeightIfCommandLink, 'AdjustHeightIfCommandLink');
+    {$IFDEF FPC}
+    RegisterPropertyHelper(@TNewButtonCommandLinkHint_R, @TNewButtonCommandLinkHint_W, 'CommandLinkHint');
+    {$ENDIF}
   end;
   Cl.Add(TNewCheckBox);
   Cl.Add(TNewRadioButton);
@@ -473,10 +513,14 @@ begin
     RIRegisterTGraphicControl(Cl);
     RIRegisterTCustomControl(Cl);
     RIRegister_TDragObject(Cl);
-    RIRegisterTSizeConstraints(cl);
+    {$IFDEF FPC}Cl.Add(TSizeConstraints){$ELSE}RIRegisterTSizeConstraints(Cl){$ENDIF};
 
     { Forms }
+    {$IFDEF FPC}
+    Cl.Add(TScrollingWinControl).RegisterMethod(@TScrollingWinControl.ScrollInView, 'ScrollInView');
+    {$ELSE}
     RIRegisterTScrollingWinControl(Cl);
+    {$ENDIF}
     RIRegisterTForm(Cl);
 
     { StdCtrls }
@@ -500,6 +544,9 @@ begin
     RIRegisterTBevel(Cl);
     RIRegisterTCustomPanel(Cl);
     RIRegisterTPanel(Cl);
+    {$IFDEF FPC}
+    Cl.FindClass('TPanel').RegisterPropertyHelper(@TWinControlBevelKind_R, @TWinControlBevelKind_W, 'BevelKind');
+    {$ENDIF}
     RIRegisterTCustomLinkLabel(Cl);
     RIRegisterTLinkLabel(Cl);
 

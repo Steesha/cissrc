@@ -12,9 +12,17 @@ unit Setup.InstFunc;
 interface
 
 uses
-  Windows, SysUtils, Diagnostics, SHA256,
+  Windows, SysUtils, SHA256,
   Shared.CommonFunc, Shared.FileClass,
   Setup.DownloadFileFunc, Compression.SevenZipDecoder;
+
+{$IFDEF FPC}
+const
+  REGSTR_PATH_SETUP = 'Software\Microsoft\Windows\CurrentVersion';
+  REGSTR_PATH_APPPATHS = REGSTR_PATH_SETUP + '\App Paths';
+  REGSTR_PATH_RUNONCE = REGSTR_PATH_SETUP + '\RunOnce';
+  REGSTR_PATH_UNINSTALL = REGSTR_PATH_SETUP + '\Uninstall';
+{$ENDIF}
 
 type
   PSimpleStringListArray = ^TSimpleStringListArray;
@@ -49,7 +57,8 @@ type
   private
     FOnDownloadProgress: TOnDownloadProgress;
     FOnExtractionProgress: TOnExtractionProgress;
-    FStopWatch: TStopWatch;
+    FLastProgressTick: UInt64;
+    FHasProgressTick: Boolean;
     FLastOkProgress: Int64;
     function ThrottleOk(const Progress, ProgressMax: Int64): Boolean;
   public
@@ -99,7 +108,6 @@ function ModifyPifFile(const Filename: String; const CloseOnExit: Boolean): Bool
 function NewForceDirectories(const Dir: String): Boolean;
 procedure RaiseOleError(const FunctionName: String; const ResultCode: HRESULT);
 procedure RefreshEnvironment;
-function RegRootKeyToUInt32(const RootKey: HKEY): UInt32;
 procedure UnregisterFont(const FontName, FontFilename: String; const PerUserFont: Boolean);
 procedure RestartReplace(const ExistingFile, DestFile: String);
 function TryRestartReplace(ExistingFile, DestFile: String;
@@ -117,7 +125,7 @@ procedure ShellChangeNotifyPath(const EventId: Integer; const Path: String;
 implementation
 
 uses
-  Messages, ShellApi, ShlObj, RegStr, Math,
+  Messages, ShellApi, ShlObj, {$IFNDEF FPC}RegStr,{$ENDIF} Math,
   PathFunc, UnsignedFunc,
   Shared.SetupTypes, Shared.SetupMessageIDs,
   SetupLdrAndSetup.Messages, Setup.PathRedir,
@@ -150,23 +158,6 @@ begin
     [FunctionName, IntToHexStr8(ResultCode), Win32ErrorString(DWORD(ResultCode))]));
 end;
 
-function RegRootKeyToUInt32(const RootKey: HKEY): UInt32;
-{ Returns RootKey casted to UInt32 if it appears to be a predefined HKEY_*
-  value: $800000xx or $FFFFFFFF800000xx. Otherwise, returns 0.
-  HKEY_* constants are sign-extended, but root keys converted from UInt32,
-  such as those of registry entries or read back by CrackRegExtraData, are
-  zero-extended. Windows accepts both, so we do as well.
-  But we do not allow anything other than 0 or $FFFFFFFF in the upper 32 bits,
-  regardless of whether Windows allows it. }
-begin
-  const KeyShifted = RootKey shr 8;
-  if (KeyShifted = $800000)
-     {$IFDEF WIN64} or (KeyShifted = $FFFFFFFF800000) {$ENDIF} then
-    Result := UInt32(RootKey)
-  else
-    Result := 0;
-end;
-
 function GetRegRootKeyName(const RootKey: HKEY): String;
 begin
   if UInt32(RootKey) = UInt32(HKEY_AUTO) then
@@ -190,6 +181,10 @@ function TryRestartReplace(ExistingFile, DestFile: String;
 { Renames ExistingFile to DestFile the next time the system boots. If DestFile
   already exists, it will be replaced. If DestFile is an empty string, then
   ExistingFile will be deleted. }
+var
+  MoveFlags: DWORD;
+  PrevState: TPreviousFsRedirectionState;
+  DestFileP: PWideChar;
 begin
   { On 32-bit Setup, we have to disable WOW64 FS redirection and pass native
     paths because MoveFileEx mishandles Sysnative paths.
@@ -198,7 +193,7 @@ begin
     shows Sysnative for the source path (needs to be System32) and SysWOW64
     for the destination path (clearly wrong). }
 
-  var MoveFlags: DWORD := MOVEFILE_DELAY_UNTIL_REBOOT;
+  MoveFlags := MOVEFILE_DELAY_UNTIL_REBOOT;
 
   ExistingFile := ApplyPathRedirRules(IsCurrentProcess64Bit, ExistingFile,
     tpNativeBit);
@@ -208,16 +203,15 @@ begin
     MoveFlags := MoveFlags or MOVEFILE_REPLACE_EXISTING;
   end;
 
-  var PrevState: TPreviousFsRedirectionState;
   if not DisableFsRedirectionIf(IsWin64, PrevState) then begin
     Result := False;
     ErrorCode := GetLastError;
   end else begin
     try
-      var DestFileP: PChar := nil;
+      DestFileP := nil;
       if DestFile <> '' then
         DestFileP := PChar(DestFile);
-      Result := MoveFileEx(PChar(ExistingFile), DestFileP, MoveFlags);
+      Result := MoveFileExW(PWideChar(ExistingFile), DestFileP, MoveFlags);
       ErrorCode := GetLastError;
     finally
       RestoreFsRedirection(PrevState);
@@ -226,8 +220,9 @@ begin
 end;
 
 procedure RestartReplace(const ExistingFile, DestFile: String);
+var
+  ErrorCode: DWORD;
 begin
-  var ErrorCode: DWORD;
   if not TryRestartReplace(ExistingFile, DestFile, ErrorCode) then
     Win32ErrorMsgEx('MoveFileEx', ErrorCode);
 end;
@@ -246,7 +241,7 @@ function DelTree(const Path: String;
 var
   BasePath, FindSpec: String;
   H: THandle;
-  FindData: TWin32FindData;
+  FindData: TWin32FindDataW;
   S: String;
 begin
   Result := True;
@@ -260,7 +255,7 @@ begin
       BasePath := PathExtractPath(Path);
       FindSpec := Path;
     end;
-    H := FindFirstFile(PChar(FindSpec), FindData);
+    H := FindFirstFileW(PWideChar(FindSpec), FindData);
     if H <> INVALID_HANDLE_VALUE then begin
       try
         repeat
@@ -270,7 +265,7 @@ begin
               { Strip the read-only attribute if this is a file, or if it's a
                 directory and we're deleting subdirectories also }
               if (FindData.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY = 0) or DeleteSubdirsAlso then
-                SetFileAttributes(PChar(BasePath + S),
+                SetFileAttributesW(PWideChar(BasePath + S),
                   FindData.dwFileAttributes and not FILE_ATTRIBUTE_READONLY);
             end;
             if FindData.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY = 0 then begin
@@ -279,7 +274,7 @@ begin
                   Result := False;
               end
               else begin
-                if not Windows.DeleteFile(PChar(BasePath + S)) then
+                if not Windows.DeleteFileW(PWideChar(BasePath + S)) then
                   Result := False;
               end;
             end
@@ -290,7 +285,7 @@ begin
                   Result := False;
             end;
           end;
-        until (BreakOnError and not Result) or not FindNextFile(H, FindData);
+        until (BreakOnError and not Result) or not FindNextFileW(H, FindData);
       finally
         Windows.FindClose(H);
       end;
@@ -302,7 +297,7 @@ begin
         Result := False;
     end
     else begin
-      if not RemoveDirectory(PChar(Path)) then
+      if not RemoveDirectoryW(PWideChar(Path)) then
         Result := False;
     end;
   end;
@@ -314,9 +309,9 @@ function IsDirEmpty(const Dir: String): Boolean;
   returned. }
 var
   H: THandle;
-  FindData: TWin32FindData;
+  FindData: TWin32FindDataW;
 begin
-  H := FindFirstFile(PChar(AddBackslash(Dir) + '*'), FindData);
+  H := FindFirstFileW(PWideChar(AddBackslash(Dir) + '*'), FindData);
   if H <> INVALID_HANDLE_VALUE then begin
     try
       Result := True;
@@ -332,7 +327,7 @@ begin
           Result := False;
           Break;
         end;
-        if not FindNextFile(H, FindData) then begin
+        if not FindNextFileW(H, FindData) then begin
           if GetLastError <> ERROR_NO_MORE_FILES then begin
             { Exited the loop early due to some unexpected error. The directory
               might not be empty, so return False }
@@ -358,16 +353,19 @@ const
 var
   K: HKEY;
   Disp, Size, CurType, NewType: DWORD;
-  CountStr: String;
+  CountStr, RedirFilename: String;
+  ErrorCode: DWORD;
+  SharedFileP: PWideChar;
+  Count: Integer;
 begin
   if Key64Bit and not IsWin64 then
     InternalError('Cannot access 64-bit SharedDLLs key on 32-bit Windows');
 
-  const RedirFilename = ApplyRedirForRegistrationOperation(Key64Bit, Filename);
+  RedirFilename := ApplyRedirForRegistrationOperation(Key64Bit, Filename);
   LogFmt('Incrementing shared file reference count (%d-bit SharedDLLs key): %s',
     [BitsFrom64BitBoolean(Key64Bit), RedirFilename]);
 
-  const ErrorCode = DWORD(RegCreateKeyExView(RegViewFrom64BitBoolean(Key64Bit),
+  ErrorCode := DWORD(RegCreateKeyExView(RegViewFrom64BitBoolean(Key64Bit),
     HKEY_LOCAL_MACHINE, SharedDLLsKey, 0, nil,
     REG_OPTION_NON_VOLATILE, KEY_QUERY_VALUE or KEY_SET_VALUE, nil, K, @Disp));
   if ErrorCode <> ERROR_SUCCESS then
@@ -376,11 +374,11 @@ begin
       FmtSetupMessage(msgErrorFunctionFailedWithMessage,
         ['RegCreateKeyEx', IntToStr(ErrorCode), Win32ErrorString(ErrorCode)]));
 
-  const SharedFileP = PChar(RedirFilename);
-  var Count := 0;
+  SharedFileP := PWideChar(RedirFilename);
+  Count := 0;
   NewType := REG_DWORD;
   try
-    if RegQueryValueEx(K, SharedFileP, nil, @CurType, nil, @Size) = ERROR_SUCCESS then
+    if RegQueryValueExW(K, SharedFileP, nil, @CurType, nil, @Size) = ERROR_SUCCESS then
       case CurType of
         REG_SZ:
           if RegQueryStringValue(K, SharedFileP, CountStr) then begin
@@ -389,7 +387,7 @@ begin
           end;
         REG_BINARY: begin
             if (Size >= 1) and (Size <= 4) then begin
-              if RegQueryValueEx(K, SharedFileP, nil, nil, PByte(@Count), @Size) <> ERROR_SUCCESS then
+              if RegQueryValueExW(K, SharedFileP, nil, nil, PByte(@Count), @Size) <> ERROR_SUCCESS then
                 { ^ relies on the high 3 bytes of Count being initialized to 0 }
                 Abort;
               NewType := REG_BINARY;
@@ -397,7 +395,7 @@ begin
           end;
         REG_DWORD: begin
             Size := SizeOf(DWORD);
-            if RegQueryValueEx(K, SharedFileP, nil, nil, PByte(@Count), @Size) <> ERROR_SUCCESS then
+            if RegQueryValueExW(K, SharedFileP, nil, nil, PByte(@Count), @Size) <> ERROR_SUCCESS then
               Abort;
           end;
       end;
@@ -412,10 +410,10 @@ begin
   case NewType of
     REG_SZ: begin
         CountStr := IntToStr(Count);
-        RegSetValueEx(K, SharedFileP, 0, NewType, PChar(CountStr), (ULength(CountStr)+1)*SizeOf(CountStr[1]));
+        RegSetValueExW(K, SharedFileP, 0, NewType, PByte(PWideChar(CountStr)), (ULength(CountStr)+1)*SizeOf(CountStr[1]));
       end;
     REG_BINARY, REG_DWORD:
-      RegSetValueEx(K, SharedFileP, 0, NewType, @Count, SizeOf(Count));
+      RegSetValueExW(K, SharedFileP, 0, NewType, @Count, SizeOf(Count));
   end;
   RegCloseKey(K);
 end;
@@ -430,17 +428,20 @@ var
   K: HKEY;
   CountRead: Boolean;
   CurType, Size: DWORD;
-  CountStr: String;
+  CountStr, RedirFilename: String;
+  ErrorCode: DWORD;
+  SharedFileP: PWideChar;
+  Count: Integer;
 begin
   Result := False;
   if Key64Bit and not IsWin64 then
     InternalError('Cannot access 64-bit SharedDLLs key on 32-bit Windows');
 
-  const RedirFilename = ApplyRedirForRegistrationOperation(Key64Bit, Filename);
+  RedirFilename := ApplyRedirForRegistrationOperation(Key64Bit, Filename);
   LogFmt('Decrementing shared file reference count (%d-bit SharedDLLs key): %s',
     [BitsFrom64BitBoolean(Key64Bit), RedirFilename]);
 
-  const ErrorCode = DWORD(RegOpenKeyExView(RegViewFrom64BitBoolean(Key64Bit),
+  ErrorCode := DWORD(RegOpenKeyExView(RegViewFrom64BitBoolean(Key64Bit),
     HKEY_LOCAL_MACHINE, SharedDLLsKey, 0, KEY_QUERY_VALUE or KEY_SET_VALUE, K));
   if ErrorCode = ERROR_FILE_NOT_FOUND then
     Exit;
@@ -450,13 +451,13 @@ begin
       FmtSetupMessage(msgErrorFunctionFailedWithMessage,
         ['RegOpenKeyEx', IntToStr(ErrorCode), Win32ErrorString(ErrorCode)]));
 
-  const SharedFileP = PChar(RedirFilename);
+  SharedFileP := PWideChar(RedirFilename);
   try
-    if RegQueryValueEx(K, SharedFileP, nil, @CurType, nil, @Size) <> ERROR_SUCCESS then
+    if RegQueryValueExW(K, SharedFileP, nil, @CurType, nil, @Size) <> ERROR_SUCCESS then
       Exit;
 
     CountRead := False;
-    var Count := 0;
+    Count := 0;
     try
       case CurType of
         REG_SZ:
@@ -466,14 +467,14 @@ begin
           end;
         REG_BINARY: begin
             if (Size >= 1) and (Size <= 4) then begin
-              if RegQueryValueEx(K, SharedFileP, nil, nil, PByte(@Count), @Size) = ERROR_SUCCESS then
+              if RegQueryValueExW(K, SharedFileP, nil, nil, PByte(@Count), @Size) = ERROR_SUCCESS then
                 { ^ relies on the high 3 bytes of Count being initialized to 0 }
                 CountRead := True;
             end;
           end;
         REG_DWORD: begin
             Size := SizeOf(DWORD);
-            if RegQueryValueEx(K, SharedFileP, nil, nil, PByte(@Count), @Size) = ERROR_SUCCESS then
+            if RegQueryValueExW(K, SharedFileP, nil, nil, PByte(@Count), @Size) = ERROR_SUCCESS then
               CountRead := True;
           end;
       end;
@@ -489,16 +490,16 @@ begin
     if Count <= 0 then begin
       Log('Shared file reference count reached zero.');
       Result := True;
-      RegDeleteValue(K, SharedFileP);
+      RegDeleteValueW(K, SharedFileP);
     end
     else begin
       case CurType of
         REG_SZ: begin
             CountStr := IntToStr(Count);
-            RegSetValueEx(K, SharedFileP, 0, REG_SZ, PChar(CountStr), (ULength(CountStr)+1)*SizeOf(Char));
+            RegSetValueExW(K, SharedFileP, 0, REG_SZ, PByte(PWideChar(CountStr)), (ULength(CountStr)+1)*SizeOf(WideChar));
           end;
         REG_BINARY, REG_DWORD:
-          RegSetValueEx(K, SharedFileP, 0, CurType, @Count, SizeOf(Count));
+          RegSetValueExW(K, SharedFileP, 0, CurType, @Count, SizeOf(Count));
       end;
     end;
   finally
@@ -509,9 +510,9 @@ end;
 function GetFileDateTime(const Filename: String; var DateTime: TFileTime): Boolean;
 var
   Handle: THandle;
-  FindData: TWin32FindData;
+  FindData: TWin32FindDataW;
 begin
-  Handle := FindFirstFile(PChar(Filename), FindData);
+  Handle := FindFirstFileW(PWideChar(Filename), FindData);
   if Handle <> INVALID_HANDLE_VALUE then begin
     Windows.FindClose(Handle);
     if FindData.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY = 0 then begin
@@ -528,8 +529,10 @@ end;
 function GetSHA256OfFile(const Filename: String): TSHA256Digest;
 { Gets SHA-256 sum as a string of the file Filename. An exception will be raised upon
   failure. }
+var
+  F: TFile;
 begin
-  const F = TFile.Create(Filename, fdOpenExisting, faRead, fsReadWrite);
+  F := TFile.Create(Filename, fdOpenExisting, faRead, fsReadWrite);
   try
     Result := GetSHA256OfFile(F);
   finally
@@ -542,12 +545,13 @@ function GetSHA256OfFile(const F: TFile): TSHA256Digest;
   failure. }
 var
   Buf: array[0..65535] of Byte;
+  Context: TSHA256Context;
+  NumRead: Cardinal;
 begin
   F.Seek(0);
-  var Context: TSHA256Context;
   SHA256Init(Context);
   while True do begin
-    var NumRead := F.Read(Buf, SizeOf(Buf));
+    NumRead := F.Read(Buf, SizeOf(Buf));
     if NumRead = 0 then
       Break;
     SHA256Update(Context, Buf, NumRead);
@@ -572,18 +576,25 @@ var
 function IsProtectedSystemFile(const Filename: String): Boolean;
 { Returns True if the specified file is protected by Windows File Protection
   (and therefore can't be replaced). }
+var
+  M: HMODULE;
+  P: Pointer;
+  NativeFilename: String;
 begin
   if not SFCInitialized then begin
-    const M = SafeLoadLibrary(PChar(AddBackslash(GetSystemDir) + 'sfc.dll'));
+    M := {$IFDEF FPC}LoadLibraryW{$ELSE}SafeLoadLibrary{$ENDIF}(
+      PWideChar(AddBackslash(GetSystemDir) + 'sfc.dll'));
     if M <> 0 then begin
-      const P = GetProcAddress(M, PAnsiChar('SfcIsFileProtected'));
-      MemoryBarrier;
-      AtomicCmpExchange(@SfcIsFileProtectedFunc, P, nil);
+      P := GetProcAddress(M, PAnsiChar('SfcIsFileProtected'));
+      if (P = nil) or
+        ({$IFDEF FPC}InterlockedCompareExchangePointer(PPointer(@@SfcIsFileProtectedFunc)^, P, nil)
+        {$ELSE}AtomicCmpExchange(@SfcIsFileProtectedFunc, P, nil){$ENDIF} <> nil) then
+        FreeLibrary(M);
     end;
-    MemoryBarrier;
+    {$IFDEF FPC}ReadWriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
     SFCInitialized := True;
   end;
-  MemoryBarrier;
+  {$IFDEF FPC}ReadWriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
   if Assigned(SfcIsFileProtectedFunc) then begin
     { This function takes a current-process-bit path, but SfcIsFileProtected
       wants a native-bit path.
@@ -596,7 +607,7 @@ begin
       seems to check whether the supplied filename exists in a list. This is
       very different from APIs like CreateFile, which actually open the specified
       file and definitely do support super paths. }
-    const NativeFilename = ApplyPathRedirRules(IsCurrentProcess64Bit, Filename,
+    NativeFilename := ApplyPathRedirRules(IsCurrentProcess64Bit, Filename,
       tpNativeBit, [rfNormalPath]);
     Result := SfcIsFileProtectedFunc(0, PChar(NativeFilename));
   end
@@ -607,6 +618,8 @@ end;
 procedure HandleProcessWait(ProcessHandle: THandle; const Wait: TExecWait;
   const ProcessMessagesProc: TProcedure; const OutputReader: TCreateProcessOutputReader;
   var ResultCode: DWORD);
+var
+  WaitMilliseconds, WaitResult: DWORD;
 begin
   try
     if Wait = ewWaitUntilIdle then begin
@@ -617,8 +630,8 @@ begin
     if Wait = ewWaitUntilTerminated then begin
       { Wait until the process returns, but still process any messages that
         arrive and read the output if requested. }
-      var WaitMilliseconds := Cardinal(IfThen(OutputReader <> nil, 50, INFINITE));
-      var WaitResult: DWORD := 0;
+      WaitMilliseconds := Cardinal(IfThen(OutputReader <> nil, 50, INFINITE));
+      WaitResult := 0;
       repeat
         { Process any pending messages first because MsgWaitForMultipleObjects
           (called below) only returns when *new* messages arrive, unless there's
@@ -652,8 +665,11 @@ function InstExec(const DisableFsRedir: Boolean; const Filename, Params: String;
   var ResultCode: DWORD): Boolean;
 var
   CmdLine: String;
-  StartupInfo: TStartupInfo;
+  StartupInfo: Windows.TStartupInfoW;
   ProcessInfo: TProcessInformation;
+  InheritHandles: Boolean;
+  dwCreationFlags, LastError: DWORD;
+  NulDevice: THandle;
 begin
   {Also see IsppFuncs' Exec }
 
@@ -689,13 +705,14 @@ begin
   if WorkingDir = '' then
     WorkingDir := GetSystemDir;
 
-  var InheritHandles := False;
-  var dwCreationFlags: DWORD := CREATE_DEFAULT_ERROR_MODE;
-  var NulDevice: THandle := INVALID_HANDLE_VALUE;
+  InheritHandles := False;
+  dwCreationFlags := CREATE_DEFAULT_ERROR_MODE;
+  NulDevice := INVALID_HANDLE_VALUE;
 
   if ((OutputReader <> nil) or HideConsole) and (Wait = ewWaitUntilTerminated) then begin
     if OutputReader <> nil then
-      OutputReader.UpdateStartupInfo(StartupInfo)
+      { The reader updates only flags and handles, which have the same A/W layout }
+      OutputReader.UpdateStartupInfo({$IFDEF FPC}TStartupInfo(StartupInfo){$ELSE}StartupInfo{$ENDIF})
     else begin
       { Without NUL as stdin, the program could wait for input on its hidden console }
       NulDevice := CreateInheritableNulDevice(GENERIC_READ or GENERIC_WRITE);
@@ -713,7 +730,7 @@ begin
   Result := CreateProcessRedir(DisableFsRedir, nil, PChar(CmdLine), nil, nil,
     InheritHandles, dwCreationFlags, nil, PChar(WorkingDir),
     StartupInfo, ProcessInfo);
-  const LastError = GetLastError;
+  LastError := GetLastError;
   if NulDevice <> INVALID_HANDLE_VALUE then
     CloseHandle(NulDevice);
   if not Result then begin
@@ -733,7 +750,7 @@ function InstShellExec(const Verb, Filename, Params: String; WorkingDir: String;
   const Wait: TExecWait; const ShowCmd: Integer;
   const ProcessMessagesProc: TProcedure; var ResultCode: DWORD): Boolean;
 var
-  Info: TShellExecuteInfo;
+  Info: TShellExecuteInfoW;
 begin
   if WorkingDir = '' then begin
     WorkingDir := PathExtractDir(Filename);
@@ -746,12 +763,12 @@ begin
   Info.fMask := SEE_MASK_FLAG_NO_UI or SEE_MASK_FLAG_DDEWAIT or
     SEE_MASK_NOCLOSEPROCESS;
   if Verb <> '' then
-    Info.lpVerb := PChar(Verb);
-  Info.lpFile := PChar(Filename);
-  Info.lpParameters := PChar(Params);
-  Info.lpDirectory := PChar(WorkingDir);
+    Info.lpVerb := PWideChar(Verb);
+  Info.lpFile := PWideChar(Filename);
+  Info.lpParameters := PWideChar(Params);
+  Info.lpDirectory := PWideChar(WorkingDir);
   Info.nShow := ShowCmd;
-  Result := ShellExecuteEx(@Info);
+  Result := ShellExecuteExW(@Info);
   if not Result then begin
     ResultCode := GetLastError;
     Exit;
@@ -766,8 +783,10 @@ end;
 function CheckForOrCreateMutexes(Mutexes: String; const Create: Boolean): Boolean;
 
   function MutexPos(const S: String): Integer;
+  var
+    I: Integer;
   begin
-    for var I := 1 to Length(S) do
+    for I := 1 to Length(S) do
       if (S[I] = ',') and ((I = 1) or (S[I-1] <> '\')) then
         Exit(I);
     Result := 0;
@@ -790,7 +809,7 @@ begin
       if Create then begin
         CreateMutex(M)
       end else begin
-        H := OpenMutex(SYNCHRONIZE, False, PChar(M));
+        H := OpenMutexW(SYNCHRONIZE, False, PWideChar(M));
         if H <> 0 then begin
           CloseHandle(H);
           Result := True;
@@ -847,7 +866,7 @@ var
   Size: DWORD;
 begin
   Size := SizeOf(Buf) div SizeOf(Buf[0]);
-  if GetComputerName(Buf, Size) then
+  if GetComputerNameW(@Buf[0], Size) then
     Result := Buf
   else
     Result := '';
@@ -859,7 +878,7 @@ var
   BufSize: DWORD;
 begin
   BufSize := SizeOf(Buf) div SizeOf(Buf[0]);
-  if GetUserName(Buf, BufSize) then
+  if GetUserNameW(@Buf[0], BufSize) then
     Result := Buf
   else
     Result := '';
@@ -943,20 +962,20 @@ begin
 end;
 
 procedure UnregisterFont(const FontName, FontFilename: String; const PerUserFont: Boolean);
+var
+  RootKey, K: HKEY;
 begin
-  var RootKey: HKEY;
   if PerUserFont then
     RootKey := HKEY_CURRENT_USER
   else
     RootKey := HKEY_LOCAL_MACHINE;
 
-  var K: HKEY;
   if RegOpenKeyExView(rvDefault, RootKey, 'Software\Microsoft\Windows NT\CurrentVersion\Fonts',
      0, KEY_SET_VALUE, K) = ERROR_SUCCESS then begin
-    RegDeleteValue(K, PChar(FontName));
+    RegDeleteValueW(K, PWideChar(FontName));
     RegCloseKey(K);
   end;
-  if RemoveFontResource(PChar(PathConvertSuperToNormal(FontFilename))) then
+  if RemoveFontResourceW(PWideChar(PathConvertSuperToNormal(FontFilename))) then
     SendNotifyMessage(HWND_BROADCAST, WM_FONTCHANGE, 0, 0);
 end;
 
@@ -966,8 +985,8 @@ function GetSpaceOnDisk(const Path: String;
   The function accepts any directory on a disk. }
 begin
   { "Windows." prefix avoids emulated version in SysUtils }
-  Result := Windows.GetDiskFreeSpaceEx(PChar(AddBackslash(PathExpand(Path))),
-    FreeBytes, TotalBytes, nil);
+  Result := Windows.GetDiskFreeSpaceExW(PWideChar(AddBackslash(PathExpand(Path))),
+    {$IFDEF FPC}@FreeBytes, @TotalBytes{$ELSE}FreeBytes, TotalBytes{$ENDIF}, nil);
 end;
 
 function GetSpaceOnNearestMountPoint(const StartDir: String;
@@ -1029,7 +1048,7 @@ begin
   if not InternalNewForceDirectories(PathExtractDir(Dir), RecursionDepth + 1) then
     Exit(False);
 
-  Result := CreateDirectory(PChar(Dir), nil);
+  Result := CreateDirectoryW(PWideChar(Dir), nil);
 end;
 
 function NewForceDirectories(const Dir: String): Boolean;
@@ -1042,21 +1061,23 @@ var
   ExistingAttr: DWORD;
 begin
   if Attribs <> 0 then begin
-    ExistingAttr := GetFileAttributes(PChar(Filename));
+    ExistingAttr := GetFileAttributesW(PWideChar(Filename));
     if ExistingAttr <> INVALID_FILE_ATTRIBUTES then
-      SetFileAttributes(PChar(Filename),
+      SetFileAttributesW(PWideChar(Filename),
         (ExistingAttr and not FILE_ATTRIBUTE_NORMAL) or DWORD(Attribs));
   end;
 end;
 
 procedure ApplyRedirToRunEntryPaths(const RunEntry64Bit: Boolean;
   var AFilename, AWorkingDir: String);
+var
+  TargetProcess: TPathRedirTargetProcess;
 begin
   { Note: When RunEntry64Bit=True, the resulting paths are always "native-bit
     target process" paths. They use System32, not Sysnative, so in a 32-bit
     Setup process they are only usable when FS redirection is disabled. }
 
-  var TargetProcess := tpCurrent;
+  TargetProcess := tpCurrent;
   if RunEntry64Bit then
     TargetProcess := tpNativeBit;
 
@@ -1081,8 +1102,9 @@ function ApplyRedirForRegistrationOperation(const RegisteringAs64BitFile: Boolea
   - Use rfNormalPath because using a super path is non-standard or might not
     work at all. Nobody would place a DLL in a path longer than MAX_PATH anyway.
   Note: Filename must be a current-process-bit path. }
+var
+  TargetProcess: TPathRedirTargetProcess;
 begin
-  var TargetProcess: TPathRedirTargetProcess;
   if RegisteringAs64BitFile then
     TargetProcess := tpNativeBit
   else
@@ -1100,16 +1122,17 @@ procedure ShellChangeNotifyPath(const EventId: Integer; const Path: String;
   isn't already there). If the path isn't usable then Flush is ignored, so when
   batching calls with Flush only on the final one, ensure the final call uses
   the shortest path. }
+var
+  NormalPath, NormalDir: String;
+  Flags: UINT;
 begin
-  var NormalPath: String;
   if PathConvertSuperToNormal(Path, NormalPath) then begin
-    var Flags: UINT := SHCNF_PATH;
+    Flags := SHCNF_PATHW;
     if Flush then
       Flags := Flags or SHCNF_FLUSH;
     SHChangeNotify(EventId, Flags, PChar(NormalPath), nil);
   end;
   if DirChangeNotifyList <> nil then begin
-    var NormalDir: String;
     if PathConvertSuperToNormal(PathExtractDir(Path), NormalDir) then
       DirChangeNotifyList.AddIfDoesntExist(NormalDir);
   end;
@@ -1192,15 +1215,20 @@ end;
 
 procedure TProgressThrottler.Reset;
 begin
-  FStopWatch.Stop;
+  FHasProgressTick := False;
 end;
 
 function TProgressThrottler.ThrottleOk(const Progress, ProgressMax: Int64): Boolean;
+var
+  Tick: UInt64;
 begin
-  Result := not FStopWatch.IsRunning or
-            ((Progress = ProgressMax) and (FLastOkProgress <> ProgressMax)) or (FStopWatch.ElapsedMilliseconds >= 50);
+  Tick := GetTickCount64;
+  Result := not FHasProgressTick or
+    ((Progress = ProgressMax) and (FLastOkProgress <> ProgressMax)) or
+    (Tick - FLastProgressTick >= 50);
   if Result then begin
-    FStopWatch := TStopwatch.StartNew;
+    FLastProgressTick := Tick;
+    FHasProgressTick := True;
     FLastOkProgress := Progress;
   end;
 end;

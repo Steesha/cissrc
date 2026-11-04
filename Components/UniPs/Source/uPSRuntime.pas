@@ -1371,36 +1371,36 @@ end;
 {$IFNDEF PS_NOWIDESTRING}
 function wPadl(s: tbtwidestring; i: longInt): tbtwidestring;
 begin
-  result := StringOfChar(tbtwidechar(' '), i - length(s)) + s;
+  result := tbtwidestring(StringOfChar(tbtwidechar(' '), i - length(s))) + s;
 end;
 //-------------------------------------------------------------------
 
 function wPadz(s: tbtwidestring; i: longInt): tbtwidestring;
 begin
-  result := StringOfChar(tbtwidechar('0'), i - length(s)) + s;
+  result := tbtwidestring(StringOfChar(tbtwidechar('0'), i - length(s))) + s;
 end;
 //-------------------------------------------------------------------
 
 function wPadr(s: tbtwidestring; i: longInt): tbtwidestring;
 begin
-  result := s + StringOfChar(tbtwidechar(' '), i - Length(s));
+  result := s + tbtwidestring(StringOfChar(tbtwidechar(' '), i - Length(s)));
 end;
 
 function uPadl(s: tbtunicodestring; i: longInt): tbtunicodestring;
 begin
-  result := StringOfChar(tbtwidechar(' '), i - length(s)) + s;
+  result := tbtunicodestring(StringOfChar(tbtwidechar(' '), i - length(s))) + s;
 end;
 //-------------------------------------------------------------------
 
 function uPadz(s: tbtunicodestring; i: longInt): tbtunicodestring;
 begin
-  result := StringOfChar(tbtwidechar('0'), i - length(s)) + s;
+  result := tbtunicodestring(StringOfChar(tbtwidechar('0'), i - length(s))) + s;
 end;
 //-------------------------------------------------------------------
 
 function uPadr(s: tbtunicodestring; i: longInt): tbtunicodestring;
 begin
-  result := s + StringOfChar(tbtwidechar(' '), i - Length(s));
+  result := s + tbtunicodestring(StringOfChar(tbtwidechar(' '), i - Length(s)));
 end;
 
 {$ENDIF}
@@ -3655,7 +3655,7 @@ begin
     if (src = nil) or (aType = nil) then raise Exception.Create(RPS_TypeMismatch);
   end;
   case aType.BaseType of
-    btU8: Result := chr(tbtu8(src^));
+    btU8: Result := tbtwidestring(chr(tbtu8(src^)));
     btU16: Result := widechar(src^);
     btChar: Result := tbtwidestring(tbtchar(Src^));
     btPchar: Result := tbtwidestring(pansichar(src^));
@@ -3677,7 +3677,7 @@ begin
     if (src = nil) or (aType = nil) then raise Exception.Create(RPS_TypeMismatch);
   end;
   case aType.BaseType of
-    btU8: Result := chr(tbtu8(src^));
+    btU8: Result := tbtunicodestring(chr(tbtu8(src^)));
     btU16: Result := widechar(src^);
     btChar: Result := tbtunicodestring(tbtchar(Src^));
     btPchar: Result := tbtunicodestring(pansichar(src^));
@@ -4034,7 +4034,7 @@ var
 begin
   for i := 0 to aType.FieldTypes.Count -1 do
   begin
-    o := Longint(atype.RealFieldOffsets[i]);
+    o := Longint(IPointer(atype.RealFieldOffsets[i]));
     if not CopyArrayContents(Pointer(IPointer(Dest)+Cardinal(o)), Pointer(IPointer(Src)+Cardinal(o)), 1, aType.FieldTypes[i]) then begin result := false; exit; end;
   end;
   Result := true;
@@ -7499,6 +7499,7 @@ begin
 
     if pvar <> nil then
     begin
+      Result := Null;
       PIFVariantToVariant(PVar, Result);
     end else
       Result := Null;
@@ -7552,6 +7553,7 @@ begin
 
     if pvar <> nil then
     begin
+      Result := Null;
       PIFVariantToVariant(PVar, Result);
     end else
       Result := Null;
@@ -9003,7 +9005,12 @@ begin
                 bts64: dec(tbts64(vd.P^));
                 btU64: dec(tbtu64(vd.P^));
 {$ENDIF}
-                btVariant: dec(Variant(vd.P^));
+                btVariant:
+{$IFDEF FPC}
+                  Variant(vd.P^) := Variant(vd.P^) - 1;
+{$ELSE}
+                  dec(Variant(vd.P^));
+{$ENDIF}
               else
                 begin
                   CMD_Err(ErTypeMismatch);
@@ -9036,7 +9043,12 @@ begin
                 bts64: Inc(tbts64(vd.P^));
                 btU64: Inc(tbtu64(vd.P^));
 {$ENDIF}
-                btVariant: Inc(Variant(vd.P^));
+                btVariant:
+{$IFDEF FPC}
+                  Variant(vd.P^) := Variant(vd.P^) + 1;
+{$ELSE}
+                  Inc(Variant(vd.P^));
+{$ENDIF}
               else
                 begin
                   CMD_Err(ErTypeMismatch);
@@ -9280,7 +9292,7 @@ function NVarProc(Caller: TPSExec; p: TPSExternalProcRec; Global, Stack: TPSStac
 var
   tmp: TPSVariantIFC;
 begin
-   case Longint(p.Ext1) of
+   case IPointer(p.Ext1) of
     0:
       begin
         if @Caller.FOnSetNVariant = nil then begin Result := False; exit; end;
@@ -9316,7 +9328,7 @@ begin
     -UPSRuntime.DefProc
     -UPSRuntime.TPSExec.RegisterStandardProcs
   }
-  case Longint(p.Ext1) of
+  case IPointer(p.Ext1) of
     0: Stack.SetAnsiString(-1, tbtstring(SysUtils.IntToStr(Stack.{$IFNDEF PS_NOINT64}GetInt64{$ELSE}GetInt{$ENDIF}(-2)))); // inttostr
     1: Stack.SetInt(-1, StrToInt(Stack.GetAnsiString(-2))); // strtoint
     2: Stack.SetInt(-1, StrToIntDef(Stack.GetAnsiString(-2), Stack.GetInt(-3))); // strtointdef
@@ -10027,7 +10039,7 @@ begin
 
   RegisterDelphiFunction(@Unassigned, 'Unassigned', cdRegister);
   RegisterDelphiFunction(@VarIsEmpty, 'VarIsEmpty', cdRegister);
-  {$IFDEF DELPHI7UP}
+  {$IF Defined(DELPHI7UP) or Defined(FPC)}
   RegisterDelphiFunction(@VarIsClear, 'VarIsClear', cdRegister);
   {$ENDIF}
   RegisterDelphiFunction(@Null, 'Null', cdRegister);
@@ -10590,9 +10602,9 @@ var
 begin
  {$IFDEF FPC}
  x := Pointer(TObject(FSelf).ClassType) + vmtMethodStart;
- Result := x^[Longint(Ptr)];
+ Result := x^[IPointer(Ptr)];
  {$ELSE}
- Result := PPtrArr(PPointer(FSelf)^)^[Longint(Ptr)];
+ Result := PPtrArr(PPointer(FSelf)^)^[IPointer(Ptr)];
  {$ENDIF}
 end;
 
@@ -10604,9 +10616,9 @@ var
 begin
   {$IFDEF FPC}
   x := Pointer(FSelf) + vmtMethodStart;
-  Result := x^[Longint(Ptr)];
+  Result := x^[IPointer(Ptr)];
   {$ELSE}
-  Result := PPtrArr(FSelf)^[Longint(Ptr)];
+  Result := PPtrArr(FSelf)^[IPointer(Ptr)];
   {$ENDIF}
 end;
 
@@ -10672,7 +10684,7 @@ begin
   begin
     if p^[I] = Ptr then
     begin
-      Result := Pointer(I);
+      Result := Pointer(IPointer(I));
       exit;
     end;
     I := I + 1;
@@ -10694,7 +10706,7 @@ begin
   begin
     if p^[I] = Ptr then
     begin
-      Result := Pointer(I);
+      Result := Pointer(IPointer(I));
       x := Pointer(FClass) + vmtMethodStart;
       t := x^[I];
       Assert(t=Ptr,'Computation of virtual method pointer fail : t<>Ptr');
@@ -10734,7 +10746,7 @@ begin
   Result := NewTPSVariantIFC(avar, false);
   if Result.aType.BaseType = btRecord then
   begin
-    Offs := Cardinal(TPSTypeRec_Record(Result.aType).RealFieldOffsets[FieldNo]);
+    Offs := Cardinal(IPointer(TPSTypeRec_Record(Result.aType).RealFieldOffsets[FieldNo]));
     Result.Dta := Pointer(IPointer(Result.dta) + Offs);
     Result.aType := TPSTypeRec_Record(Result.aType).FieldTypes[FieldNo];
   end else
@@ -10790,7 +10802,7 @@ begin
   Result := aVar;
   if Result.aType.BaseType = btRecord then
   begin
-    Offs := Cardinal(TPSTypeRec_Record(Result.aType).RealFieldOffsets[FieldNo]);
+    Offs := Cardinal(IPointer(TPSTypeRec_Record(Result.aType).RealFieldOffsets[FieldNo]));
     Result.aType := TPSTypeRec_Record(Result.aType).FieldTypes[FieldNo];
     Result.Dta := Pointer(IPointer(Result.dta) + Offs);
   end else
@@ -11224,7 +11236,7 @@ begin
     n2 := NewPPSVariantIFC(Stack[CurrStack + 1], True);
   end else n2 := nil;
   try
-    Caller.InnerfuseCall(FSelf, Pointer(Pointer(IPointer(FSelf^) + (Cardinal(p.Ext1) * Sizeof(Pointer)))^), cc, MyList, n2);
+    Caller.InnerfuseCall(FSelf, Pointer(Pointer(IPointer(FSelf^) + (IPointer(p.Ext1) * Sizeof(Pointer)))^), cc, MyList, n2);
     result := true;
   finally
     DisposePPSVariantIFC(n2);
@@ -12314,6 +12326,53 @@ begin
   Result := (Modifier = '%') or (Modifier = '!') or AlwaysAsVariable(aType);
 end;
 
+function ResultAsRegister(b: TPSTypeRec): Boolean;
+begin
+  case b.BaseType of
+    btSingle,
+    btDouble,
+    btExtended,
+    btCurrency,
+    btU8,
+    bts8,
+    bts16,
+    btu16,
+    bts32,
+    btu32,
+{$IFDEF PS_FPCSTRINGWORKAROUND}
+    btString,
+{$ENDIF}
+{$IFNDEF PS_NOINT64}
+    bts64,
+    btU64,
+{$ENDIF}
+    btPChar,
+{$IFNDEF PS_NOWIDESTRING}
+    btWideChar,
+{$ENDIF}
+    btChar,
+    btclass,
+    btEnum: Result := true;
+{$IFDEF DELPHI}
+    { The Delphi x64 ABI returns a record of 1, 2, or 4 bytes in RAX, and
+      the x86 ABI a record of 1 or 2 bytes in AL/AX (see System.Rtti's
+      UseResultPointer). Records of these sizes never contain a managed
+      field, so no managed check is needed. A record of pointer size is
+      also returned in RAX/EAX, but only when it contains no managed
+      field. Static arrays follow the same rule: UseResultPointer treats
+      tkArray like tkRecord. }
+    btRecord, btStaticArray: Result := (b.RealSize in [1, 2{$IFDEF CPU64}, 4{$ENDIF}]) or
+      ((b.RealSize = PointerSize) and not IsManagedType(b));
+{$ENDIF}
+    btSet: Result := b.RealSize <= PointerSize;
+{$IFNDEF DELPHI}
+    btStaticArray: Result := b.RealSize <= PointerSize;
+{$ENDIF}
+  else
+    Result := false;
+  end;
+end;
+
 {$ifdef fpc}
   {$if defined(cpupowerpc) or defined(cpuarm) or defined(cpu64)}
     {$define empty_methods_handler}
@@ -12457,53 +12516,6 @@ asm
 end;
 {$ENDIF}
 {$endif CPU64}
-
-function ResultAsRegister(b: TPSTypeRec): Boolean;
-begin
-  case b.BaseType of
-    btSingle,
-    btDouble,
-    btExtended,
-    btCurrency,
-    btU8,
-    bts8,
-    bts16,
-    btu16,
-    bts32,
-    btu32,
-{$IFDEF PS_FPCSTRINGWORKAROUND}
-    btString,
-{$ENDIF}
-{$IFNDEF PS_NOINT64}
-    bts64,
-    btU64,
-{$ENDIF}
-    btPChar,
-{$IFNDEF PS_NOWIDESTRING}
-    btWideChar,
-{$ENDIF}
-    btChar,
-    btclass,
-    btEnum: Result := true;
-{$IFDEF DELPHI}
-    { The Delphi x64 ABI returns a record of 1, 2, or 4 bytes in RAX, and
-      the x86 ABI a record of 1 or 2 bytes in AL/AX (see System.Rtti's
-      UseResultPointer). Records of these sizes never contain a managed
-      field, so no managed check is needed. A record of pointer size is
-      also returned in RAX/EAX, but only when it contains no managed
-      field. Static arrays follow the same rule: UseResultPointer treats
-      tkArray like tkRecord. }
-    btRecord, btStaticArray: Result := (b.RealSize in [1, 2{$IFDEF CPU64}, 4{$ENDIF}]) or
-      ((b.RealSize = PointerSize) and not IsManagedType(b));
-{$ENDIF}
-    btSet: Result := b.RealSize <= PointerSize;
-{$IFNDEF DELPHI}
-    btStaticArray: Result := b.RealSize <= PointerSize;
-{$ENDIF}
-  else
-    Result := false;
-  end;
-end;
 
 function SupportsRegister(b: TPSTypeRec): Boolean;
 begin
@@ -13742,7 +13754,7 @@ begin
        begin
          if i = DISP_E_EXCEPTION then
            {$IFDEF FPC}
-           raise Exception.Create(ExceptInfo.Source+': '+ExceptInfo.Description)
+           raise Exception.Create(UTF8Encode(ExceptInfo.Source+': '+ExceptInfo.Description))
            {$ELSE}
            raise Exception.Create(ExceptInfo.bstrSource+': '+ExceptInfo.bstrDescription)
            {$ENDIF}

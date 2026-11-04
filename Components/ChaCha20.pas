@@ -14,7 +14,7 @@ unit ChaCha20;
 interface
 
 uses
-  System.SysUtils;
+  SysUtils;
 
 type
   TChaCha20Ctx = array[0..15] of Cardinal;
@@ -84,6 +84,8 @@ begin
 end;
 
 procedure ChaCha20RunRounds(var ctx, keystream: TChaCha20Ctx);
+var
+  i: Integer;
 
   function ROTL(const x: Cardinal; const n: Byte): Cardinal;
   begin
@@ -92,16 +94,16 @@ procedure ChaCha20RunRounds(var ctx, keystream: TChaCha20Ctx);
 
   procedure CHACHA20_QR(var a, b, c, d: Cardinal);
   begin
-    Inc(a, b); d := d xor a; d := ROTL(d, 16);
-    Inc(c, d); b := b xor c; b := ROTL(b, 12);
-    Inc(a, b); d := d xor a; d := ROTL(d, 8);
-    Inc(c, d); b := b xor c; b := ROTL(b, 7);
+    a := Cardinal(a + b); d := d xor a; d := ROTL(d, 16);
+    c := Cardinal(c + d); b := b xor c; b := ROTL(b, 12);
+    a := Cardinal(a + b); d := d xor a; d := ROTL(d, 8);
+    c := Cardinal(c + d); b := b xor c; b := ROTL(b, 7);
   end;
 
 begin
   Move(ctx, keystream, SizeOf(ctx));
 
-  for var i := 0 to 9 do begin
+  for i := 0 to 9 do begin
     CHACHA20_QR(keystream[0], keystream[4], keystream[8], keystream[12]);  // column 0
     CHACHA20_QR(keystream[1], keystream[5], keystream[9], keystream[13]);  // column 1
     CHACHA20_QR(keystream[2], keystream[6], keystream[10], keystream[14]); // column 2
@@ -115,9 +117,14 @@ end;
 
 procedure ChaCha20Crypt(var Context: TChaCha20Context; const InBuffer;
   var OutBuffer; const Length: Cardinal);
+var
+  InBuf, OutBuf, KeyStream: PByte;
+  I: Cardinal;
 
   procedure ChaCha20BlockNext(var ctx, keystream: TChaCha20Ctx;
     var exhausted: Boolean; const count64: Boolean);
+  var
+    i: Integer;
   begin
     { The counter is advanced only after the block for it has been generated,
       so the last valid block (counter at its maximum) must still be usable.
@@ -127,8 +134,8 @@ procedure ChaCha20Crypt(var Context: TChaCha20Context; const InBuffer;
 
     ChaCha20RunRounds(ctx, keystream);
 
-    for var i := 0 to 15 do
-      keystream[i] := keystream[i] + ctx[i];
+    for i := 0 to 15 do
+      keystream[i] := Cardinal(keystream[i] + ctx[i]);
 
     if count64 then begin
       if ctx[12] < High(Cardinal) then
@@ -150,11 +157,11 @@ begin
   if Length = 0 then
     Exit;
 
-  var InBuf: PByte := @InBuffer;
-  var OutBuf: PByte := @OutBuffer;
-  var KeyStream := PByte(@Context.keystream);
+  InBuf := @InBuffer;
+  OutBuf := @OutBuffer;
+  KeyStream := PByte(@Context.keystream);
 
-  for var I := 0 to Length-1 do begin
+  for I := 0 to Length-1 do begin
     if Context.position >= 64 then begin
       ChaCha20BlockNext(Context.ctx, Context.keystream, Context.exhausted, Context.count64);
       Context.position := 0;
@@ -166,12 +173,13 @@ end;
 
 procedure HChaCha20(const Key; const KeyLength: Cardinal; const Nonce;
   const NonceLength: Cardinal; out SubKey: TBytes);
+var
+  NonceBytes: PByte;
+  ctx, keystream: TChaCha20Ctx;
 begin
   Assert(NonceLength = 16);
-  var NonceBytes: PByte := @Nonce;
-  var ctx: TChaCha20Ctx;
+  NonceBytes := @Nonce;
   ChaCha20InitCtx(ctx, Key, KeyLength, NonceBytes[4], 12, PCardinal(NonceBytes)^);
-  var keystream: TChaCha20Ctx;
   ChaCha20RunRounds(ctx, keystream);
   try
     SetLength(SubKey, 32);
@@ -187,12 +195,14 @@ end;
 procedure XChaCha20Init(var Context: TChaCha20Context; const Key;
  const KeyLength: Cardinal; const Nonce; const NonceLength: Cardinal;
  const Count: Cardinal);
+var
+  SubKey: TBytes;
+  NonceBytes: PByte;
 begin
   Assert(NonceLength = 24);
-  var SubKey: TBytes;
   HChaCha20(Key, KeyLength, Nonce, 16, SubKey);
   try
-    var NonceBytes: PByte := @Nonce;
+    NonceBytes := @Nonce;
     ChaCha20Init(Context, SubKey[0], ULength(SubKey), NonceBytes[16], 8, Count);
   finally
     { Security: don't leave derived key in heap memory }

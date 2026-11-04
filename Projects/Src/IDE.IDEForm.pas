@@ -51,7 +51,6 @@ implementation
 uses
   Windows,
   Themes,
-  UnsignedFunc,
   Shared.CommonFunc, Shared.CommonFunc.Vcl,
   IDE.HelperFunc, IDE.LocalizeFunc;
 
@@ -100,7 +99,7 @@ class procedure TIDEForm.HandleWMWindowPosChanged(const Form: TForm;
         const Origin = Form.ClientOrigin;
         var R := TRect.Create(0, 0, Form.ClientWidth, Form.ClientHeight);
         OffsetRect(R, Origin.X - WindowRect.Left, Origin.Y - WindowRect.Top);
-        const Brush = CreateSolidBrush(UColorToRGB(Form.Color)); { Color set by InitFormTheme }
+        const Brush = CreateSolidBrush(TColorRef(ColorToRGB(Form.Color))); { Color set by InitFormTheme }
         FillRect(DC, R, Brush);
         DeleteObject(Brush);
       finally

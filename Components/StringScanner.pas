@@ -40,7 +40,7 @@ type
 
 implementation
 
-{$ZEROBASEDSTRINGS OFF}
+{$IFNDEF FPC}{$ZEROBASEDSTRINGS OFF}{$ENDIF}
 
 { TStringScanner }
 
@@ -58,12 +58,14 @@ begin
 end;
 
 function TStringScanner.Consume(const S: String): Boolean;
+var
+  SLen, I: Integer;
 begin
-  const SLen = Length(S);
+  SLen := Length(S);
   if SLen > GetRemainingCount then
     Exit(False);
 
-  for var I := 0 to SLen-1 do
+  for I := 0 to SLen-1 do
     if FStr[FPosition + I] <> S[I+1] then
       Exit(False);
 
@@ -74,12 +76,14 @@ end;
 function TStringScanner.ConsumeMulti(const AAllowedChars: TSysCharSet;
   const AAllowAllCharsAboveFF: Boolean = False; const AMinChars: Integer = 1;
   const AMaxChars: Integer = MaxInt): Integer;
+var
+  Remain: Integer;
 begin
   { AMinChars may be 0; it functions the same as 1 }
   if (AMinChars < 0) or (AMinChars > AMaxChars) then
     raise EStringScannerError.Create('TStringScanner.ConsumeMulti: Invalid parameter');
 
-  const Remain = GetRemainingCount;
+  Remain := GetRemainingCount;
   if Remain < AMinChars then
     Exit(0);
 
@@ -98,8 +102,10 @@ end;
 function TStringScanner.ConsumeMultiToString(const AAllowedChars: TSysCharSet;
   var ACapturedString: String; const AAllowAllCharsAboveFF: Boolean = False;
   const AMinChars: Integer = 1; const AMaxChars: Integer = MaxInt): Integer;
+var
+  StartPos: Integer;
 begin
-  const StartPos = FPosition;
+  StartPos := FPosition;
   Result := ConsumeMulti(AAllowedChars, AAllowAllCharsAboveFF, AMinChars, AMaxChars);
   if Result > 0 then
     ACapturedString := Copy(FStr, StartPos, Result)
@@ -113,13 +119,15 @@ begin
 end;
 
 function TStringScanner.GetRemainingCount: Integer;
+var
+  Len: Integer;
 begin
   { The "<= 0" check exists to protect against OOB reads in case someone calls
     into an instance that was never properly initialized (via Create).
     Inside TStringScanner, FStr[FPosition] must not be accessed unless
     GetRemainingCount is called first and returns a nonzero value. }
 
-  const Len = Length(FStr);
+  Len := Length(FStr);
   if (FPosition <= 0) or (FPosition > Len) then
     Result := 0
   else

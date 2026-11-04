@@ -2,7 +2,7 @@ unit TaskbarProgressFunc;
 
 {
   Inno Setup
-  Copyright (C) 1997-2024 Jordan Russell
+  Copyright (C) 1997-2026 Jordan Russell
   Portions by Martijn Laan
   For conditions of distribution and use, see LICENSE.TXT.
 
@@ -32,7 +32,7 @@ var
   Intf: ITaskbarList3;
 begin
   if not TaskbarListInitialized then begin
-    if CoCreateInstance(CLSID_TaskbarList, nil, CLSCTX_INPROC_SERVER, IID_ITaskbarList3, Intf) = S_OK then
+    if CoCreateInstance(CLSID_TaskbarList, nil, CLSCTX_INPROC_SERVER, {$IFDEF FPC}ITaskbarList3{$ELSE}IID_ITaskbarList3{$ENDIF}, Intf) = S_OK then
       if Intf.HrInit = S_OK then begin
         { Safety: don't allow the instance to be destroyed at shutdown }
         Intf._AddRef;

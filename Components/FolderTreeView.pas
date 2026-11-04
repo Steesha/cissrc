@@ -12,7 +12,7 @@ unit FolderTreeView;
 interface
 
 uses
-  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, CommCtrl;
+  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, CommCtrl{$IFDEF FPC}, LCLType, LMessages{$ENDIF};
 
 type
   TCustomFolderTreeView = class;
@@ -27,8 +27,10 @@ type
     FItemExpanding: Boolean;
     FOnChange: TNotifyEvent;
     FOnRename: TFolderRenameEvent;
+    {$IFNDEF FPC}
     class constructor Create;
     class destructor Destroy;
+    {$ENDIF}
     procedure Change;
     procedure DeleteObsoleteNewItems(const ParentItem, ItemToKeep: HTREEITEM);
     function FindItem(const ParentItem: HTREEITEM; const AName: String): HTREEITEM;
@@ -41,11 +43,12 @@ type
     procedure SetDirectory(const Value: String);
     function TryExpandItem(const Item: HTREEITEM): Boolean;
     procedure CNKeyDown(var Message: TWMKeyDown); message CN_KEYDOWN;
-    procedure CNNotify(var Message: TWMNotify); message CN_NOTIFY;
+    procedure CNNotify(var Message: TWMNotify); {$IFNDEF FPC}message CN_NOTIFY;{$ENDIF}
     procedure WMCtlColorEdit(var Message: TMessage); message WM_CTLCOLOREDIT;
     procedure WMDestroy(var Message: TWMDestroy); message WM_DESTROY;
     procedure WMEraseBkgnd(var Message: TWMEraseBkgnd); message WM_ERASEBKGND;
   protected
+    {$IFDEF FPC}class procedure WSRegisterClass; override;{$ENDIF}
     function ItemChildrenNeeded(const Item: HTREEITEM): Boolean; virtual; abstract;
     procedure CreateParams(var Params: TCreateParams); override;
     procedure CreateWnd; override;
@@ -105,6 +108,7 @@ type
     property OnRename;
   end;
 
+  {$IFNDEF FPC}
   TFolderTreeViewStyleHook = class(TScrollingStyleHook)
 {$IFDEF VCLSTYLES}
   strict private
@@ -117,6 +121,7 @@ type
     constructor Create(AControl: TWinControl); override;
 {$ENDIF}
   end;
+  {$ENDIF}
 
 procedure Register;
 
@@ -127,31 +132,36 @@ implementation
   1. Don't call TreeView_SelectItem without calling TreeView_Expand on the
      item's parents first. Otherwise infinite recursion can occur:
      a. TreeView_SelectItem will first set the selected item. It will then try
-        to expand the parent node, causing a TVN_ITEMEXPANDING message to be
+        to expand the parent node, causing a TVN_ITEMEXPANDINGW message to be
         sent.
-     b. If the TVN_ITEMEXPANDING handler calls TreeView_SortChildren, TV_SortCB
+     b. If the TVN_ITEMEXPANDINGW handler calls TreeView_SortChildren, TV_SortCB
         will call TV_EnsureVisible if the selected item was one of the items
         affected by the sorting (which will always be the case).
      c. TV_EnsureVisible will expand parent nodes if necessary. However, since
-        we haven't yet returned from the original TVN_ITEMEXPANDING message
+        we haven't yet returned from the original TVN_ITEMEXPANDINGW message
         handler, the parent node doesn't yet have the TVIS_EXPANDED state,
         thus it thinks the node still needs expanding.
-     d. Another, nested TVN_ITEMEXPANDING message is sent, bringing us back to
+     d. Another, nested TVN_ITEMEXPANDINGW message is sent, bringing us back to
         step b.
      (Reproducible on Windows 95 and 2000.)
      The recursion can be seen if you comment out the ExpandParents call in
      the SelectItem method, then click "New Folder" on a folder with no
      children.
      (Note, however, that because of the ChildrenAdded check in our
-     TVN_ITEMEXPANDING handler, it can only recurse once. That won't cause a
+     TVN_ITEMEXPANDINGW handler, it can only recurse once. That won't cause a
      fatal stack overflow (like it did before the ChildrenAdded check was
      added), but it's still wrong to allow that to happen.)
 }
 
 uses
-  ShellAPI, Types, GraphUtil,
+  ShellAPI, Types,
+  {$IFDEF FPC}
+  WSLCLClasses, Win32WSControls, Win32Proc,
+  {$ELSE}
+  GraphUtil,
   {$IFDEF VCLSTYLES} Vcl.Themes, UITypes, {$ELSE} Themes, {$ENDIF}
-  PathFunc, NewUxTheme, UnsignedFunc;
+  {$ENDIF}
+  PathFunc, NewUxTheme;
 
 const
   SHPPFW_NONE = $00000000;
@@ -163,6 +173,28 @@ const
   TVM_SETEXTENDEDSTYLE = TV_FIRST + 44;
   TVS_EX_DOUBLEBUFFER = $0004;
 
+{$IFDEF FPC}
+function TreeView_GetItem(const Window: HWND; var Item: TTVItemW): Boolean;
+begin
+  Result := SendMessageW(Window, TVM_GETITEMW, 0, LPARAM(@Item)) <> 0;
+end;
+
+procedure TreeView_SetItem(const Window: HWND; const Item: TTVItemW);
+begin
+  SendMessageW(Window, TVM_SETITEMW, 0, LPARAM(@Item));
+end;
+
+function TreeView_InsertItem(const Window: HWND; const Item: TTVInsertStructW): HTREEITEM;
+begin
+  Result := HTREEITEM(SendMessageW(Window, TVM_INSERTITEMW, 0, LPARAM(@Item)));
+end;
+
+procedure TreeView_EditLabel(const Window: HWND; const Item: HTREEITEM);
+begin
+  SendMessageW(Window, TVM_EDITLABELW, 0, LPARAM(Item));
+end;
+{$ENDIF}
+
 procedure Register;
 begin
   RegisterComponents('JR', [TFolderTreeView, TStartMenuFolderTreeView]);
@@ -170,16 +202,21 @@ end;
 
 function GetSystemDir: String;
 var
-  Buf: array[0..MAX_PATH-1] of Char;
+  Buf: array[0..MAX_PATH-1] of WideChar;
+  Count: Cardinal;
 begin
-  GetSystemDirectory(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
-  Result := StrPas(Buf);
+  Count := GetSystemDirectoryW(@Buf[0], Length(Buf));
+  if (Count = 0) or (Count >= Length(Buf)) then
+    Exit('');
+  SetString(Result, PWideChar(@Buf[0]), Count);
 end;
 
 var
   LoadedUrlmonDLL: Boolean;
 
 procedure PreloadUrlmonDLL;
+var
+  SystemDir: String;
 begin
   { Pre-load urlmon.dll and its dependencies.
     Without this, on Windows 11 25H2, urlmon.dll + 3 other DLLs are loaded and
@@ -193,12 +230,14 @@ begin
     I suspect Windows 11 25H2 is to blame; I never saw this on 23H2. }
 
   if not LoadedUrlmonDLL then begin
-    LoadLibrary(PChar(AddBackslash(GetSystemDir) + 'urlmon.dll'));
+    SystemDir := GetSystemDir;
+    if SystemDir <> '' then
+      LoadLibraryW(PWideChar(AddBackslash(SystemDir) + 'urlmon.dll'));
     LoadedUrlmonDLL := True;
   end;
 end;
 
-function IsListableDirectory(const FindData: TWin32FindData): Boolean;
+function IsListableDirectory(const FindData: TWin32FindDataW): Boolean;
 begin
   Result := (FindData.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY <> 0) and
     (FindData.dwFileAttributes and (FILE_ATTRIBUTE_HIDDEN or FILE_ATTRIBUTE_SYSTEM) <>
@@ -210,10 +249,10 @@ end;
 function HasSubfolders(const Path: String): Boolean;
 var
   H: THandle;
-  FindData: TWin32FindData;
+  FindData: TWin32FindDataW;
 begin
   Result := False;
-  H := FindFirstFile(PChar(AddBackslash(Path) + '*'), FindData);
+  H := FindFirstFileW(PWideChar(AddBackslash(Path) + '*'), FindData);
   if H <> INVALID_HANDLE_VALUE then begin
     try
       repeat
@@ -221,7 +260,7 @@ begin
           Result := True;
           Break;
         end;
-      until not FindNextFile(H, FindData);
+      until not FindNextFileW(H, FindData);
     finally
       Windows.FindClose(H);
     end;
@@ -230,9 +269,9 @@ end;
 
 function GetFileDisplayName(const Filename: String): String;
 var
-  FileInfo: TSHFileInfo;
+  FileInfo: TSHFileInfoW;
 begin
-  if SHGetFileInfo(PChar(Filename), 0, FileInfo, SizeOf(FileInfo),
+  if SHGetFileInfoW(PWideChar(Filename), 0, FileInfo, SizeOf(FileInfo),
      SHGFI_DISPLAYNAME) <> 0 then
     Result := FileInfo.szDisplayName
   else
@@ -243,9 +282,9 @@ function GetFileImageIndex(const Filename: String; const OpenIcon: Boolean): Int
 const
   OpenFlags: array[Boolean] of UINT = (0, SHGFI_OPENICON);
 var
-  FileInfo: TSHFileInfo;
+  FileInfo: TSHFileInfoW;
 begin
-  if SHGetFileInfo(PChar(Filename), 0, FileInfo, SizeOf(FileInfo),
+  if SHGetFileInfoW(PWideChar(Filename), 0, FileInfo, SizeOf(FileInfo),
      SHGFI_SYSICONINDEX or SHGFI_SMALLICON or OpenFlags[OpenIcon]) <> 0 then
     Result := FileInfo.iIcon
   else
@@ -256,9 +295,9 @@ function GetDefFolderImageIndex(const OpenIcon: Boolean): Integer;
 const
   OpenFlags: array[Boolean] of UINT = (0, SHGFI_OPENICON);
 var
-  FileInfo: TSHFileInfo;
+  FileInfo: TSHFileInfoW;
 begin
-  if SHGetFileInfo('c:\directory', FILE_ATTRIBUTE_DIRECTORY, FileInfo, SizeOf(FileInfo),
+  if SHGetFileInfoW('c:\directory', FILE_ATTRIBUTE_DIRECTORY, FileInfo, SizeOf(FileInfo),
      SHGFI_USEFILEATTRIBUTES or SHGFI_SYSICONINDEX or SHGFI_SMALLICON or OpenFlags[OpenIcon]) <> 0 then
     Result := FileInfo.iIcon
   else
@@ -277,7 +316,7 @@ var
 begin
   LocalName := Drive + ':';
   RemoteNameLen := SizeOf(RemoteName) div SizeOf(RemoteName[0]);
-  ErrorCode := WNetGetConnection(PChar(LocalName), RemoteName, RemoteNameLen);
+  ErrorCode := WNetGetConnectionW(PWideChar(LocalName), @RemoteName[0], RemoteNameLen);
   Result := (ErrorCode = NO_ERROR) or (ErrorCode = ERROR_CONNECTION_UNAVAIL);
 end;
 
@@ -346,7 +385,7 @@ var
   ActiveWindow: HWND;
   DidMove: Boolean;
   OldRect: TRect;
-  WindowList: Pointer;
+  WindowList: {$IFDEF FPC}TList{$ELSE}Pointer{$ENDIF};
 begin
   { SHPathPrepareForWrite only exists on Windows 2000, Me, and later.
     Do nothing on older versions of Windows. }
@@ -363,14 +402,14 @@ begin
     around, go ahead and pass a proper owner window. }
   ActiveWindow := GetActiveWindow;
   DidMove := MoveAppWindowToActiveWindowMonitor(OldRect);
-  WindowList := DisableTaskWindows(0);
+  WindowList := {$IFDEF FPC}Screen.DisableForms(nil){$ELSE}DisableTaskWindows(0){$ENDIF};
   try
     Result := SUCCEEDED(SHPathPrepareForWriteFunc(Application.Handle, nil,
       PChar(Path), SHPPFW_NONE));
   finally
     if DidMove then
       MoveAppWindowBack(OldRect);
-    EnableTaskWindows(WindowList);
+    {$IFDEF FPC}Screen.EnableForms(WindowList){$ELSE}EnableTaskWindows(WindowList){$ENDIF};
     SetActiveWindow(ActiveWindow);
   end;
 end;
@@ -385,14 +424,61 @@ type
     ChildrenAdded: Boolean;
   end;
 
+{$IFDEF FPC}
+type
+  TWin32WSFolderTreeView = class(TWin32WSWinControl)
+  public
+    class function CreateHandle(const AWinControl: TWinControl;
+      const AParams: TCreateParams): HWND; override;
+  end;
+
+function FolderTreeParentMessage(const AWinControl: TWinControl; Window: HWND;
+  Msg: UINT; WParam: Windows.WPARAM; LParam: Windows.LPARAM;
+  var MsgResult: Windows.LRESULT; var WinProcess: Boolean): Boolean;
+var
+  Notification: TWMNotify;
+begin
+  Result := Msg = WM_NOTIFY;
+  if Result then begin
+    Notification.Msg := CN_NOTIFY;
+    Notification.IDCtrl := WParam;
+    Notification.NMHdr := Windows.PNMHdr(LParam);
+    Notification.Result := 0;
+    TCustomFolderTreeView(AWinControl).CNNotify(Notification);
+    MsgResult := Notification.Result;
+    WinProcess := False;
+  end;
+end;
+
+class function TWin32WSFolderTreeView.CreateHandle(const AWinControl: TWinControl;
+  const AParams: TCreateParams): HWND;
+var
+  Params: TCreateWindowExParams;
+begin
+  PrepareCreateWindow(AWinControl, AParams, Params);
+  Params.pClassName := 'SysTreeView32';
+  FinishCreateWindow(AWinControl, Params, False);
+  Params.WindowInfo^.ParentMsgHandler := @FolderTreeParentMessage;
+  SendMessageW(Params.Window, TVM_SETUNICODEFORMAT, 1, 0);
+  Result := Params.Window;
+end;
+
+class procedure TCustomFolderTreeView.WSRegisterClass;
+begin
+  inherited WSRegisterClass;
+  RegisterWSComponent(TCustomFolderTreeView, TWin32WSFolderTreeView);
+end;
+{$ELSE}
 class constructor TCustomFolderTreeView.Create;
 begin
   TCustomStyleEngine.RegisterStyleHook(TCustomFolderTreeView, TFolderTreeViewStyleHook);
 end;
 
+{$ENDIF}
+
 constructor TCustomFolderTreeView.Create(AOwner: TComponent);
 var
-  LogFont: TLogFont;
+  LogFont: TLogFontW;
 begin
   inherited;
   ControlStyle := ControlStyle - [csCaptureMouse];
@@ -400,8 +486,8 @@ begin
   Height := 97;
   ParentColor := False;
   TabStop := True;
-  if SystemParametersInfo(SPI_GETICONTITLELOGFONT, SizeOf(LogFont), @LogFont, 0) then
-    Font.Handle := CreateFontIndirect(LogFont);
+  if SystemParametersInfoW(SPI_GETICONTITLELOGFONT, SizeOf(LogFont), @LogFont, 0) then
+    Font.Handle := CreateFontIndirectW(LogFont);
   PreloadUrlmonDLL;
 end;
 
@@ -411,7 +497,7 @@ const
 begin
   InitCommonControls;
   inherited;
-  CreateSubClass(Params, WC_TREEVIEW);
+  {$IFNDEF FPC}CreateSubClass(Params, WC_TREEVIEW);{$ENDIF}
   with Params do begin
     Style := Style or WS_CLIPCHILDREN or WS_CLIPSIBLINGS or TVS_LINESATROOT or
       TVS_HASBUTTONS or TVS_SHOWSELALWAYS or TVS_EDITLABELS;
@@ -424,19 +510,22 @@ end;
 procedure TCustomFolderTreeView.CreateWnd;
 var
   ImageList: HIMAGELIST;
-  FileInfo: TSHFileInfo;
+  FileInfo: TSHFileInfoW;
   SaveCursor: HCURSOR;
 begin
   FDestroyingHandle := False;
   inherited;
-  TreeView_SetBkColor(Handle, UColorToRGB(Color));
-  TreeView_SetTextColor(Handle, UColorToRGB(Font.Color));
+  TreeView_SetBkColor(Handle, TColorRef(ColorToRGB(Color)));
+  TreeView_SetTextColor(Handle, TColorRef(ColorToRGB(Font.Color)));
   FDirectory := '';
   if csDesigning in ComponentState then
     Exit;
 
   { Enable the new Explorer-style look }
   if Assigned(SetWindowTheme) then begin
+    {$IFDEF FPC}
+    SetWindowTheme(Handle, 'Explorer', nil);
+    {$ELSE}
     var LStyle := StyleServices(Self);
     if not LStyle.Enabled or LStyle.IsSystemStyle then
      LStyle := nil;
@@ -444,6 +533,7 @@ begin
       SetWindowTheme(Handle, 'Explorer', nil)
     else
       SetWindowTheme(Handle, 'DarkMode_Explorer', nil);
+    {$ENDIF}
     { Like Explorer, enable double buffering to avoid flicker when the mouse
       is moved across the items }
     SendMessage(Handle, TVM_SETEXTENDEDSTYLE, TVS_EX_DOUBLEBUFFER,
@@ -451,12 +541,12 @@ begin
   end;
 
   { Initialize the image list }
-  ImageList := SHGetFileInfo('', 0, FileInfo, SizeOf(FileInfo),
+  ImageList := SHGetFileInfoW('', 0, FileInfo, SizeOf(FileInfo),
     SHGFI_USEFILEATTRIBUTES or SHGFI_SYSICONINDEX or SHGFI_SMALLICON);
   TreeView_SetImageList(Handle, ImageList, TVSIL_NORMAL);
 
   { Add the root items }
-  SaveCursor := SetCursor(LoadCursor(0, IDC_WAIT));
+  SaveCursor := Windows.SetCursor(LoadCursor(0, IDC_WAIT));
   try
     ItemChildrenNeeded(nil);
   finally
@@ -464,10 +554,13 @@ begin
   end;
 end;
 
+{$IFNDEF FPC}
 class destructor TCustomFolderTreeView.Destroy;
 begin
   TCustomStyleEngine.UnRegisterStyleHook(TCustomFolderTreeView, TFolderTreeViewStyleHook);
 end;
+
+{$ENDIF}
 
 procedure TCustomFolderTreeView.WMDestroy(var Message: TWMDestroy);
 begin
@@ -479,7 +572,7 @@ begin
     removable drives.
     Currently, however, this problem isn't seen in practice because we don't
     use TVS_SINGLEEXPAND on pre-XP Windows. }
-  FDestroyingHandle := True;  { disables our TVN_SELCHANGED handling }
+  FDestroyingHandle := True;  { disables our TVN_SELCHANGEDW handling }
   SelectItem(nil);
   inherited;
 end;
@@ -534,7 +627,7 @@ end;
 
 function TCustomFolderTreeView.GetItemFullPath(Item: HTREEITEM): String;
 var
-  TVItem: TTVItem;
+  TVItem: TTVItemW;
 begin
   Result := '';
   while Assigned(Item) do begin
@@ -583,20 +676,20 @@ procedure TCustomFolderTreeView.CNNotify(var Message: TWMNotify);
   end;
 
 var
-  Hdr: PNMTreeView;
+  Hdr: PNMTreeViewW;
   SaveCursor: HCURSOR;
-  DispItem: PTVItem;
-  TVItem: TTVItem;
+  DispItem: PTVItemW;
+  TVItem: TTVItemW;
   S: String;
   Accept: Boolean;
 begin
-  inherited;
+  {$IFNDEF FPC}inherited;{$ENDIF}
   case Message.NMHdr.code of
-    TVN_DELETEITEM:
+    TVN_DELETEITEMW:
       begin
-        Dispose(PItemData(PNMTreeView(Message.NMHdr).itemOld.lParam));
+        Dispose(PItemData(PNMTreeViewW(Message.NMHdr).itemOld.lParam));
       end;
-    TVN_ITEMEXPANDING:
+    TVN_ITEMEXPANDINGW:
       begin
         { Sanity check: Make sure this message isn't sent recursively.
           (See top of source code for details.) }
@@ -604,12 +697,12 @@ begin
           raise Exception.Create('Internal error: Item already expanding');
         FItemExpanding := True;
         try
-          Hdr := PNMTreeView(Message.NMHdr);
+          Hdr := PNMTreeViewW(Message.NMHdr);
           if (Hdr.action = TVE_EXPAND) and
              not PItemData(Hdr.itemNew.lParam).ChildrenAdded and
              not PItemData(Hdr.itemNew.lParam).NewItem then begin
             PItemData(Hdr.itemNew.lParam).ChildrenAdded := True;
-            SaveCursor := SetCursor(LoadCursor(0, IDC_WAIT));
+            SaveCursor := Windows.SetCursor(LoadCursor(0, IDC_WAIT));
             try
               if ItemChildrenNeeded(Hdr.itemNew.hItem) then begin
                 { If no subfolders were found, and there are no 'new' items
@@ -633,9 +726,9 @@ begin
           FItemExpanding := False;
         end;
       end;
-    TVN_GETDISPINFO:
+    TVN_GETDISPINFOW:
       begin
-        DispItem := @PTVDispInfo(Message.NMHdr).item;
+        DispItem := @PTVDispInfoW(Message.NMHdr).item;
         if DispItem.mask and TVIF_IMAGE <> 0 then begin
           DispItem.iImage := GetItemImageIndex(DispItem.hItem,
             PItemData(DispItem.lParam).NewItem, False);
@@ -652,21 +745,21 @@ begin
         { Store the values with the item so the callback isn't called again }
         DispItem.mask := DispItem.mask or TVIF_DI_SETITEM;
       end;
-    TVN_SELCHANGED:
+    TVN_SELCHANGEDW:
       begin
         if not FDestroyingHandle then
           Change;
       end;
-    TVN_BEGINLABELEDIT:
+    TVN_BEGINLABELEDITW:
       begin
-        DispItem := @PTVDispInfo(Message.NMHdr).item;
+        DispItem := @PTVDispInfoW(Message.NMHdr).item;
         { Only 'new' items may be renamed }
         if not PItemData(DispItem.lParam).NewItem then
           Message.Result := 1;
       end;
-    TVN_ENDLABELEDIT:
+    TVN_ENDLABELEDITW:
       begin
-        DispItem := @PTVDispInfo(Message.NMHdr).item;
+        DispItem := @PTVDispInfoW(Message.NMHdr).item;
         { Only 'new' items may be renamed }
         if PItemData(DispItem.lParam).NewItem and
            Assigned(DispItem.pszText) then begin
@@ -683,7 +776,7 @@ begin
             TVItem.hItem := DispItem.hItem;
             TVItem.pszText := PChar(S);
             TreeView_SetItem(Handle, TVItem);
-            TreeView_SortChildren(Handle, TreeView_GetParent(Handle, DispItem.hItem), False);
+            TreeView_SortChildren(Handle, TreeView_GetParent(Handle, DispItem.hItem), {$IFDEF FPC}0{$ELSE}False{$ENDIF});
             Change;
           end;
         end;
@@ -704,7 +797,7 @@ end;
 procedure TCustomFolderTreeView.SetItemHasChildren(const Item: HTREEITEM;
   const AHasChildren: Boolean);
 var
-  TVItem: TTVItem;
+  TVItem: TTVItemW;
 begin
   TVItem.mask := TVIF_CHILDREN;
   TVItem.hItem := Item;
@@ -732,7 +825,7 @@ procedure TCustomFolderTreeView.DeleteObsoleteNewItems(const ParentItem,
 
 var
   Item, NextItem: HTREEITEM;
-  TVItem: TTVItem;
+  TVItem: TTVItemW;
 begin
   Item := TreeView_GetChild(Handle, ParentItem);
   while Assigned(Item) do begin
@@ -757,7 +850,7 @@ end;
 function TCustomFolderTreeView.InsertItem(const ParentItem: HTREEITEM;
   const AName, ACustomDisplayName: String; const ANewItem: Boolean): HTREEITEM;
 var
-  InsertStruct: TTVInsertStruct;
+  InsertStruct: TTVInsertStructW;
   ItemData: PItemData;
 begin
   if ANewItem then
@@ -809,7 +902,7 @@ end;
 function TCustomFolderTreeView.FindItem(const ParentItem: HTREEITEM;
   const AName: String): HTREEITEM;
 var
-  TVItem: TTVItem;
+  TVItem: TTVItemW;
 begin
   Result := TreeView_GetChild(Handle, ParentItem);
   while Assigned(Result) do begin
@@ -862,7 +955,7 @@ function TCustomFolderTreeView.TryExpandItem(const Item: HTREEITEM): Boolean;
   initialized (if any), or False if the initialization failed due to a
   temporary error (i.e. ItemChildrenNeeded returned False). }
 var
-  TVItem: TTVItem;
+  TVItem: TTVItemW;
 begin
   TreeView_Expand(Handle, Item, TVE_EXPAND);
   TVItem.mask := TVIF_CHILDREN or TVIF_PARAM;
@@ -977,7 +1070,7 @@ function TFolderTreeView.ItemChildrenNeeded(const Item: HTREEITEM): Boolean;
   var
     OldErrorMode: UINT;
     H: THandle;
-    FindData: TWin32FindData;
+    FindData: TWin32FindDataW;
     S: String;
   begin
     OldErrorMode := SetErrorMode(SEM_FAILCRITICALERRORS);
@@ -994,7 +1087,7 @@ function TFolderTreeView.ItemChildrenNeeded(const Item: HTREEITEM): Boolean;
       end;
       Result := True;
 
-      H := FindFirstFile(PChar(AddBackslash(Path) + '*'), FindData);
+      H := FindFirstFileW(PWideChar(AddBackslash(Path) + '*'), FindData);
       if H <> INVALID_HANDLE_VALUE then begin
         try
           repeat
@@ -1003,7 +1096,7 @@ function TFolderTreeView.ItemChildrenNeeded(const Item: HTREEITEM): Boolean;
               InsertItem(ParentItem, S, GetFileDisplayName(AddBackslash(Path) + S),
                 False);
             end;
-          until not FindNextFile(H, FindData);
+          until not FindNextFileW(H, FindData);
         finally
           Windows.FindClose(H);
         end;
@@ -1023,7 +1116,7 @@ begin
     if Result then begin
       { When a text callback is used, sorting after all items are inserted is
         exponentially faster than using hInsertAfter=TVI_SORT }
-      TreeView_SortChildren(Handle, Item, False);
+      TreeView_SortChildren(Handle, Item, {$IFDEF FPC}0{$ELSE}False{$ENDIF});
     end;
   end;
 end;
@@ -1052,7 +1145,7 @@ begin
   Path := GetItemFullPath(Item);
   OldErrorMode := SetErrorMode(SEM_FAILCRITICALERRORS);
   try
-    Result := (GetDriveType(PChar(AddBackslash(PathExtractDrive(Path)))) = DRIVE_REMOTE) or
+    Result := (GetDriveTypeW(PWideChar(AddBackslash(PathExtractDrive(Path)))) = DRIVE_REMOTE) or
       HasSubfolders(Path);
   finally
     SetErrorMode(OldErrorMode);
@@ -1062,7 +1155,7 @@ end;
 procedure TFolderTreeView.RefreshDriveItem(const Item: HTREEITEM;
   const ANewDisplayName: String);
 var
-  TVItem: TTVItem;
+  TVItem: TTVItemW;
 begin
   TVItem.mask := TVIF_IMAGE or TVIF_SELECTEDIMAGE;
   TVItem.hItem := Item;
@@ -1102,7 +1195,7 @@ function TStartMenuFolderTreeView.ItemChildrenNeeded(const Item: HTREEITEM): Boo
     StartupName: String;
     OldErrorMode: UINT;
     H: THandle;
-    FindData: TWin32FindData;
+    FindData: TWin32FindDataW;
     S: String;
   begin
     { Determine the name of the Startup folder so that we can hide it from the
@@ -1113,7 +1206,7 @@ function TStartMenuFolderTreeView.ItemChildrenNeeded(const Item: HTREEITEM): Boo
 
     OldErrorMode := SetErrorMode(SEM_FAILCRITICALERRORS);
     try
-      H := FindFirstFile(PChar(AddBackslash(Path) + '*'), FindData);
+      H := FindFirstFileW(PWideChar(AddBackslash(Path) + '*'), FindData);
       if H <> INVALID_HANDLE_VALUE then begin
         try
           repeat
@@ -1123,7 +1216,7 @@ function TStartMenuFolderTreeView.ItemChildrenNeeded(const Item: HTREEITEM): Boo
                 if FindItem(ParentItem, S) = nil then
                   InsertItem(ParentItem, S, GetFileDisplayName(AddBackslash(Path) + S), False);
             end;
-          until not FindNextFile(H, FindData);
+          until not FindNextFileW(H, FindData);
         finally
           Windows.FindClose(H);
         end;
@@ -1160,7 +1253,7 @@ begin
       AddSubfolders(Item, AddBackslash(FCommonPrograms) + Path, FCommonStartup);
     if FUserPrograms <> '' then
       AddSubfolders(Item, AddBackslash(FUserPrograms) + Path, FUserStartup);
-    TreeView_SortChildren(Handle, Item, False);
+    TreeView_SortChildren(Handle, Item, {$IFDEF FPC}0{$ELSE}False{$ENDIF});
   end;
 end;
 
@@ -1184,7 +1277,7 @@ begin
   FCommonPrograms := ACommonPrograms;
   FUserStartup := AUserStartup;
   FCommonStartup := ACommonStartup;
-  RecreateWnd;
+  {$IFDEF FPC}RecreateWnd(Self){$ELSE}RecreateWnd{$ENDIF};
 end;
 
 {$IFDEF VCLSTYLES}
@@ -1343,8 +1436,20 @@ end;
 
 {$ENDIF}
 
-initialization
+procedure InitFolderTree;
+var
+  SystemDir: String;
+  ShellModule: HMODULE;
+begin
   InitThemeLibrary;
-  SHPathPrepareForWriteFunc := GetProcAddress(LoadLibrary(PChar(AddBackslash(GetSystemDir) + shell32)),
-    'SHPathPrepareForWriteW');
+  SystemDir := GetSystemDir;
+  if SystemDir <> '' then begin
+    ShellModule := LoadLibraryW(PWideChar(AddBackslash(SystemDir) + shell32));
+    if ShellModule <> 0 then
+      SHPathPrepareForWriteFunc := GetProcAddress(ShellModule, 'SHPathPrepareForWriteW');
+  end;
+end;
+
+initialization
+  InitFolderTree;
 end.

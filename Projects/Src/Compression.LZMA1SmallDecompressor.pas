@@ -2,7 +2,7 @@ unit Compression.LZMA1SmallDecompressor;
 
 {
   Inno Setup
-  Copyright (C) 1997-2025 Jordan Russell
+  Copyright (C) 1997-2026 Jordan Russell
   Portions by Martijn Laan
   For conditions of distribution and use, see LICENSE.TXT.
 
@@ -16,7 +16,7 @@ unit Compression.LZMA1SmallDecompressor;
 interface
 
 uses
-  Windows, SysUtils, Compression.Base;
+  {$IFDEF MSWINDOWS} Windows, {$ENDIF} SysUtils, Compression.Base;
 
 type
   { Internally-used record }
@@ -83,10 +83,14 @@ end;
 
 { TLZMA1SmallDecompressor }
 
+{$IFDEF FPC}
+{$LINKLIB inno_decoders}
+{$ELSE}
 {$IFNDEF WIN64}
 {$L Src\Compression.LZMA1SmallDecompressor\LzmaDecode\LzmaDecodeInno-x86.obj}
 {$ELSE}
 {$L Src\Compression.LZMA1SmallDecompressor\LzmaDecode\LzmaDecodeInno-x64.obj}
+{$ENDIF}
 {$ENDIF}
 type
   TLzmaInCallback = record
@@ -101,12 +105,12 @@ const
 
 function LzmaMyDecodeProperties(var vs: TLZMAInternalDecoderState;
   vsSize: Integer; const propsData; propsDataSize: Integer;
-  var outPropsSize: LongWord; var outDictionarySize: LongWord): Integer; cdecl; external name {$IFNDEF WIN64} '_LzmaMyDecodeProperties' {$ELSE} 'LzmaMyDecodeProperties' {$ENDIF};
+  var outPropsSize: LongWord; var outDictionarySize: LongWord): Integer; cdecl; external name {$IF not Defined(WIN64) and not Defined(FPC)} '_LzmaMyDecodeProperties' {$ELSE} 'LzmaMyDecodeProperties' {$ENDIF};
 procedure LzmaMyDecoderInit(var vs: TLZMAInternalDecoderState;
-  probsPtr: Pointer; dictionaryPtr: Pointer); cdecl; external name {$IFNDEF WIN64} '_LzmaMyDecoderInit' {$ELSE} 'LzmaMyDecoderInit' {$ENDIF};
+  probsPtr: Pointer; dictionaryPtr: Pointer); cdecl; external name {$IF not Defined(WIN64) and not Defined(FPC)} '_LzmaMyDecoderInit' {$ELSE} 'LzmaMyDecoderInit' {$ENDIF};
 function LzmaDecode(var vs: TLZMAInternalDecoderState;
   var inCallback: TLzmaInCallback; var outStream; outSize: Cardinal;
-  var outSizeProcessed: Cardinal): Integer; cdecl; external name {$IFNDEF WIN64} '_LzmaDecode' {$ELSE} 'LzmaDecode' {$ENDIF};
+  var outSizeProcessed: Cardinal): Integer; cdecl; external name {$IFDEF FPC} 'IS_LzmaSmallDecode' {$ELSE} {$IFNDEF WIN64} '_LzmaDecode' {$ELSE} 'LzmaDecode' {$ENDIF} {$ENDIF};
 
 type
   TLZMADecompressorCallbackData = record
@@ -132,7 +136,11 @@ procedure TLZMA1SmallDecompressor.DestroyHeap;
 begin
   FHeapSize := 0;
   if Assigned(FHeapBase) then begin
+    {$IFDEF MSWINDOWS}
     VirtualFree(FHeapBase, 0, MEM_RELEASE);
+    {$ELSE}
+    FreeMem(FHeapBase);
+    {$ENDIF}
     FHeapBase := nil;
   end;
 end;
@@ -172,7 +180,11 @@ begin
   NewHeapSize := ProbsSize + DictionarySize;
   if FHeapSize <> NewHeapSize then begin
     DestroyHeap;
+    {$IFDEF MSWINDOWS}
     FHeapBase := VirtualAlloc(nil, NewHeapSize, MEM_COMMIT, PAGE_READWRITE);
+    {$ELSE}
+    GetMem(FHeapBase, NewHeapSize);
+    {$ENDIF}
     if FHeapBase = nil then
       OutOfMemoryError;
     FHeapSize := NewHeapSize;

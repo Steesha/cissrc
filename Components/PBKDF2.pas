@@ -12,7 +12,7 @@ unit PBKDF2;
 interface
 
 uses
-  System.SysUtils;
+  SysUtils;
 
 function PBKDF2SHA256(const Password: TBytes; const Salt: TBytes; const Iterations, KeyLength: Integer): TBytes; overload;
 function PBKDF2SHA256(const Password: String; const Salt: TBytes; const Iterations, KeyLength: Integer): TBytes; overload;
@@ -20,76 +20,122 @@ function PBKDF2SHA256(const Password: String; const Salt: TBytes; const Iteratio
 implementation
 
 uses
-  System.Hash, System.Math;
+  SHA256;
 
-function PBKDF2SHA256(const Password: TBytes; const Salt: TBytes; const Iterations, KeyLength: Integer): TBytes;
+type
+  THMACSHA256Context = record
+    Inner, Outer: TSHA256Context;
+  end;
+
+procedure InitHMAC(var Context: THMACSHA256Context; const Password: TBytes);
+var
+  Pad: array[0..63] of Byte;
+  Digest: TSHA256Digest;
+  I: Integer;
 begin
-  const HashVersion = THashSHA2.TSHA2Version.SHA256;
-
-  var Hash := THashSHA2.Create(HashVersion); { This is a record so no need to free }
-  const HashSize = Hash.GetHashSize;
-  var WorkingPassword := Copy(Password);
+  FillChar(Pad, SizeOf(Pad), 0);
+  FillChar(Digest, SizeOf(Digest), 0);
   try
-
-    if Length(WorkingPassword) > Hash.GetBlockSize then begin
-      { Pre-hash password so THashSHA2.GetHMACAsBytes won't do this over and over again }
-      Hash.Update(WorkingPassword);
-      const NewPassword = Hash.HashAsBytes;
-      { Security: don't leave the old copy on the heap }
-      FillChar(WorkingPassword[0], Length(WorkingPassword), 0);
-      WorkingPassword := NewPassword;
-    end;
-
-    SetLength(Result, KeyLength);
-    var BytesDone := 0;
-
-    const L = Ceil(KeyLength / HashSize);
-
-    for var Block := 1 to L do begin
-      const SaltAndBlock = Salt + [Byte(Block shr 24), Byte(Block shr 16), Byte(Block shr 8), Byte(Block)];
-      var U := THashSHA2.GetHMACAsBytes(SaltAndBlock, WorkingPassword, HashVersion);
-      var F := Copy(U);
-
-      for var I := 2 to Iterations do begin
-        const NewU = THashSHA2.GetHMACAsBytes(U, WorkingPassword, HashVersion);
-        { Security: don't leave key derivation intermediates on the heap }
-        FillChar(U[0], Length(U), 0);
-        U := NewU;
-        for var J := 0 to High(F) do
-          F[J] := F[J] xor U[J];
-      end;
-
-      const BytesLeft = KeyLength - BytesDone;
-      const BytesToCopy = Min(BytesLeft, Length(F));
-      Move(F[0], Result[BytesDone], BytesToCopy);
-      { Security: don't leave key derivation intermediates on the heap }
-      FillChar(U[0], Length(U), 0);
-      FillChar(F[0], Length(F), 0);
-      Inc(BytesDone, BytesToCopy);
-    end;
+    if Length(Password) > SizeOf(Pad) then begin
+      Digest := SHA256Buf(Password[0], Length(Password));
+      Move(Digest, Pad, SizeOf(Digest));
+    end else if Length(Password) > 0 then
+      Move(Password[0], Pad, Length(Password));
+    for I := Low(Pad) to High(Pad) do
+      Pad[I] := Pad[I] xor $36;
+    SHA256Init(Context.Inner);
+    SHA256Update(Context.Inner, Pad, SizeOf(Pad));
+    for I := Low(Pad) to High(Pad) do
+      Pad[I] := Pad[I] xor $36 xor $5c;
+    SHA256Init(Context.Outer);
+    SHA256Update(Context.Outer, Pad, SizeOf(Pad));
   finally
-    { Security: zero the password bytes created by Copy or HashAsBytes }
-    if Length(WorkingPassword) > 0 then
-      FillChar(WorkingPassword[0], Length(WorkingPassword), 0);
+    FillChar(Pad, SizeOf(Pad), 0);
+    FillChar(Digest, SizeOf(Digest), 0);
   end;
 end;
 
-function PBKDF2SHA256(const Password: String; const Salt: TBytes; const Iterations, KeyLength: Integer): TBytes;
-
-  function StringToBytes(const S: String): TBytes;
-  begin
-    const N = Length(S)*SizeOf(S[1]);
-    SetLength(Result, N);
-    if N > 0 then
-      Move(S[1], Result[0], N);
-  end;
-
+function HMAC(const Context: THMACSHA256Context; const Buffer;
+  const Count: Cardinal): TSHA256Digest;
+var
+  Inner, Outer: TSHA256Context;
+  Digest: TSHA256Digest;
 begin
-  var PasswordBytes := StringToBytes(Password);
+  Inner := Context.Inner;
+  Outer := Context.Outer;
+  try
+    SHA256Update(Inner, Buffer, Count);
+    Digest := SHA256Final(Inner);
+    SHA256Update(Outer, Digest, SizeOf(Digest));
+    Result := SHA256Final(Outer);
+  finally
+    FillChar(Inner, SizeOf(Inner), 0);
+    FillChar(Outer, SizeOf(Outer), 0);
+    FillChar(Digest, SizeOf(Digest), 0);
+  end;
+end;
+
+function PBKDF2SHA256(const Password: TBytes; const Salt: TBytes;
+  const Iterations, KeyLength: Integer): TBytes;
+var
+  Context: THMACSHA256Context;
+  SaltAndBlock: TBytes;
+  U, F: TSHA256Digest;
+  Block: Cardinal;
+  BytesDone, BytesToCopy, I, J: Integer;
+begin
+  if (Iterations < 1) or (KeyLength < 0) then
+    raise EArgumentException.Create('Invalid PBKDF2 iterations or key length');
+  Result := nil;
+  SetLength(Result, KeyLength);
+  if KeyLength = 0 then
+    Exit;
+  InitHMAC(Context, Password);
+  try
+    SetLength(SaltAndBlock, Length(Salt) + 4);
+    if Length(Salt) > 0 then
+      Move(Salt[0], SaltAndBlock[0], Length(Salt));
+    BytesDone := 0;
+    Block := 1;
+    while BytesDone < KeyLength do begin
+      for I := 0 to 3 do
+        SaltAndBlock[Length(Salt) + I] := Byte(Block shr ((3 - I) * 8));
+      U := HMAC(Context, SaltAndBlock[0], Length(SaltAndBlock));
+      F := U;
+      for I := 2 to Iterations do begin
+        U := HMAC(Context, U, SizeOf(U));
+        for J := Low(F) to High(F) do
+          F[J] := F[J] xor U[J];
+      end;
+      BytesToCopy := KeyLength - BytesDone;
+      if BytesToCopy > SizeOf(F) then
+        BytesToCopy := SizeOf(F);
+      Move(F, Result[BytesDone], BytesToCopy);
+      Inc(BytesDone, BytesToCopy);
+      Inc(Block);
+    end;
+  finally
+    FillChar(Context, SizeOf(Context), 0);
+    FillChar(U, SizeOf(U), 0);
+    FillChar(F, SizeOf(F), 0);
+  end;
+end;
+
+function PBKDF2SHA256(const Password: String; const Salt: TBytes;
+  const Iterations, KeyLength: Integer): TBytes;
+var
+  PasswordBytes: TBytes;
+  I: Integer;
+begin
+  { The installer format uses UTF-16LE password bytes on every host }
+  SetLength(PasswordBytes, Length(Password) * 2);
+  for I := 1 to Length(Password) do begin
+    PasswordBytes[(I-1)*2] := Byte(Ord(Password[I]));
+    PasswordBytes[(I-1)*2+1] := Byte(Ord(Password[I]) shr 8);
+  end;
   try
     Result := PBKDF2SHA256(PasswordBytes, Salt, Iterations, KeyLength);
   finally
-    { Security: zero the password bytes created by StringToBytes }
     if Length(PasswordBytes) > 0 then
       FillChar(PasswordBytes[0], Length(PasswordBytes), 0);
   end;

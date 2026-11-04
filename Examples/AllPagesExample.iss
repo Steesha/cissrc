@@ -16,14 +16,14 @@ OutputDir=userdocs:Inno Setup Examples Output
 PrivilegesRequired=lowest
 
 DisableWelcomePage=no
-LicenseFile=license.txt
+LicenseFile=License.txt
 #define Password 'password'
 Password={#Password}
-InfoBeforeFile=readme.txt
+InfoBeforeFile=Readme.txt
 UserInfoPage=yes
 DisableDirPage=no
 DisableProgramGroupPage=no
-InfoAfterFile=readme.txt
+InfoAfterFile=Readme.txt
 
 [Files]
 Source: "MyProg.exe"; DestDir: "{app}"

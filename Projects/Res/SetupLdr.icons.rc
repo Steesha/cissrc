@@ -1,0 +1,3 @@
+LANGUAGE 9, 1
+MAINICON ICON "Setup.icon.ico"
+MAINICON_DARK ICON "Setup.icon.dark.ico"

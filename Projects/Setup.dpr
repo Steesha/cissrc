@@ -1,5 +1,7 @@
 program Setup;
 
+{$IFDEF FPC}{$APPTYPE GUI}{$ENDIF}
+
 {
   Inno Setup
   Copyright (C) 1997-2026 Jordan Russell
@@ -12,6 +14,7 @@ program Setup;
 uses
   SafeDLLPath in '..\Components\SafeDLLPath.pas',
   SetupLdrAndSetup.XPTheme in 'Src\SetupLdrAndSetup.XPTheme.pas',
+  {$IFDEF FPC}Interfaces,{$ENDIF}
   Forms,
   Windows,
   SysUtils,
@@ -20,7 +23,9 @@ uses
   RichEditViewer in '..\Components\RichEditViewer.pas',
   Shared.CommonFunc.Vcl in 'Src\Shared.CommonFunc.Vcl.pas',
   Shared.CommonFunc in 'Src\Shared.CommonFunc.pas',
+  {$IFNDEF FPC}
   Shared.CommonFunc.Test in 'Src\Shared.CommonFunc.Test.pas',
+  {$ENDIF}
   Setup.Start in 'Src\Setup.Start.pas',
   Setup.MainForm in 'Src\Setup.MainForm.pas',
   Setup.MainFunc in 'Src\Setup.MainFunc.pas',
@@ -32,6 +37,7 @@ uses
   SetupLdrAndSetup.Messages in 'Src\SetupLdrAndSetup.Messages.pas',
   Shared.SetupMessageIDs in 'Src\Shared.SetupMessageIDs.pas',
   Setup.UninstallLog in 'Src\Setup.UninstallLog.pas',
+  Setup.UninstallLog.Actions in 'Src\Setup.UninstallLog.Actions.pas',
   Shared.Struct in 'Src\Shared.Struct.pas',
   Setup.NewDiskForm in 'Src\Setup.NewDiskForm.pas' {NewDiskForm},
   SetupLdrAndSetup.InstFunc in 'Src\SetupLdrAndSetup.InstFunc.pas',
@@ -54,40 +60,58 @@ uses
   Compression.LZMADecompressor in 'Src\Compression.LZMADecompressor.pas',
   Shared.FileClass in 'Src\Shared.FileClass.pas',
   MD5 in '..\Components\MD5.pas',
+  {$IFNDEF FPC}
   MD5.Test in '..\Components\MD5.Test.pas',
+  {$ENDIF}
   SHA1 in '..\Components\SHA1.pas',
+  {$IFNDEF FPC}
   SHA1.Test in '..\Components\SHA1.Test.pas',
+  {$ENDIF}
   SHA256 in '..\Components\SHA256.pas',
+  {$IFNDEF FPC}
   SHA256.Test in '..\Components\SHA256.Test.pas',
+  {$ENDIF}
   Setup.LoggingFunc in 'Src\Setup.LoggingFunc.pas',
   Setup.DebugClient in 'Src\Setup.DebugClient.pas',
   Shared.DebugStruct in 'Src\Shared.DebugStruct.pas',
   ChaCha20 in '..\Components\ChaCha20.pas',
+  {$IFNDEF FPC}
   ChaCha20.Test in '..\Components\ChaCha20.Test.pas',
+  {$ENDIF}
   Setup.Uninstall in 'Src\Setup.Uninstall.pas',
   Setup.UninstallProgressForm in 'Src\Setup.UninstallProgressForm.pas' {UninstallProgressForm},
   Setup.UninstallSharedFileForm in 'Src\Setup.UninstallSharedFileForm.pas' {UninstallSharedFileForm},
   SimpleExpression in '..\Components\SimpleExpression.pas',
+  {$IFNDEF FPC}
   SimpleExpression.Test in '..\Components\SimpleExpression.Test.pas',
+  {$ENDIF}
   UIStateForm in '..\Components\UIStateForm.pas',
   Setup.SetupForm in 'Src\Setup.SetupForm.pas',
   Setup.RegSvr in 'Src\Setup.RegSvr.pas',
   BrowseFunc in '..\Components\BrowseFunc.pas',
   Setup.PathRedir in 'Src\Setup.PathRedir.pas',
+  {$IFNDEF FPC}
   Setup.PathRedir.Test in 'Src\Setup.PathRedir.Test.pas',
+  {$ENDIF}
   Setup.RedirFunc in 'Src\Setup.RedirFunc.pas',
   Setup.SecurityFunc in 'Src\Setup.SecurityFunc.pas',
   Shared.VerInfoFunc in 'Src\Shared.VerInfoFunc.pas',
+  {$IFNDEF FPC}
   Shared.VerInfoFunc.Test in 'Src\Shared.VerInfoFunc.Test.pas',
+  {$ENDIF}
   Setup.RegDLL in 'Src\Setup.RegDLL.pas',
   Setup.SpawnCommon in 'Src\Setup.SpawnCommon.pas',
   Setup.SpawnServer in 'Src\Setup.SpawnServer.pas',
   Setup.SpawnClient in 'Src\Setup.SpawnClient.pas',
   Shared.TaskDialogFunc in 'Src\Shared.TaskDialogFunc.pas',
   BidiUtils in '..\Components\BidiUtils.pas',
+  {$IFNDEF FPC}
   BidiUtils.Test in '..\Components\BidiUtils.Test.pas',
+  {$ENDIF}
   PathFunc in '..\Components\PathFunc.pas',
+  {$IFNDEF FPC}
   PathFunc.Test in '..\Components\PathFunc.Test.pas',
+  {$ENDIF}
   NewCtrls in '..\Components\NewCtrls.pas',
   BitmapButton in '..\Components\BitmapButton.pas',
   BitmapImage in '..\Components\BitmapImage.pas',
@@ -110,23 +134,35 @@ uses
   Shared.DotNetVersion in 'Src\Shared.DotNetVersion.pas',
   NewUxTheme in '..\Components\NewUxTheme.pas',
   PBKDF2 in '..\Components\PBKDF2.pas',
+  {$IFNDEF FPC}
   PBKDF2.Test in '..\Components\PBKDF2.Test.pas',
+  {$ENDIF}
   Compression.SevenZipDecoder in 'Src\Compression.SevenZipDecoder.pas',
   PSStackHelper in '..\Components\PSStackHelper.pas',
   Setup.ScriptFunc.HelperFunc in 'Src\Setup.ScriptFunc.HelperFunc.pas',
   ECDSA in '..\Components\ECDSA.pas',
   ISSigFunc in '..\Components\ISSigFunc.pas',
+  {$IFNDEF FPC}
   ISSigFunc.Test in '..\Components\ISSigFunc.Test.pas',
+  {$ENDIF}
   StringScanner in '..\Components\StringScanner.pas',
+  {$IFNDEF FPC}
   StringScanner.Test in '..\Components\StringScanner.Test.pas',
+  {$ENDIF}
   Compression.SevenZipDLLDecoder in 'Src\Compression.SevenZipDLLDecoder.pas',
   Compression.SevenZipDLLDecoder.Interfaces in 'Src\Compression.SevenZipDLLDecoder.Interfaces.pas',
   Shared.EncryptionFunc in 'Src\Shared.EncryptionFunc.pas',
+  {$IFNDEF FPC}
   Shared.EncryptionFunc.Test in 'Src\Shared.EncryptionFunc.Test.pas',
+  {$ENDIF}
   UnsignedFunc in '..\Components\UnsignedFunc.pas',
+  {$IFNDEF FPC}
   UnsignedFunc.Test in '..\Components\UnsignedFunc.Test.pas',
+  {$ENDIF}
+  {$IFNDEF FPC}
   Themes in '..\Components\Themes.pas',
   FormBackgroundStyleHook in '..\Components\FormBackgroundStyleHook.pas',
+  {$ENDIF}
   uPSDebugger in '..\Components\UniPs\Source\uPSDebugger.pas',
   uPSR_classes in '..\Components\UniPs\Source\uPSR_classes.pas',
   uPSR_comobj in '..\Components\UniPs\Source\uPSR_comobj.pas',

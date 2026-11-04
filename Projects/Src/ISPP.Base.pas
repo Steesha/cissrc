@@ -96,24 +96,30 @@ begin
 end;
 
 function TIsppVariant.AsCardinal: Cardinal;
+var
+  I: Int64;
 begin
-  const I = AsInt64;
+  I := AsInt64;
   if (I < Low(Result)) or (I > High(Result)) then
     raise Exception.Create(SRangeCheckError);
   Result := Cardinal(I);
 end;
 
 function TIsppVariant.AsInteger: Integer;
+var
+  I: Int64;
 begin
-  const I = AsInt64;
+  I := AsInt64;
   if (I < Low(Result)) or (I > High(Result)) then
     raise Exception.Create(SRangeCheckError);
   Result := Integer(I);
 end;
 
 function TIsppVariant.AsWord: Word;
+var
+  I: Int64;
 begin
-  const I = AsInt64;
+  I := AsInt64;
   if (I < Low(Result)) or (I > High(Result)) then
     raise Exception.Create(SRangeCheckError);
   Result := Word(I);

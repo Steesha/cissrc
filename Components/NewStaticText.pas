@@ -11,7 +11,8 @@ interface
 
 uses
   Windows, Messages, SysUtils, Classes, Controls, Forms,
-  {$IFDEF VCLSTYLES} Vcl.Themes, {$ELSE} Themes, {$ENDIF}
+  {$IFDEF FPC} LCLType, LMessages, StdCtrls,
+  {$ELSE} {$IFDEF VCLSTYLES} Vcl.Themes, {$ELSE} Themes, {$ENDIF} {$ENDIF}
   Graphics;
 
 {$IFDEF VCLSTYLES}
@@ -19,50 +20,81 @@ uses
 {$ENDIF}
 
 type
-  TNewStaticText = class(TWinControl)
+  {$IFDEF FPC}
+  TStaticTextStyleElement = (seFont, seClient, seBorder);
+  TStaticTextStyleElements = set of TStaticTextStyleElement;
+  {$ENDIF}
+
+  TNewStaticText = class({$IFDEF FPC}TCustomStaticText{$ELSE}TWinControl{$ENDIF})
   private
+    {$IFNDEF FPC}
     FAlignment: TAlignment;
-    FAutoSize: Boolean;
     FFocusControl: TWinControl;
+    FShowAccelChar: Boolean;
+    {$ENDIF}
+    FAutoSize: Boolean;
     FForceLTRReading: Boolean;
     FLastAdjustBoundsRTL: Boolean;
-    FShowAccelChar: Boolean;
-    {$IFNDEF TRANSPARENCYSUPPORT}
+    {$IF not Defined(FPC) and not Defined(TRANSPARENCYSUPPORT)}
     FTransparent: Boolean;
-    {$ENDIF}
+    {$IFEND}
     FWordWrap: Boolean;
+    {$IFDEF FPC}
+    FStyleElements: TStaticTextStyleElements;
+    procedure SetStyleElements(const Value: TStaticTextStyleElements);
+    procedure RemoveInheritedStyleColor;
+    {$ENDIF}
+    {$IFNDEF FPC}
     class constructor Create;
     class destructor Destroy;
     {$IFDEF TRANSPARENCYSUPPORT}
     procedure CNCtlColorStatic(var Message: TWMCtlColorStatic); message CN_CTLCOLORSTATIC;
     {$ENDIF}
     procedure CMDialogChar(var Message: TCMDialogChar); message CM_DIALOGCHAR;
-    procedure CMFontChanged(var Message: TMessage); message CM_FONTCHANGED;
-    procedure CMParentFontChanged(var Message: TMessage); message CM_PARENTFONTCHANGED;
-    procedure CMTextChanged(var Message: TMessage); message CM_TEXTCHANGED;
+    {$ENDIF}
+    procedure CMFontChanged(var Message: {$IFDEF FPC}TLMessage{$ELSE}TMessage{$ENDIF}); message CM_FONTCHANGED;
+    procedure CMParentFontChanged(var Message: {$IFDEF FPC}TLMessage{$ELSE}TMessage{$ENDIF}); message CM_PARENTFONTCHANGED;
+    procedure CMTextChanged(var Message: {$IFDEF FPC}TLMessage{$ELSE}TMessage{$ENDIF}); message CM_TEXTCHANGED;
     procedure AdjustBounds;
     function CalcBounds: TPoint;
     function GetDrawTextFlags: UINT;
+    {$IFNDEF FPC}
     procedure SetAlignment(Value: TAlignment);
     procedure SetFocusControl(Value: TWinControl);
-    procedure SetForceLTRReading(Value: Boolean);
     procedure SetShowAccelChar(Value: Boolean);
     procedure SetTransparent(const Value: Boolean);
-    procedure SetWordWrap(Value: Boolean);
     function GetTransparent: Boolean;
+    {$ENDIF}
+    procedure SetForceLTRReading(Value: Boolean);
+    procedure SetWordWrap(Value: Boolean);
   protected
     procedure CreateParams(var Params: TCreateParams); override;
     procedure Loaded; override;
+    {$IFDEF FPC}
+    procedure SetShowAccelChar(Value: Boolean); override;
+    {$ELSE}
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
+    {$ENDIF}
     procedure SetAutoSize(Value: Boolean); override;
   public
+    {$IFDEF FPC}
+    class var InheritedStyleColor: TColor;
+    {$ENDIF}
     constructor Create(AOwner: TComponent); override;
     function AdjustHeight: Integer;
+    {$IFDEF FPC}
+    function UseRightToLeftReading: Boolean; override;
+    {$ELSE}
     function GetControlsAlignment: TAlignment; override;
+    {$ENDIF}
   published
     property Align;
+    {$IFDEF FPC}
+    property Alignment;
+    {$ELSE}
     property Alignment: TAlignment read FAlignment write SetAlignment
       default taLeftJustify;
+    {$ENDIF}
     property Anchors;
     property AutoSize: Boolean read FAutoSize write SetAutoSize default True;
     property Caption;
@@ -70,7 +102,9 @@ type
     property DragCursor;
     property DragMode;
     property Enabled;
+    {$IFDEF FPC} property FocusControl; {$ELSE}
     property FocusControl: TWinControl read FFocusControl write SetFocusControl;
+    {$ENDIF}
     property Font;
     property ForceLTRReading: Boolean read FForceLTRReading write SetForceLTRReading
       default False;
@@ -78,15 +112,24 @@ type
     property ParentFont;
     property ParentShowHint;
     property PopupMenu;
+    {$IFDEF FPC} property ShowAccelChar; {$ELSE}
     property ShowAccelChar: Boolean read FShowAccelChar write SetShowAccelChar
       default True;
+    {$ENDIF}
     property ShowHint;
+    {$IFDEF FPC}
+    property StyleElements: TStaticTextStyleElements read FStyleElements write SetStyleElements
+      default [seFont, seClient, seBorder];
+    {$ELSE}
     property StyleElements;
     property StyleName;
+    {$ENDIF}
     property TabOrder;
     property TabStop;
+    {$IFDEF FPC} property Transparent; {$ELSE}
     property Transparent: Boolean read GetTransparent write SetTransparent
       default True;
+    {$ENDIF}
     property Visible;
     property WordWrap: Boolean read FWordWrap write SetWordWrap default False;
     property OnClick;
@@ -100,6 +143,7 @@ type
     property OnStartDrag;
   end;
 
+  {$IFNDEF FPC}
   TNewStaticTextStyleHook = class(TStyleHook)
 {$IFDEF VCLSTYLES}
   strict protected
@@ -108,13 +152,14 @@ type
     constructor Create(AControl: TWinControl); override;
 {$ENDIF}
   end;
+  {$ENDIF}
 
 procedure Register;
 
 implementation
 
 uses
-  StdCtrls, Types, BidiUtils;
+  {$IFNDEF FPC}StdCtrls,{$ENDIF} Types, BidiUtils;
 
 procedure Register;
 begin
@@ -123,33 +168,47 @@ end;
 
 { TNewStaticText }
 
+{$IFNDEF FPC}
 class constructor TNewStaticText.Create;
 begin
   TCustomStyleEngine.RegisterStyleHook(TNewStaticText, TNewStaticTextStyleHook);
 end;
 
+{$ENDIF}
+
 constructor TNewStaticText.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  {$IFDEF FPC}
+  FStyleElements := [seFont, seClient, seBorder];
+  {$ELSE}
   ControlStyle := [csCaptureMouse, csClickEvents, csSetCaption,
     csReplicatable, csDoubleClicks, csGestures {$IF RtlVersion >= 35.0}, csNeedsDesignDisabledState{$ENDIF}];
   {$IFNDEF TRANSPARENCYSUPPORT}
   ControlStyle := ControlStyle + [csOpaque];
   FTransparent := True;  { Even though Transparent is ignored, we still want it to work as if it isn't at design time }
   {$ENDIF}
+  FShowAccelChar := True;
+  {$ENDIF}
   Width := 65;
   Height := 17;
   FAutoSize := True;
-  FShowAccelChar := True;
   AdjustBounds;
 end;
 
 procedure TNewStaticText.CreateParams(var Params: TCreateParams);
+{$IFNDEF FPC}
 const
   Alignments: array[Boolean, TAlignment] of DWORD =
     ((SS_LEFT, SS_RIGHT, SS_CENTER), (SS_RIGHT, SS_LEFT, SS_CENTER));
+{$ENDIF}
 begin
   inherited CreateParams(Params);
+  {$IFDEF FPC}
+  { The Win32 LCL widget already creates the STATIC window and sets its alignment }
+  if (Alignment = taLeftJustify) and not FWordWrap then
+    Params.Style := Params.Style or SS_LEFTNOWORDWRAP;
+  {$ELSE}
   CreateSubClass(Params, 'STATIC');
   with Params do
   begin
@@ -162,8 +221,10 @@ begin
     if FForceLTRReading then ExStyle := ExStyle and not WS_EX_RTLREADING;
     WindowClass.style := WindowClass.style and not CS_VREDRAW;
   end;
+  {$ENDIF}
 end;
 
+{$IFNDEF FPC}
 class destructor TNewStaticText.Destroy;
 begin
   TCustomStyleEngine.UnregisterStyleHook(TNewStaticText, TNewStaticTextStyleHook);
@@ -181,22 +242,45 @@ begin
       end;
 end;
 
-procedure TNewStaticText.CMFontChanged(var Message: TMessage);
+{$ENDIF}
+
+procedure TNewStaticText.CMFontChanged(var Message: {$IFDEF FPC}TLMessage{$ELSE}TMessage{$ENDIF});
 begin
   inherited;
   AdjustBounds;
 end;
 
-procedure TNewStaticText.CMParentFontChanged(var Message: TMessage);
+{$IFDEF FPC}
+procedure TNewStaticText.RemoveInheritedStyleColor;
+begin
+  if not (seFont in FStyleElements) and ParentFont and
+     (InheritedStyleColor <> clNone) and (Font.Color = InheritedStyleColor) then
+    Font.Color := clWindowText;
+end;
+
+procedure TNewStaticText.SetStyleElements(const Value: TStaticTextStyleElements);
+begin
+  if FStyleElements <> Value then begin
+    FStyleElements := Value;
+    RemoveInheritedStyleColor;
+    Invalidate;
+  end;
+end;
+{$ENDIF}
+
+procedure TNewStaticText.CMParentFontChanged(var Message: {$IFDEF FPC}TLMessage{$ELSE}TMessage{$ENDIF});
 begin
   inherited;
+  {$IFDEF FPC}
+  RemoveInheritedStyleColor;
+  {$ENDIF}
   { What we're really trapping here is changes to Parent. Recalculate size
     if the new Parent's RTL setting is different. }
   if IsRightToLeft <> FLastAdjustBoundsRTL then
     AdjustBounds;
 end;
 
-procedure TNewStaticText.CMTextChanged(var Message: TMessage);
+procedure TNewStaticText.CMTextChanged(var Message: {$IFDEF FPC}TLMessage{$ELSE}TMessage{$ENDIF});
 begin
   inherited;
   Invalidate;
@@ -209,6 +293,12 @@ begin
   AdjustBounds;
 end;
 
+{$IFDEF FPC}
+function TNewStaticText.UseRightToLeftReading: Boolean;
+begin
+  Result := not FForceLTRReading and inherited UseRightToLeftReading;
+end;
+{$ELSE}
 function TNewStaticText.GetControlsAlignment: TAlignment;
 begin
   { This is needed to suppress the WS_EX_RIGHT style when BiDiMode is
@@ -216,15 +306,19 @@ begin
   Result := FAlignment;
 end;
 
+{$ENDIF}
+
 function TNewStaticText.GetDrawTextFlags: UINT;
 const
   Alignments: array[Boolean, TAlignment] of Word =
     ((DT_LEFT, DT_RIGHT, DT_CENTER), (DT_RIGHT, DT_LEFT, DT_CENTER));
+var
+  AlignmentFlag: UINT;
 begin
-  const AlignmentFlag = Alignments[UseRightToLeftAlignment, FAlignment];
+  AlignmentFlag := Alignments[UseRightToLeftAlignment, Alignment];
   Result := DT_EXPANDTABS or DT_NOCLIP or AlignmentFlag;
   if FWordWrap then Result := Result or DT_WORDBREAK;
-  if not FShowAccelChar then Result := Result or DT_NOPREFIX;
+  if not ShowAccelChar then Result := Result or DT_NOPREFIX;
   if UseRightToLeftReading then begin
     { Note: DT_RTLREADING must be included even when just calculating the
       size, since on certain fonts it can affect the width of characters.
@@ -247,14 +341,14 @@ begin
   R := Rect(0, 0, Width, 0);
   if R.Right > 0 then Dec(R.Right);
 
-  S := Caption;
-  if (S = '') or (FShowAccelChar and (S[1] = '&') and (Length(S) = 1)) then
+  S := {$IFDEF FPC}UTF8Decode(Caption){$ELSE}Caption{$ENDIF};
+  if (S = '') or (ShowAccelChar and (S[1] = '&') and (Length(S) = 1)) then
     S := S + ' ';
 
   DC := GetDC(0);
   try
     SelectObject(DC, Font.Handle);
-    DrawText(DC, PChar(S), Length(S), R, DT_CALCRECT or GetDrawTextFlags);
+    DrawTextW(DC, PWideChar(S), Length(S), R, DT_CALCRECT or GetDrawTextFlags);
   finally
     ReleaseDC(0, DC);
   end;
@@ -294,6 +388,7 @@ begin
   Result := Height - OldHeight;
 end;
 
+{$IFNDEF FPC}
 procedure TNewStaticText.Notification(AComponent: TComponent;
   Operation: TOperation);
 begin
@@ -311,6 +406,8 @@ begin
   end;
 end;
 
+{$ENDIF}
+
 procedure TNewStaticText.SetAutoSize(Value: Boolean);
 begin
   if FAutoSize <> Value then
@@ -320,29 +417,39 @@ begin
   end;
 end;
 
+{$IFNDEF FPC}
 procedure TNewStaticText.SetFocusControl(Value: TWinControl);
 begin
   FFocusControl := Value;
   if Value <> nil then Value.FreeNotification(Self);
 end;
 
+{$ENDIF}
+
 procedure TNewStaticText.SetForceLTRReading(Value: Boolean);
 begin
   if FForceLTRReading <> Value then begin
     FForceLTRReading := Value;
-    RecreateWnd;
+    {$IFDEF FPC}RecreateWnd(Self){$ELSE}RecreateWnd{$ENDIF};
     AdjustBounds;
   end;
 end;
 
 procedure TNewStaticText.SetShowAccelChar(Value: Boolean);
 begin
+  {$IFDEF FPC}
+  if ShowAccelChar <> Value then begin
+    inherited SetShowAccelChar(Value);
+    AdjustBounds;
+  end;
+  {$ELSE}
   if FShowAccelChar <> Value then
   begin
     FShowAccelChar := Value;
     RecreateWnd;
     AdjustBounds;
   end;
+  {$ENDIF}
 end;
 
 {$IFDEF TRANSPARENCYSUPPORT}
@@ -364,6 +471,7 @@ begin
 end;
 {$ENDIF}
 
+{$IFNDEF FPC}
 procedure TNewStaticText.SetTransparent(const Value: Boolean);
 begin
 {$IFDEF TRANSPARENCYSUPPORT}
@@ -389,12 +497,14 @@ begin
 {$ENDIF}
 end;
 
+{$ENDIF}
+
 procedure TNewStaticText.SetWordWrap(Value: Boolean);
 begin
   if FWordWrap <> Value then
   begin
     FWordWrap := Value;
-    RecreateWnd;
+    {$IFDEF FPC}RecreateWnd(Self){$ELSE}RecreateWnd{$ENDIF};
     AdjustBounds;
   end;
 end;
@@ -439,7 +549,7 @@ begin
     end;
     Details := LStyle.GetElementDetails(States[Control.Enabled]);
     S := TNewStaticText(Control).Caption;
-    if (S = '') or (TNewStaticText(Control).FShowAccelChar and (S[1] = '&') and (Length(S) = 1)) then
+    if (S = '') or (TNewStaticText(Control).ShowAccelChar and (S[1] = '&') and (Length(S) = 1)) then
       S := S + ' ';
     if seFont in Control.StyleElements then
       DrawControlText(Canvas, Details, S, R, TNewStaticText(Control).GetDrawTextFlags)

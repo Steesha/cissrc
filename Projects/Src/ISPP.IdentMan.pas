@@ -13,7 +13,7 @@ unit ISPP.IdentMan;
 interface
 
 uses
-  SysUtils, Classes, ISPP.Intf, ISPP.Base;
+  SysUtils, Classes, ISPP.Intf, ISPP.Base, Shared.FPCStringUtils;
 
 type
 
@@ -82,12 +82,12 @@ type
     procedure FreeItem(Item: Pointer);
     function MacroIdents: IIdentManager;
   protected
-    function QueryInterface(const IID: TGUID; out Obj): HRESULT; stdcall;
+    function QueryInterface({$IFDEF FPC}constref{$ELSE}const{$ENDIF} IID: TGUID; out Obj): HRESULT; {$IFDEF MSWINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
   public
     constructor Create(const CustomIdents: IIdentManager; FuncSender: NativeInt);
     destructor Destroy; override;
-    function _AddRef: Integer; stdcall;
-    function _Release: Integer; stdcall;
+    function _AddRef: Integer; {$IFDEF MSWINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
+    function _Release: Integer; {$IFDEF MSWINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
     procedure BeginLocal;
     procedure EndLocal;
     function Defined(const Name: string): Boolean;
@@ -118,7 +118,7 @@ const
 implementation
 
 uses
-  Windows, Types, ISPP.CTokenizer, ISPP.Parser,
+  {$IFDEF MSWINDOWS}Windows,{$ENDIF} Types, ISPP.CTokenizer, ISPP.Parser,
   ISPP.VarUtils, ISPP.Consts, ISPP.Sessions;
 
 const
@@ -126,9 +126,11 @@ const
   GL: array[TDefineScope] of string = ('Public', 'Public', 'Protected', 'Private');
 
 function MakeHash(const S: string): Integer;
+var
+  I: Integer;
 begin
   Result := 0;
-  for var I := 1 to Length(S) do
+  for I := 1 to Length(S) do
     Result := ((Result shl 7) or (Result shr 25)) + Ord(UpCase(S[I]));
 end;
 
@@ -185,8 +187,9 @@ type
   private
     FVariable: PVariable;
     FIndex: Integer;
-  protected
+  public
     constructor Create(Variable: PVariable);
+  protected
     { ICallContext }
     procedure Add(const Name: string; const Value: TIsppVariant);
     function Call: TIsppVariant;
@@ -205,7 +208,7 @@ procedure TVarCallContext.Add(const Name: string;
 begin
   if FVariable.Dim <> 0 then
   begin
-    if (Name = '') or (CompareText(Name, 'INDEX') = 0) then
+    if (Name = '') or (InnoCompareText(Name, 'INDEX') = 0) then
     begin
       if FIndex <> -1 then ErrorDefined('Index');
       try
@@ -282,9 +285,10 @@ type
     FLocalVars: TList;
     procedure AdjustLocalArray(Index: Integer);
     function FindFormalParam(const Name: string): Integer;
-  protected
+  public
     constructor Create(const IdentManager: IIdentManager; Macro: PMacro);
     destructor Destroy; override;
+  protected
     { IIdentManager}
     function GetIdent(const Name: string; out CallContext: ICallContext): TIdentType;
     function Defined(const Name: string): Boolean;
@@ -305,7 +309,7 @@ end;
 procedure TMacroLocalArrayCallContext.Add(const Name: String;
   const Value: TIsppVariant);
 begin
-  if (Name = '') or (CompareText(Name, 'INDEX') = 0) then
+  if (Name = '') or (InnoCompareText(Name, 'INDEX') = 0) then
   begin
     if FIndex <> -1 then ErrorDefined('Index');
     try
@@ -343,13 +347,15 @@ begin
 end;
 
 destructor TMacroCallContext.Destroy;
+var
+  I: Integer;
 begin
   if Assigned(FLocalVars) then begin
-    for var I := 0 to FLocalVars.Count - 1 do
+    for I := 0 to FLocalVars.Count - 1 do
       Dispose(PIsppVariant(FLocalVars[I]));
     FLocalVars.Free;
   end;
-  for var I := 0 to FMacro.ParamCount - 1 do
+  for I := 0 to FMacro.ParamCount - 1 do
     Finalize(FList[I]);
   FreeMem(FList);
   inherited;
@@ -433,20 +439,20 @@ begin
       if E.Position > 0 then
       begin
         if FMacro.DeclPos.FileName <> '' then
-          Msg := Format(SErrorExecutingMacroFile, [FMacro.Name,
+          Msg := InnoFormat(SErrorExecutingMacroFile, [FMacro.Name,
             FMacro.DeclPos.FileName,
             FMacro.DeclPos.Line, E.Position, E.Message])
         else
-          Msg := Format(SErrorExecutingMacroMainScript, [FMacro.Name,
+          Msg := InnoFormat(SErrorExecutingMacroMainScript, [FMacro.Name,
             FMacro.DeclPos.Line, E.Position, E.Message]);
-        E.Message := Msg;
+        E.Message := ToNativeText(Msg);
         E.Position := 0;
       end;
       raise;
     end;
     on E: Exception do
     begin
-      E.Message := Format(SErrorExecutingMacroUnexpected, [FMacro.Name, E.Message]);
+      E.Message := ToNativeText(InnoFormat(SErrorExecutingMacroUnexpected, [FMacro.Name, E.Message]));
       raise;
     end;
   end;
@@ -458,9 +464,9 @@ var
   I: Integer;
 begin
   Result := True;
-  if CompareText(Name, SLocal) = 0 then Exit;
+  if InnoCompareText(Name, SLocal) = 0 then Exit;
   for I := 0 to FMacro^.ParamCount - 1 do
-    if CompareText(FMacro^.Params[I].Name, Name) = 0 then
+    if InnoCompareText(FMacro^.Params[I].Name, Name) = 0 then
       Exit;
   Result := FIdentManager.Defined(Name)
 end;
@@ -468,7 +474,7 @@ end;
 function TMacroCallContext.FindFormalParam(const Name: string): Integer;
 begin
   for Result := 0 to FMacro.ParamCount - 1 do
-    if CompareText(FMacro.Params[Result].Name, Name) = 0 then Exit;
+    if InnoCompareText(FMacro.Params[Result].Name, Name) = 0 then Exit;
   raise EMacroError.CreateFmt(SUnknownParam, [Name]);
 end;
 
@@ -479,12 +485,12 @@ var
 begin
   { Also see TypeOf and DimOf }
   Result := itVariable;
-  if CompareText(SLocal, Name) = 0 then begin
+  if InnoCompareText(SLocal, Name) = 0 then begin
     CallContext := TMacroLocalArrayCallContext.Create(Self);
     Exit;
   end else begin
     for I := 0 to FMacro.ParamCount - 1 do begin
-      if CompareText(FMacro.Params[I].Name, Name) = 0 then begin
+      if InnoCompareText(FMacro.Params[I].Name, Name) = 0 then begin
         if FMacro.Params[I].DefValue.Typ = evCallContext then
           FList[I].Value.Value[0].AsCallContext.Clone(CallContext)
         else
@@ -501,12 +507,12 @@ var
   I: Integer;
 begin
   { Also see GetIdent and DimOf }
-  if CompareText(Name, SLocal) = 0 then begin
+  if InnoCompareText(Name, SLocal) = 0 then begin
     Result := TYPE_ARRAY;
     Exit;
   end;
   for I := 0 to FMacro.ParamCount - 1 do begin
-    if CompareText(FMacro.Params[I].Name, Name) = 0 then begin
+    if InnoCompareText(FMacro.Params[I].Name, Name) = 0 then begin
       if FMacro.Params[I].DefValue.Typ = evCallContext then begin
         if pfFunc in FMacro.Params[I].ParamFlags then
           Result := TYPE_FUNC
@@ -529,16 +535,19 @@ begin
 end;
 
 function TMacroCallContext.DimOf(const Name: string): Integer;
+var
+  I: Integer;
+  Obj: TObject;
 begin
   { Also see GetIdent and TypeOf }
-  if CompareText(Name, SLocal) = 0 then
+  if InnoCompareText(Name, SLocal) = 0 then
     Exit(MaxLocalArraySize);
-  for var I := 0 to FMacro.ParamCount - 1 do begin
-    if CompareText(FMacro.Params[I].Name, Name) = 0 then begin
+  for I := 0 to FMacro.ParamCount - 1 do begin
+    if InnoCompareText(FMacro.Params[I].Name, Name) = 0 then begin
       { Also see Add }
       if (FMacro.Params[I].DefValue.Typ = evCallContext) and
          (pfArray in FMacro.Params[I].ParamFlags) then begin
-        const Obj = FList[I].Value.Value[0].AsCallContext as TObject;
+        Obj := FList[I].Value.Value[0].AsCallContext as TObject;
         if Obj is TVarCallContext then
           Exit(TVarCallContext(Obj).FVariable.Dim)
         else if Obj is TMacroLocalArrayCallContext then
@@ -561,9 +570,10 @@ type
     FFunc: PFunc;
     FResult: TIsppVariant;
     FParams: TList;
-  protected
+  public
     constructor Create(Sender: NativeInt; Func: PFunc);
     destructor Destroy; override;
+  protected
     { IIsppFuncParams }
     function GetCount: NativeInt; stdcall;
     { IInternalFuncParams }
@@ -586,8 +596,10 @@ begin
 end;
 
 destructor TFuncCallContext.Destroy;
+var
+  I: Integer;
 begin
-  for var I := 0 to FParams.Count - 1 do
+  for I := 0 to FParams.Count - 1 do
     Dispose(PIsppVariant(FParams[I]));
   FParams.Free;
   inherited;
@@ -659,8 +671,10 @@ begin
 end;
 
 destructor TIdentManager.Destroy;
+var
+  I: Integer;
 begin
-  for var I := 0 to FVarMan.Count - 1 do
+  for I := 0 to FVarMan.Count - 1 do
     FreeItem(FVarMan[I]);
   FVarMan.Free;
   inherited;
@@ -691,13 +705,14 @@ procedure TIdentManager.DefineMacro(const Name, Expression: string;
   Params: array of TIsppMacroParam; Scope: TDefineScope);
 var
   P: PMacro;
+  I, J: Integer;
 begin
   if Scope = dsAny then Scope := dsPublic;
   Delete(Name, Scope);
 
-  for var I := 1 to High(Params) do
-    for var J := 0 to I - 1 do
-      if CompareText(Params[I].Name, Params[J].Name) = 0 then
+  for I := 1 to High(Params) do
+    for J := 0 to I - 1 do
+      if InnoCompareText(Params[I].Name, Params[J].Name) = 0 then
         raise EIdentError.CreateFmt(SRedeclaredIdentifier, [Params[I].Name]);
 
   P := AllocMem(SizeOf(TMacro) + SizeOf(TIsppMacroParam) * Length(Params));
@@ -711,7 +726,7 @@ begin
     P^.DeclPos := ExprPos;
     P^.ParserOptions := ParserOptions;
     P^.ParamCount := Integer(Length(Params));
-    for var I := 0 to High(Params) do
+    for I := 0 to High(Params) do
       P^.Params[I] := Params[I];
     FVarMan.Add(P);
   except
@@ -726,9 +741,10 @@ procedure TIdentManager.DefineVariable(const Name: string; Index: Integer;
 var
   V: PVariable;
   Ident: PIdent;
+  HasIndex: Boolean;
 begin
   if Scope = dsAny then Scope := dsPublic;
-  const HasIndex = (Index <> -1) or IndexSpecified;
+  HasIndex := (Index <> -1) or IndexSpecified;
   Ident := Find(Name, Scope);
   if HasIndex and (Ident <> nil) and (Ident.IdentType = itVariable) and (PVariable(Ident).Dim <> 0) then
   begin
@@ -849,12 +865,15 @@ begin
 end;
 
 function TIdentManager.FindIndex(const Name: string; AScope: TDefineScope): Integer;
+var
+  I: Integer;
+  H: Integer;
 begin
   Result := -1;
-  var H := MakeHash(Name);
-  for var I := FVarMan.Count - 1 downto 0 do
+  H := MakeHash(Name);
+  for I := FVarMan.Count - 1 downto 0 do
     if (H = PIdent(FVarMan[I]).Hash) and (
-      CompareText(PIdent(FVarMan[I]).Name, Name) = 0) then
+      InnoCompareText(PIdent(FVarMan[I]).Name, Name) = 0) then
     begin
       if (PIdent(FVarMan[I]).IdentType in [itVariable, itMacro]) then
         with PDefinable(FVarMan[I])^.Scope do
@@ -889,11 +908,11 @@ function TIdentManager.GetIdent(const Name: string;
 var
   P: PIdent;
 begin
-  if CompareText(Name, 'DEFINED') = 0 then
+  if InnoCompareText(Name, 'DEFINED') = 0 then
     Result := itDefinedFunc
-  else if CompareText(Name, 'TYPEOF') = 0 then
+  else if InnoCompareText(Name, 'TYPEOF') = 0 then
     Result := itTypeOfFunc
-  else if CompareText(Name, 'DIMOF') = 0 then
+  else if InnoCompareText(Name, 'DIMOF') = 0 then
     Result := itDimOfFunc
   else
   begin
@@ -914,7 +933,7 @@ begin
   end;
 end;
 
-function TIdentManager.QueryInterface(const IID: TGUID; out Obj): HRESULT;
+function TIdentManager.QueryInterface({$IFDEF FPC}constref{$ELSE}const{$ENDIF} IID: TGUID; out Obj): HRESULT;
 begin
   if GetInterface(IID, Obj) then Result := 0 else Result := E_NOINTERFACE;
 end;
@@ -959,8 +978,10 @@ begin
 end;
 
 procedure TIdentManager.EndLocal;
+var
+  I: Integer;
 begin
-  for var I := FVarMan.Count - 1 downto 0 do
+  for I := FVarMan.Count - 1 downto 0 do
     if (PIdent(FVarMan.Items[I]).IdentType in [itVariable, itMacro]) and
       (PDefinable(FVarMan.Items[I]).Scope.LocalLevel = FLocalLevel) then
     begin
@@ -1006,12 +1027,13 @@ end;
 procedure TMacroCallContext.AdjustLocalArray(Index: Integer);
 var
   V: PIsppVariant;
+  I: Integer;
 begin
   if not Assigned(FLocalVars) then
     FLocalVars := TList.Create;
   if FLocalVars.Count > Index then Exit;
   VerboseMsg(10, SAllocatingMacroLocalArrayUpToEle, [FMacro.Name, Index]);
-  for var I := FLocalVars.Count to Index do begin
+  for I := FLocalVars.Count to Index do begin
     New(V);
     V.Typ := evNull;
     FLocalVars.Add(V);

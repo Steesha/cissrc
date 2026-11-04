@@ -20,8 +20,8 @@ unit BitmapButton;
 interface
 
 uses
-  Windows, Messages, ShellAPI, Controls, Graphics, Classes, Imaging.pngimage,
-  BitmapImage;
+  Windows, Messages, ShellAPI, Controls, Graphics, Classes, {$IFDEF FPC}InnoPngImage{$ELSE}Imaging.pngimage{$ENDIF},
+  {$IFDEF FPC}LCLType,{$ENDIF} BitmapImage;
 
 type
   TBitmapButton = class(TCustomControl)
@@ -40,8 +40,9 @@ type
     procedure CMTextChanged(var Message: TMessage); message CM_TEXTCHANGED;
     procedure WMSetFocus(var Message: TWMSetFocus); message WM_SETFOCUS;
     procedure WMKillFocus(var Message: TWMKillFocus); message WM_KILLFOCUS;
-    procedure CNCommand(var Message: TWMCommand); message CN_COMMAND;
+    {$IFNDEF FPC}procedure CNCommand(var Message: TWMCommand); message CN_COMMAND;{$ENDIF}
   protected
+    {$IFDEF FPC}class procedure WSRegisterClass; override;{$ENDIF}
     procedure CreateParams(var Params: TCreateParams); override;
     function GetPalette: HPALETTE; override;
     procedure Paint; override;
@@ -81,29 +82,81 @@ procedure Register;
 
 implementation
 
+{$IFDEF FPC}
+uses
+  WSLCLClasses, Win32WSControls, Win32Proc;
+
+type
+  TWin32WSBitmapButton = class(TWin32WSWinControl)
+  public
+    class function CreateHandle(const AWinControl: TWinControl;
+      const AParams: TCreateParams): HWND; override;
+  end;
+
+function BitmapButtonParentMessage(const AWinControl: TWinControl; Window: HWND;
+  Msg: UINT; WParam: Windows.WPARAM; LParam: Windows.LPARAM;
+  var MsgResult: Windows.LRESULT; var WinProcess: Boolean): Boolean;
+begin
+  Result := False;
+  if Msg <> WM_COMMAND then
+    Exit;
+
+  case HiWord(WParam) of
+    BN_CLICKED: TBitmapButton(AWinControl).Click;
+    BN_DBLCLK: TBitmapButton(AWinControl).DblClick;
+  else
+    Exit;
+  end;
+  MsgResult := 0;
+  WinProcess := False;
+  Result := True;
+end;
+
+class function TWin32WSBitmapButton.CreateHandle(const AWinControl: TWinControl;
+  const AParams: TCreateParams): HWND;
+var
+  Params: TCreateWindowExParams;
+begin
+  PrepareCreateWindow(AWinControl, AParams, Params);
+  Params.pClassName := 'BUTTON';
+  Params.WindowTitle := Params.StrCaption;
+  FinishCreateWindow(AWinControl, Params, False);
+  Params.WindowInfo^.ParentMsgHandler := @BitmapButtonParentMessage;
+  Result := Params.Window;
+end;
+
+class procedure TBitmapButton.WSRegisterClass;
+begin
+  inherited WSRegisterClass;
+  RegisterWSComponent(TBitmapButton, TWin32WSBitmapButton);
+end;
+{$ENDIF}
+
 procedure Register;
 begin
   RegisterComponents('JR', [TBitmapButton]);
 end;
 
 constructor TBitmapButton.Create(AOwner: TComponent);
+const
+  FocusBorderSize = 2;
+  TotalBorderSize = 2 * FocusBorderSize;
 begin
   inherited;
   ControlStyle := ControlStyle + [csParentBackground, csReplicatable] - [csClickEvents];
   { Using a fixed focus border width/height to avoid design problems between systems }
-  FFocusBorderWidthHeight := 2;
-  const DoubleFBWH = 2*FFocusBorderWidthHeight;
-  FImpl.Init(Self, DoubleFBWH, DoubleFBWH);
+  FFocusBorderWidthHeight := FocusBorderSize;
+  FImpl.Init(Self, TotalBorderSize, TotalBorderSize);
   Center := True;
   TabStop := True;
-  Width := 75+DoubleFBWH;
-  Height := 25+DoubleFBWH;
+  Width := 75 + TotalBorderSize;
+  Height := 25 + TotalBorderSize;
 end;
 
 procedure TBitmapButton.CreateParams(var Params: TCreateParams);
 begin
   inherited;
-  CreateSubClass(Params, 'BUTTON');
+  {$IFNDEF FPC}CreateSubClass(Params, 'BUTTON');{$ENDIF}
   Params.Style := Params.Style or BS_NOTIFY; { For BN_DBLCLK }
 end;
 
@@ -179,11 +232,13 @@ begin
 end;
 
 procedure TBitmapButton.Paint;
+var
+  R: TRect;
 begin
   Canvas.Font := Font;
   Canvas.Brush.Color := Color;
 
-  var R := ClientRect;
+  R := ClientRect;
 
   if Focused and (SendMessage(Handle, WM_QUERYUISTATE, 0, 0) and UISF_HIDEFOCUS = 0) then begin
     { See TBitBtn.DrawItem in Vcl.Buttons.pas }
@@ -191,7 +246,7 @@ begin
     Canvas.Brush.Style := bsSolid;
     Canvas.Brush.Color := clBtnFace;
     { This might draw a focus border thinner or thicker than our FFocusBorderWidthHeight but that's okay }
-    Canvas.DrawFocusRect(R);
+    {$IFDEF FPC}Windows.DrawFocusRect(Canvas.Handle, R){$ELSE}Canvas.DrawFocusRect(R){$ENDIF};
   end;
 
   InflateRect(R, -FFocusBorderWidthHeight, -FFocusBorderWidthHeight);
@@ -217,6 +272,7 @@ begin
   Invalidate;
 end;
 
+{$IFNDEF FPC}
 procedure TBitmapButton.CNCommand(var Message: TWMCommand);
 begin
   if (Message.NotifyCode = BN_CLICKED) then
@@ -224,5 +280,6 @@ begin
   else if (Message.NotifyCode = BN_DBLCLK) then
     DblClick;
 end;
+{$ENDIF}
 
 end.

@@ -14,14 +14,14 @@ unit Shared.CommonFunc.Vcl;
 interface
 
 uses
-  Windows, Messages, SysUtils, Forms, Graphics, Controls, StdCtrls;
+  Windows, Messages, SysUtils, {$IFDEF FPC}Classes, {$ENDIF} Forms, Graphics, Controls, StdCtrls;
 
 type
   TWindowDisabler = class
   private
     FFallbackWnd, FOwnerWnd: HWND;
     FPreviousActiveWnd, FPreviousFocusWnd: HWND;
-    FWindowList: Pointer;
+    FWindowList: {$IFDEF FPC}TList{$ELSE}Pointer{$ENDIF};
   public
     constructor Create;
     destructor Destroy; override;
@@ -34,6 +34,10 @@ type
     const Param: NativeInt);
 
   TControlHelper = class helper for TControl
+    {$IFDEF FPC}
+    function GetCurrentPPI: Integer;
+    property CurrentPPI: Integer read GetCurrentPPI;
+    {$ENDIF}
     procedure SetCurrentPPI(const CurrentPPI: Integer);
   end;
 
@@ -57,13 +61,13 @@ procedure SetDarkTitleBar(const Form: TForm; const Dark: Boolean);
 
 implementation
 
-{$IF Defined(SETUPPROJ) and Defined(VCLSTYLES)}
+{$IF Defined(SETUPPROJ) and (Defined(VCLSTYLES) or Defined(INNO_LCL_DARK_RESOURCES))}
   {$DEFINE USETASKDIALOGFORM}
 {$IFEND}
 
 uses
-  DwmApi, PathFunc, Themes,
-  {$IFDEF USETASKDIALOGFORM} CommCtrl, Setup.TaskDialogForm, Setup.InstFunc, {$ENDIF}
+  DwmApi, PathFunc, {$IFNDEF FPC}Themes, {$ENDIF}
+  {$IFDEF USETASKDIALOGFORM} CommCtrl, Setup.TaskDialogForm, Setup.InstFunc, {$IFDEF FPC}Setup.SetupForm,{$ENDIF} {$ENDIF}
   Shared.CommonFunc;
 
 var
@@ -93,20 +97,27 @@ type
 
 procedure UpdateScrollWidth(const ListBox: TCustomListBox;
   const ItemIsBold: TListBoxItemIsBoldFunc);
+var
+  Font, BoldFont: TFont;
+  DC: HDC;
+  TextMetrics: TTextMetricW;
+  Size: TSize;
+  ItemText: String;
+  I, MaxScrollWidth, ScrollWidth: Integer;
 begin
-  const Font = TListBoxAccess(ListBox).Font;
-  var BoldFont: TFont := nil;
+  Font := TListBoxAccess(ListBox).Font;
+  BoldFont := nil;
   try
-    var MaxScrollWidth := 0;
-    const DC = GetDC(0);
+    MaxScrollWidth := 0;
+    DC := GetDC(0);
     try
       SelectObject(DC, Font.Handle);
 
       //Q66370 says tmAveCharWidth should be added to scroll width
-      var TextMetrics: TTextMetric;
-      GetTextMetrics(DC, TextMetrics);
+      FillChar(TextMetrics, SizeOf(TextMetrics), 0);
+      GetTextMetricsW(DC, {$IFDEF FPC}@{$ENDIF}TextMetrics);
 
-      for var I := 0 to ListBox.Items.Count-1 do begin
+      for I := 0 to ListBox.Items.Count-1 do begin
         if Assigned(ItemIsBold) and ItemIsBold(I) then begin
           if BoldFont = nil then begin
             BoldFont := TFont.Create;
@@ -116,11 +127,12 @@ begin
           SelectObject(DC, BoldFont.Handle);
         end else if BoldFont <> nil then
           SelectObject(DC, Font.Handle);
-        var Size: TSize;
-        GetTextExtentPoint32(DC, PChar(ListBox.Items[I]), Length(ListBox.Items[I]), Size);
-        const ScrollWidth = Size.cx + TextMetrics.tmAveCharWidth;
-        if ScrollWidth > MaxScrollWidth then
-          MaxScrollWidth := ScrollWidth;
+        ItemText := {$IFDEF FPC}UTF8Decode(ListBox.Items[I]){$ELSE}ListBox.Items[I]{$ENDIF};
+        if GetTextExtentPoint32W(DC, PChar(ItemText), Length(ItemText), Size) then begin
+          ScrollWidth := Size.cx + TextMetrics.tmAveCharWidth;
+          if ScrollWidth > MaxScrollWidth then
+            MaxScrollWidth := ScrollWidth;
+        end;
       end;
 
     finally
@@ -246,16 +258,34 @@ begin
 end;
 
 procedure SetDarkTitleBar(const Form: TForm; const Dark: Boolean);
+const
+  DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+var
+  Value: BOOL;
+  {$IFDEF FPC}
+  Loaded: Boolean;
+  {$ENDIF}
 begin
   { Based on https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/apply-windows-themes
     Unlike this article we check for Windows 10 Version 2004 because that's the first version
     that introduced DWMWA_USE_IMMERSIVE_DARK_MODE as 20 (the now documented value) instead of 19 }
   if CurrentWindowsVersionAtLeast(10, 0, 19041) then begin
+    {$IFDEF FPC}
+    Loaded := InitDwmLibrary;
+    try
+      if Loaded and Assigned(DwmSetWindowAttribute) then begin
+        Value := Dark;
+        DwmSetWindowAttribute(Form.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, @Value, SizeOf(Value));
+      end;
+    finally
+      FreeDwmLibrary;
+    end;
+    {$ELSE}
     if TStyleManager.FormBorderStyle = fbsCurrentStyle then
       Form.StyleElements := Form.StyleElements - [seBorder];
-    const DWMWA_USE_IMMERSIVE_DARK_MODE: DWORD = 20;
-    var value: BOOL := Dark;
-    DwmSetWindowAttribute(Form.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, @value, SizeOf(value));
+    Value := Dark;
+    DwmSetWindowAttribute(Form.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, @Value, SizeOf(Value));
+    {$ENDIF}
   end;
 end;
 
@@ -300,9 +330,19 @@ function MsgBox(const Text, Caption: PChar; Flags: Cardinal): Integer;
   end;
 {$ENDIF}
 
+{$IFDEF USETASKDIALOGFORM}
+const
+  MB_CANCELTRYCONTINUE = $00000006;
+{$ENDIF}
 var
+  {$IFDEF USETASKDIALOGFORM}
+  Icon: PChar;
+  TDCommonButtons, Typ: Cardinal;
+  DefCommonButton: Integer;
+  SetForeground: Boolean;
+  {$ENDIF}
   ActiveWindow: HWND;
-  WindowList: Pointer;
+  WindowList: {$IFDEF FPC}TList{$ELSE}Pointer{$ENDIF};
 begin
   { Always restore the app first if it's minimized. This makes sense from a
     usability perspective (e.g., it may be unclear which app generated the
@@ -338,15 +378,9 @@ begin
         { We don't use MB_ABORTRETRYIGNORE or MB_CANCELTRYCONTINUE, but end users
           are liable to in [Code]. TaskDialogForm doesn't support them because
           currently we lack the strings needed for the required common buttons. }
-        const Typ = (Flags and MB_TYPEMASK);
-        const MB_CANCELTRYCONTINUE = $00000006;
+        Typ := Flags and MB_TYPEMASK;
         if (Typ <> Cardinal(MB_ABORTRETRYIGNORE)) and (Typ <> Cardinal(MB_CANCELTRYCONTINUE)) then begin
-          const LStyle = TStyleManager.ActiveStyle;
-          if not LStyle.IsSystemStyle then begin
-            var Icon: PChar;
-            var TDCommonButtons: Cardinal;
-            var DefCommonButton: Integer;
-            var SetForeground: Boolean;
+          if {$IFDEF FPC}HasActiveLclStyle{$ELSE}not TStyleManager.ActiveStyle.IsSystemStyle{$ENDIF} then begin
             { Ignores MB_DEFBUTTON4 (there are never 4 buttons) and MB_RTLREADING+MB_RIGHT
               (TaskDialogForm has its own RTL detection) }
             MsgBoxFlagsDecode(Flags, Icon, TDCommonButtons, DefCommonButton, SetForeground);
@@ -415,21 +449,26 @@ begin
     }
     if GetOwnerWndForMessageBox = 0 then begin
       ActiveWindow := GetActiveWindow;
-      WindowList := DisableTaskWindows(0);
+      WindowList := {$IFDEF FPC}Screen.DisableForms(nil){$ELSE}DisableTaskWindows(0){$ENDIF};
       try
         { Note: DisableTaskWindows doesn't disable invisible windows.
           MB_TASKMODAL will ensure that Application.Handle gets disabled too. }
         if not Application.MainFormOnTaskBar then
           Flags := Flags or MB_TASKMODAL;
-        Result := MessageBox(0, Text, Caption, UINT(Flags));
+        Result := MessageBoxW(0, Text, Caption, UINT(Flags));
       finally
-        EnableTaskWindows(WindowList);
+        {$IFDEF FPC}Screen.EnableForms(WindowList){$ELSE}EnableTaskWindows(WindowList){$ENDIF};
         SetActiveWindow(ActiveWindow);
       end;
       Exit;
     end;
 
+    {$IFDEF FPC}
+    Result := Application.MessageBox(PAnsiChar(UTF8Encode(String(Text))),
+      PAnsiChar(UTF8Encode(String(Caption))), Integer(Flags));
+    {$ELSE}
     Result := Application.MessageBox(Text, Caption, Integer(Flags));
+    {$ENDIF}
   finally
     TriggerMessageBoxCallbackFunc(Flags, True);
   end;
@@ -440,10 +479,12 @@ function MsgBox(const Text, Caption: String; const Typ: TMsgBoxType;
 const
   IconFlags: array[TMsgBoxType] of Cardinal =
     (MB_ICONINFORMATION, MB_ICONQUESTION, MB_ICONEXCLAMATION, MB_ICONSTOP);
+var
+  NewCaption: String;
 begin
-  var NewCaption := Caption;
+  NewCaption := Caption;
   if NewCaption = '' then
-    NewCaption := Application.Title;
+    NewCaption := {$IFDEF FPC}UTF8Decode(Application.Title){$ELSE}Application.Title{$ENDIF};
   Result := MsgBox(PChar(Text), PChar(NewCaption), Buttons or IconFlags[Typ]);
 end;
 
@@ -452,7 +493,7 @@ end;
 const
   WindowDisablerWndClassName = 'TWindowDisabler-Window';
 var
-  WindowDisablerWndClassAtom: TAtom;
+  WindowDisablerWndClassAtom: ATOM;
 
 function WindowDisablerWndProc(Wnd: HWND; Msg: UINT; WParam: WPARAM;
   LParam: LPARAM): LRESULT; stdcall;
@@ -463,12 +504,12 @@ begin
       it would destroy the window }
     Result := 0
   else
-    Result := DefWindowProc(Wnd, Msg, WParam, LParam);
+    Result := DefWindowProcW(Wnd, Msg, WParam, LParam);
 end;
 
 constructor TWindowDisabler.Create;
 const
-  WndClass: TWndClass = (
+  WndClass: TWndClassW = (
     style: 0;
     lpfnWndProc: @WindowDisablerWndProc;
     cbClsExtra: 0;
@@ -483,7 +524,7 @@ begin
   inherited Create;
   FPreviousActiveWnd := GetActiveWindow;
   FPreviousFocusWnd := GetFocus;
-  FWindowList := DisableTaskWindows(0);
+  FWindowList := {$IFDEF FPC}Screen.DisableForms(nil){$ELSE}DisableTaskWindows(0){$ENDIF};
 
   { Create the "fallback" window.
     When a child process hides its last window, Windows will try to activate
@@ -492,17 +533,17 @@ begin
     foreground. This gives Windows an enabled window to re-activate, which
     is invisible to the user. }
   if WindowDisablerWndClassAtom = 0 then
-    WindowDisablerWndClassAtom := Windows.RegisterClass(WndClass);
+    WindowDisablerWndClassAtom := Windows.RegisterClassW(WndClass);
   if WindowDisablerWndClassAtom <> 0 then begin
     { Create an invisible owner window for the fallback window so that it
       doesn't display a taskbar button. (We can't just give it the
       WS_EX_TOOLWINDOW style because Windows skips tool windows when searching
       for a new window to activate.) }
-    FOwnerWnd := CreateWindowEx(0, WindowDisablerWndClassName, '',
+    FOwnerWnd := CreateWindowExW(0, WindowDisablerWndClassName, '',
       WS_POPUP or WS_DISABLED, 0, 0, 0, 0, HWND_DESKTOP, 0, HInstance, nil);
     if FOwnerWnd <> 0 then begin
-      FFallbackWnd := CreateWindowEx(0, WindowDisablerWndClassName,
-        PChar(Application.Title), WS_POPUP, 0, 0, 0, 0, FOwnerWnd, 0,
+      FFallbackWnd := CreateWindowExW(0, WindowDisablerWndClassName,
+        PChar({$IFDEF FPC}UTF8Decode(Application.Title){$ELSE}Application.Title{$ENDIF}), WS_POPUP, 0, 0, 0, 0, FOwnerWnd, 0,
         HInstance, nil);
       if FFallbackWnd <> 0 then
         ShowWindow(FFallbackWnd, SW_SHOWNA);
@@ -517,7 +558,7 @@ end;
 
 destructor TWindowDisabler.Destroy;
 begin
-  EnableTaskWindows(FWindowList);
+  {$IFDEF FPC}Screen.EnableForms(FWindowList){$ELSE}EnableTaskWindows(FWindowList){$ENDIF};
   { Re-activate the previous window. But don't do this if GetActiveWindow
     returns zero, because that means another application is in the foreground
     (possibly a child process spawned by us that is still running). }
@@ -536,9 +577,33 @@ end;
 
 { TControlHelper }
 
-procedure TControlHelper.SetCurrentPPI(const CurrentPPI: Integer);
+{$IFDEF FPC}
+function TControlHelper.GetCurrentPPI: Integer;
 begin
+  Result := Font.PixelsPerInch;
+end;
+{$ENDIF}
+
+procedure TControlHelper.SetCurrentPPI(const CurrentPPI: Integer);
+{$IFDEF FPC}
+var
+  PreviousHeight: Integer;
+{$ENDIF}
+begin
+  {$IFDEF FPC}
+  if Font.PixelsPerInch <> CurrentPPI then begin
+    PreviousHeight := Font.Height;
+    Font.BeginUpdate;
+    try
+      Font.PixelsPerInch := CurrentPPI;
+      Font.Height := PreviousHeight;
+    finally
+      Font.EndUpdate;
+    end;
+  end;
+  {$ELSE}
   FCurrentPPI := CurrentPPI;
+  {$ENDIF}
 end;
 
 end.

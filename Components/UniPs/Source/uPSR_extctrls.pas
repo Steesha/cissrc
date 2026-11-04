@@ -23,7 +23,7 @@ procedure RIRegisterTNOTEBOOK(Cl: TPSRuntimeClassImporter);
 {$ENDIF}
 procedure RIRegisterTCUSTOMRADIOGROUP(Cl: TPSRuntimeClassImporter);
 procedure RIRegisterTRADIOGROUP(Cl: TPSRuntimeClassImporter);
-{$IFDEF DELPHI14UP}
+{$IF Defined(DELPHI14UP) or (Defined(FPC) and Defined(SETUPPROJ))}
 procedure RIRegisterTCUSTOMLINKLABEL(Cl: TPSRuntimeClassImporter);
 procedure RIRegisterTLINKLABEL(Cl: TPSRuntimeClassImporter);
 {$ENDIF}
@@ -34,7 +34,7 @@ uses
   {$IFDEF CLX}
   QExtCtrls, QGraphics;
   {$ELSE}
-  ExtCtrls, Graphics;
+  ExtCtrls, Graphics{$IF Defined(FPC) and Defined(SETUPPROJ)}, Classes, NewCtrls{$IFEND};
   {$ENDIF}
 
 procedure RIRegisterTSHAPE(Cl: TPSRuntimeClassImporter);
@@ -121,10 +121,10 @@ begin
   Cl.Add(TRADIOGROUP);
 end;
 
-{$IFDEF DELPHI14UP}
+{$IF Defined(DELPHI14UP) or (Defined(FPC) and Defined(SETUPPROJ))}
 
-procedure TCUSTOMLINKLABELALIGNMENT_R(Self: TCUSTOMLINKLABEL; var T: TCustomLinkLabel.TLinkAlignment); begin T := Self.ALIGNMENT; end;
-procedure TCUSTOMLINKLABELALIGNMENT_W(Self: TCUSTOMLINKLABEL; T: TCustomLinkLabel.TLinkAlignment); begin
+procedure TCUSTOMLINKLABELALIGNMENT_R(Self: TCUSTOMLINKLABEL; var T: {$IFDEF FPC}TAlignment{$ELSE}TCustomLinkLabel.TLinkAlignment{$ENDIF}); begin T := Self.ALIGNMENT; end;
+procedure TCUSTOMLINKLABELALIGNMENT_W(Self: TCUSTOMLINKLABEL; T: {$IFDEF FPC}TAlignment{$ELSE}TCustomLinkLabel.TLinkAlignment{$ENDIF}); begin
 Self.ALIGNMENT := T;
 end;
 procedure TCUSTOMLINKLABELAUTOSIZE_R(Self: TCUSTOMLINKLABEL; var T: Boolean); begin T := Self.AUTOSIZE; end;
@@ -178,7 +178,7 @@ begin
   RIRegisterTCUSTOMRADIOGROUP(Cl);
   RIRegisterTRADIOGROUP(Cl);
   {$ENDIF}
-  {$IFDEF DELPHI14UP}
+  {$IF Defined(DELPHI14UP) or (Defined(FPC) and Defined(SETUPPROJ))}
   RIRegisterTCUSTOMLINKLABEL(Cl);
   RIRegisterTLINKLABEL(Cl);
   {$ENDIF}

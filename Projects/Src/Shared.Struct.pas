@@ -13,7 +13,7 @@ unit Shared.Struct;
 interface
 
 uses
-  Windows, SHA256;
+  {$IFDEF MSWINDOWS} Windows {$ELSE} Shared.PlatformTypes {$ENDIF}, SHA256;
 
 const
   SetupTitle = 'Inno Setup';

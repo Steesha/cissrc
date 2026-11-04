@@ -10,6 +10,7 @@ unit Shared.CommonFunc;
 }
 
 {$B-,R-}
+{$IFDEF FPC}{$MODESWITCH NESTEDPROCVARS}{$ENDIF}
 
 interface
 
@@ -17,14 +18,9 @@ uses
   Windows, SysUtils, Classes;
 
 type
-  TSimpleLock = record
-  strict private
-    [volatile] FLockValue: Integer;
-  public
-    class function Create: TSimpleLock; static;
-    procedure Release;
-    function TryAcquire: Boolean;
-  end;
+  {$IF NOT DECLARED(NTSTATUS)}
+  NTSTATUS = Integer;
+  {$IFEND}
 
   TOneShotTimer = record
   private
@@ -100,10 +96,17 @@ type
 
   TFileOperationFailingNextAction = (naStopAndFail, naStopAndSucceed, naRetry);
 
+  {$IFDEF FPC}
+  TFileOperationFunc = function(out LastError: Cardinal): Boolean is nested;
+  TFileOperationFailingProc = procedure(const LastError: Cardinal) is nested;
+  TFileOperationFailingExProc = procedure(const LastError: Cardinal; var RetriesLeft: Integer; var NextAction: TFileOperationFailingNextAction) is nested;
+  TFileOperationFailedProc = procedure(const LastError: Cardinal; var TryOnceMore: Boolean) is nested;
+  {$ELSE}
   TFileOperationFunc = reference to function(out LastError: Cardinal): Boolean;
   TFileOperationFailingProc = reference to procedure(const LastError: Cardinal);
   TFileOperationFailingExProc = reference to procedure(const LastError: Cardinal; var RetriesLeft: Integer; var NextAction: TFileOperationFailingNextAction);
   TFileOperationFailedProc = reference to procedure(const LastError: Cardinal; var TryOnceMore: Boolean);
+  {$ENDIF}
 
 const
   IsCurrentProcess64Bit = {$IFDEF WIN64} True {$ELSE} False {$ENDIF};
@@ -209,16 +212,18 @@ function IsWindowOnTaskbar(const Wnd: HWND): Boolean;
 function SetWindowCloaked(const Wnd: HWND; const Cloaked: Boolean): Boolean;
 function CreateInheritableNulDevice(const DesiredAccess: DWORD): THandle;
 
+function RegRootKeyToUInt32(const RootKey: HKEY): UInt32;
+
 implementation
 
 uses
   DwmApi,
   PathFunc, UnsignedFunc,
-  Shared.FileClass;
+  Shared.FileClass, Shared.CompilerSupport;
 
 function InternalGetFileAttr(const Name: String): DWORD;
 begin
-  Result := GetFileAttributes(PChar(RemoveBackslashUnlessRoot(Name)));
+  Result := GetFileAttributesW(PChar(RemoveBackslashUnlessRoot(Name)));
 end;
 
 function NewFileExists(const Name: String): Boolean;
@@ -227,8 +232,10 @@ function NewFileExists(const Name: String): Boolean;
   on files in directories that don't have "list" permission. There is, however,
   one other difference: FileExists allows wildcards, but this function does
   not. }
+var
+  Attr: DWORD;
 begin
-  var Attr := GetFileAttributes(PChar(Name));
+  Attr := GetFileAttributesW(PChar(Name));
   Result := (Attr <> INVALID_FILE_ATTRIBUTES) and (Attr and faDirectory = 0);
 end;
 
@@ -238,8 +245,10 @@ function DirExists(const Name: String): Boolean;
   NOTE: Delphi's FileCtrl unit has a similar function called DirectoryExists.
   However, the implementation is different between Delphi 1 and 2. (Delphi 1
   does not count hidden or system directories as existing.) }
+var
+  Attr: DWORD;
 begin
-  var Attr := InternalGetFileAttr(Name);
+  Attr := InternalGetFileAttr(Name);
   Result := (Attr <> INVALID_FILE_ATTRIBUTES) and (Attr and faDirectory <> 0);
 end;
 
@@ -257,7 +266,7 @@ const
 var
   Attr: DWORD;
 begin
-  Attr := GetFileAttributes(PChar(Name));
+  Attr := GetFileAttributesW(PChar(Name));
   Result := (Attr <> INVALID_FILE_ATTRIBUTES) and
     (Attr and FILE_ATTRIBUTE_DIRECTORY <> 0) and
     (Attr and FILE_ATTRIBUTE_REPARSE_POINT = 0);
@@ -268,7 +277,7 @@ function GetLastWriteTimeOfFile(const Filename: String;
 var
   H: THandle;
 begin
-  H := CreateFile(PChar(Filename), 0, FILE_SHARE_READ or FILE_SHARE_WRITE,
+  H := CreateFileW(PChar(Filename), 0, FILE_SHARE_READ or FILE_SHARE_WRITE,
     nil, OPEN_EXISTING, 0, 0);
   if H <> INVALID_HANDLE_VALUE then begin
     Result := GetFileTime(H, nil, nil, LastWriteTime);
@@ -290,10 +299,10 @@ begin
   while True do begin
     SetString(Result, nil, BufSize);
     if Filename <> '' then
-      Len := GetPrivateProfileString(PChar(Section), PChar(Key), PChar(Default),
+      Len := GetPrivateProfileStringW(PChar(Section), PChar(Key), PChar(Default),
         @Result[1], BufSize, PChar(Filename))
     else
-      Len := GetProfileString(PChar(Section), PChar(Key), PChar(Default),
+      Len := GetProfileStringW(PChar(Section), PChar(Key), PChar(Default),
         @Result[1], BufSize);
     { Work around bug present on Windows NT/2000 (not 95): When lpDefault is
       too long to fit in the buffer, nSize is returned (null terminator
@@ -350,12 +359,12 @@ function IniKeyExists(const Section, Key, Filename: String): Boolean;
   begin
     Test[0] := #0;
     if Filename <> '' then
-      GetPrivateProfileString(PChar(Section), PChar(Key), Default,
+      GetPrivateProfileStringW(PChar(Section), PChar(Key), Default,
         Test, SizeOf(Test) div SizeOf(Test[0]), PChar(Filename))
     else
-      GetProfileString(PChar(Section), PChar(Key), Default,
+      GetProfileStringW(PChar(Section), PChar(Key), Default,
         Test, SizeOf(Test) div SizeOf(Test[0]));
-    Result := lstrcmp(Test, Default) = 0;
+    Result := lstrcmpW(Test, Default) = 0;
   end;
 begin
   { If the key does not exist, a default string is returned both times. }
@@ -368,10 +377,10 @@ var
 begin
   Test[0] := #0;
   if Filename <> '' then
-    GetPrivateProfileString(PChar(Section), nil, '', Test,
+    GetPrivateProfileStringW(PChar(Section), nil, '', Test,
       SizeOf(Test) div SizeOf(Test[0]), PChar(Filename))
   else
-    GetProfileString(PChar(Section), nil, '', Test,
+    GetProfileStringW(PChar(Section), nil, '', Test,
       SizeOf(Test) div SizeOf(Test[0]));
   Result := Test[0] = #0;
 end;
@@ -379,10 +388,10 @@ end;
 function SetIniString(const Section, Key, Value, Filename: String): Boolean;
 begin
   if Filename <> '' then
-    Result := WritePrivateProfileString(PChar(Section), PChar(Key),
+    Result := WritePrivateProfileStringW(PChar(Section), PChar(Key),
       PChar(Value), PChar(Filename))
   else
-    Result := WriteProfileString(PChar(Section), PChar(Key),
+    Result := WriteProfileStringW(PChar(Section), PChar(Key),
       PChar(Value));
 end;
 
@@ -401,20 +410,20 @@ end;
 procedure DeleteIniEntry(const Section, Key, Filename: String);
 begin
   if Filename <> '' then
-    WritePrivateProfileString(PChar(Section), PChar(Key),
+    WritePrivateProfileStringW(PChar(Section), PChar(Key),
       nil, PChar(Filename))
   else
-    WriteProfileString(PChar(Section), PChar(Key),
+    WriteProfileStringW(PChar(Section), PChar(Key),
       nil);
 end;
 
 procedure DeleteIniSection(const Section, Filename: String);
 begin
   if Filename <> '' then
-    WritePrivateProfileString(PChar(Section), nil, nil,
+    WritePrivateProfileStringW(PChar(Section), nil, nil,
       PChar(Filename))
   else
-    WriteProfileString(PChar(Section), nil, nil);
+    WriteProfileStringW(PChar(Section), nil, nil);
 end;
 
 function GetEnv(const EnvVar: String): String;
@@ -424,7 +433,7 @@ var
 begin
   SetLength(Result, 255);
   repeat
-    Res := GetEnvironmentVariable(PChar(EnvVar), PChar(Result), ULength(Result));
+    Res := GetEnvironmentVariableW(PChar(EnvVar), PChar(Result), ULength(Result));
     if Res = 0 then begin
       Result := '';
       Break;
@@ -471,7 +480,7 @@ function GetCmdTail: String;
 var
   S: String;
 begin
-  Result := GetParamStr(GetCommandLine, S);
+  Result := GetParamStr(GetCommandLineW, S);
 end;
 
 function GetCmdTailEx(StartIndex: Integer): String;
@@ -481,7 +490,7 @@ var
   P: PChar;
   S: String;
 begin
-  P := GetParamStr(GetCommandLine, S);
+  P := GetParamStr(GetCommandLineW, S);
   while (StartIndex > 1) and (P^ <> #0) do begin
     P := GetParamStr(P, S);
     Dec(StartIndex);
@@ -494,7 +503,7 @@ var
   P: PChar;
   S: String;
 begin
-  P := GetParamStr(GetCommandLine, S);
+  P := GetParamStr(GetCommandLineW, S);
   Result := 0;
   while P^ <> #0 do begin
     Inc(Result);
@@ -516,10 +525,10 @@ var
   P: PChar;
 begin
   if Index = 0 then begin
-    SetString(Result, Buffer, GetModuleFileName(0, Buffer, SizeOf(Buffer) div SizeOf(Buffer[0])));
+    SetString(Result, Buffer, GetModuleFileNameW(0, Buffer, SizeOf(Buffer) div SizeOf(Buffer[0])));
   end
   else begin
-    P := GetCommandLine;
+    P := GetCommandLineW;
     while True do begin
       if P^ = #0 then begin
         S := '';
@@ -546,13 +555,8 @@ begin
 end;
 
 function RemoveQuotes(const S: String): String;
-{ Opposite of AddQuotes; removes any quotes around the string. }
 begin
-  Result := S;
-  while (Result <> '') and (Result[1] = '"') do
-    Delete(Result, 1, 1);
-  while (Result <> '') and (PathLastChar(Result)^ = '"') do
-    SetLength(Result, Length(Result)-1);
+  Result := Shared.CompilerSupport.RemoveQuotes(S);
 end;
 
 function ConvertPercentStr(var S: String): Boolean;
@@ -586,112 +590,18 @@ begin
 end;
 
 function SkipPastConst(const S: String; const Start: Integer): Integer;
-{ Returns the character index following the Inno Setup constant embedded
-  into the string S at index Start.
-  If the constant is not closed (missing a closing brace), it returns zero. }
-var
-  L, BraceLevel, LastOpenBrace: Integer;
 begin
-  Result := Start;
-  L := Length(S);
-  if Result < L then begin
-    Inc(Result);
-    if S[Result] = '{' then begin
-      Inc(Result);
-      Exit;
-    end
-    else begin
-      BraceLevel := 1;
-      LastOpenBrace := -1;
-      while Result <= L do begin
-        case S[Result] of
-          '{': begin
-                   if LastOpenBrace <> Result-1 then begin
-                     Inc(BraceLevel);
-                     LastOpenBrace := Result;
-                   end
-                   else
-                     { Skip over '{{' when in an embedded constant }
-                     Dec(BraceLevel);
-                 end;
-          '}': begin
-                 Dec(BraceLevel);
-                 if BraceLevel = 0 then begin
-                   Inc(Result);
-                   Exit;
-                 end;
-               end;
-        end;
-        Inc(Result);
-      end;
-    end;
-  end;
-  Result := 0;
+  Result := Shared.CompilerSupport.SkipPastConst(S, Start);
 end;
 
 function ConvertConstPercentStr(var S: String): Boolean;
-{ Same as ConvertPercentStr, but is designed to ignore embedded Inno Setup
-  constants. Any '%' characters between braces are not translated. Two
-  consecutive braces are ignored. }
-var
-  I, C, E: Integer;
-  N: String;
 begin
-  Result := True;
-  I := 1;
-  while I <= Length(S) do begin
-    case S[I] of
-      '{': begin
-             I := SkipPastConst(S, I);
-             if I = 0 then begin
-               Result := False;
-               Break;
-             end;
-             Dec(I);  { ...since there's an Inc below }
-           end;
-      '%': begin
-             N := Copy(S, I, 3);
-             if Length(N) <> 3 then begin
-               Result := False;
-               Break;
-             end;
-             N[1] := '$';
-             Val(N, C, E);
-             if E <> 0 then begin
-               Result := False;
-               Break;
-             end;
-             { delete the two numbers following '%', and replace '%' with the character }
-             Delete(S, I+1, 2);
-             S[I] := Chr(C);
-           end;
-    end;
-    Inc(I);
-  end;
+  Result := Shared.CompilerSupport.ConvertConstPercentStr(S);
 end;
 
 function ConstPos(const Ch: Char; const S: String): Integer;
-{ Like the standard Pos function, but skips over any Inno Setup constants
-  embedded in S }
-var
-  I, L: Integer;
 begin
-  Result := 0;
-  I := 1;
-  L := Length(S);
-  while I <= L do begin
-    if S[I] = Ch then begin
-      Result := I;
-      Break;
-    end
-    else if S[I] = '{' then begin
-      I := SkipPastConst(S, I);
-      if I = 0 then
-        Break;
-    end
-    else
-      Inc(I);
-  end;
+  Result := Shared.CompilerSupport.ConstPos(Ch, S);
 end;
 
 function GetWinDir: String;
@@ -700,7 +610,7 @@ function GetWinDir: String;
 var
   Buf: array[0..MAX_PATH-1] of Char;
 begin
-  GetWindowsDirectory(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
+  GetWindowsDirectoryW(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
   Result := StrPas(Buf);
 end;
 
@@ -726,7 +636,7 @@ function GetSystemDir: String;
 var
   Buf: array[0..MAX_PATH-1] of Char;
 begin
-  GetSystemDirectory(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
+  GetSystemDirectoryW(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
   Result := StrPas(Buf);
 end;
 
@@ -738,8 +648,9 @@ function GetSysWow64Dir: String;
   Returns '' if there is no SysWow64 directory (e.g. running 32-bit Windows). }
 var
   Buf: array[0..MAX_PATH] of Char;
+  Res: DWORD;
 begin
-  const Res = GetSystemWow64Directory_static(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
+  Res := GetSystemWow64Directory_static(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
   if (Res > 0) and (Res < SizeOf(Buf) div SizeOf(Buf[0])) then
     Result := Buf
   else
@@ -773,22 +684,27 @@ function GetTempDir: String;
   procedure RestoreDeletedTempDirWithLogonSessionId(const DeletedTempDir: String);
   { Restores a deleted temporary directory in the specific scenario described at
     https://learn.microsoft.com/en-us/troubleshoot/windows-server/shell-experience/temp-folder-with-logon-session-id-deleted }
+  var
+    DirWithoutSlash, BaseName: String;
+    BaseNameIsNumber: Boolean;
+    I: Integer;
   begin
-    const DirWithoutSlash = RemoveBackslashUnlessRoot(DeletedTempDir);
-    const BaseName = PathExtractName(DirWithoutSlash);
-    var BaseNameIsNumber := False;
-    for var I := Low(BaseName) to High(BaseName) do begin
+    DirWithoutSlash := RemoveBackslashUnlessRoot(DeletedTempDir);
+    BaseName := PathExtractName(DirWithoutSlash);
+    BaseNameIsNumber := False;
+    for I := Low(BaseName) to High(BaseName) do begin
       BaseNameIsNumber := CharInSet(BaseName[I], ['0'..'9']);
       if not BaseNameIsNumber then
         Break;
     end;
     if BaseNameIsNumber then
-      CreateDirectory(PChar(DirWithoutSlash), nil);
+      CreateDirectoryW(PChar(DirWithoutSlash), nil);
   end;
 
 var
   GetTempPathFunc: function(nBufferLength: DWORD; lpBuffer: LPWSTR): DWORD; stdcall;
   Buf: array[0..MAX_PATH] of Char;
+  Res: DWORD;
 begin
   { When available, GetTempPath2 is preferred as it returns a private
     directory (typically C:\Windows\SystemTemp) when running as SYSTEM }
@@ -797,7 +713,7 @@ begin
   if not Assigned(GetTempPathFunc) then
     GetTempPathFunc := GetTempPathW;
 
-  const Res = GetTempPathFunc(SizeOf(Buf) div SizeOf(Buf[0]), Buf);
+  Res := GetTempPathFunc(SizeOf(Buf) div SizeOf(Buf[0]), Buf);
   if (Res > 0) and (Res < SizeOf(Buf) div SizeOf(Buf[0])) then begin
     { The docs say the returned path is fully qualified and ends with a
       backslash, but let's be really sure! }
@@ -866,21 +782,20 @@ end;
 function InternalRegQueryStringValue(H: HKEY; Name: PChar; var ResultStr: String;
   Type1, Type2, Type3: DWORD): Boolean;
 var
-  Typ, Size: DWORD;
+  Typ, Size, Data, Len: DWORD;
   S: String;
   ErrorCode: Integer;
 label 1;
 begin
   Result := False;
 1:Size := 0;
-  if (RegQueryValueEx(H, Name, nil, @Typ, nil, @Size) = ERROR_SUCCESS) and
+  if (RegQueryValueExW(H, Name, nil, @Typ, nil, @Size) = ERROR_SUCCESS) and
      ((Typ = Type1) or (Typ = Type2) or ((Type3 <> REG_NONE) and (Typ = Type3))) then begin
     if Typ = REG_DWORD then begin
-      var Data: DWORD;
       Size := SizeOf(Data);
-      if (RegQueryValueEx(H, Name, nil, @Typ, PByte(@Data), @Size) = ERROR_SUCCESS) and
+      if (RegQueryValueExW(H, Name, nil, @Typ, PByte(@Data), @Size) = ERROR_SUCCESS) and
          (Typ = REG_DWORD) and (Size = Sizeof(Data)) then begin
-        ResultStr := Data.ToString;
+        ResultStr := UIntToStr(Data);
         Result := True;
       end;
     end else if Size = 0 then begin
@@ -897,9 +812,9 @@ begin
         OutOfMemoryError;
       { Note: If Size isn't a multiple of SizeOf(S[1]), we have to round up
         here so that RegQueryValueEx doesn't overflow the buffer }
-      var Len := (Size + (SizeOf(S[1]) - 1)) div SizeOf(S[1]);
+      Len := (Size + (SizeOf(S[1]) - 1)) div SizeOf(S[1]);
       SetString(S, nil, Len);
-      ErrorCode := RegQueryValueEx(H, Name, nil, @Typ, PByte(@S[1]), @Size);
+      ErrorCode := RegQueryValueExW(H, Name, nil, @Typ, PByte(@S[1]), @Size);
       if ErrorCode = ERROR_MORE_DATA then begin
         { The data must've increased in size since the first RegQueryValueEx
           call. Start over. }
@@ -934,8 +849,9 @@ function RegQueryStringValue(H: HKEY; Name: PChar; var ResultStr: String; AllowD
 { Queries the specified REG_SZ or REG_EXPAND_SZ registry key/value, and returns
   the value in ResultStr. Returns True if successful. When False is returned,
   ResultStr is unmodified. Optionally supports REG_DWORD. }
+var
+  Type3: DWORD;
 begin
-  var Type3: DWORD;
   if AllowDWord then
     Type3 := REG_DWORD
   else
@@ -957,7 +873,7 @@ function RegValueExists(H: HKEY; Name: PChar): Boolean;
 { Returns True if the specified value exists. Requires KEY_QUERY_VALUE access
   to the key. }
 begin
-  Result := RegQueryValueEx(H, Name, nil, nil, nil, nil) = ERROR_SUCCESS;
+  Result := RegQueryValueExW(H, Name, nil, nil, nil, nil) = ERROR_SUCCESS;
 end;
 
 function RegViewToWowKeyFlag(const RegView: TRegView): REGSAM;
@@ -976,7 +892,7 @@ function RegCreateKeyExView(const RegView: TRegView; hKey: HKEY; lpSubKey: PChar
   lpdwDisposition: PDWORD): Longint;
 begin
   samDesired := samDesired or RegViewToWowKeyFlag(RegView);
-  Result := RegCreateKeyEx(hKey, lpSubKey, Reserved, lpClass, dwOptions,
+  Result := RegCreateKeyExW(hKey, lpSubKey, Reserved, lpClass, dwOptions,
     samDesired, lpSecurityAttributes, phkResult, lpdwDisposition);
 end;
 
@@ -984,7 +900,7 @@ function RegOpenKeyExView(const RegView: TRegView; hKey: HKEY; lpSubKey: PChar;
   ulOptions: DWORD; samDesired: REGSAM; var phkResult: HKEY): Longint;
 begin
   samDesired := samDesired or RegViewToWowKeyFlag(RegView);
-  Result := RegOpenKeyEx(hKey, lpSubKey, ulOptions, samDesired, phkResult);
+  Result := RegOpenKeyExW(hKey, lpSubKey, ulOptions, samDesired, phkResult);
 end;
 
 function RegDeleteKeyEx_static(hKey: HKEY; lpSubKey: LPCWSTR;
@@ -1017,7 +933,7 @@ begin
       I := 0;
       while True do begin
         KeyNameCount := ULength(KeyName);
-        ErrorCode := RegEnumKeyEx(H, I, @KeyName[1], KeyNameCount, nil, nil, nil, nil);
+        ErrorCode := RegEnumKeyExW(H, I, @KeyName[1], KeyNameCount, nil, nil, nil, nil);
         if ErrorCode = ERROR_MORE_DATA then begin
           { Double the size of the buffer and try again }
           if Length(KeyName) >= 65536 then begin
@@ -1053,7 +969,7 @@ begin
   Result := RegOpenKeyExView(RegView, RootKey, SubkeyName, 0, KEY_QUERY_VALUE, K);
   if Result <> ERROR_SUCCESS then
     Exit;
-  Result := RegQueryInfoKey(K, nil, nil, nil, @NumSubkeys, nil, nil,
+  Result := RegQueryInfoKeyW(K, nil, nil, nil, @NumSubkeys, nil, nil,
     @NumValues, nil, nil, nil, nil);
   RegCloseKey(K);
   if Result <> ERROR_SUCCESS then
@@ -1095,6 +1011,11 @@ begin
   GetShellFolderPath(FolderID, Result);
 end;
 
+{$IFDEF FPC}
+function ConvertSidToStringSidW(Sid: PSID; out StringSid: PWideChar): BOOL;
+  stdcall; external advapi32 name 'ConvertSidToStringSidW';
+{$ENDIF}
+
 function GetCurrentUserSid: String;
 var
   Token: THandle;
@@ -1119,7 +1040,7 @@ begin
 
     if ConvertSidToStringSidW(UserInfo.User.Sid, StringSid) then begin
       Result := StringSid;
-      LocalFree(StringSid);
+      LocalFree({$IFDEF FPC}HLOCAL(StringSid){$ELSE}StringSid{$ENDIF});
     end;
   finally
     FreeMem(UserInfo);
@@ -1142,7 +1063,7 @@ var
     var IsMember: BOOL): BOOL; stdcall;
   IsMember: BOOL;
   Token: THandle;
-  GroupInfoSize: DWORD;
+  GroupInfoSize, I: DWORD;
   GroupInfo: PTokenGroups;
 begin
   Result := False;
@@ -1183,7 +1104,7 @@ begin
            GroupInfoSize, GroupInfoSize) then
           Exit;
 
-        for var I := 0 to GroupInfo.GroupCount-1 do begin
+        for I := 0 to GroupInfo.GroupCount-1 do begin
           if EqualSid(Sid, GroupInfo.Groups[I].Sid) and
              (GroupInfo.Groups[I].Attributes and (SE_GROUP_ENABLED or
               SE_GROUP_USE_FOR_DENY_ONLY) = SE_GROUP_ENABLED) then begin
@@ -1219,7 +1140,9 @@ begin
   Result := IsMemberOfGroup(DOMAIN_ALIAS_RID_POWER_USERS);
 end;
 
-function FontExistsCallback(const lplf: TLogFont; const lptm: TTextMetric;
+function FontExistsCallback(
+  {$IFDEF FPC}lplf: LPLOGFONTW; lptm: LPTEXTMETRICW;
+  {$ELSE}const lplf: TLogFont; const lptm: TTextMetric;{$ENDIF}
   dwType: DWORD; lpData: LPARAM): Integer; stdcall;
 begin
   Boolean(Pointer(lpData)^) := True;
@@ -1233,7 +1156,8 @@ begin
   Result := False;
   DC := GetDC(0);
   try
-    EnumFonts(DC, PChar(FaceName), @FontExistsCallback, LPARAM(@Result));
+    EnumFontsW(DC, PChar(FaceName), @FontExistsCallback,
+      {$IFDEF FPC}@Result{$ELSE}LPARAM(@Result){$ENDIF});
   finally
     ReleaseDC(0, DC);
   end;
@@ -1270,10 +1194,12 @@ function RemoveAccelChar(const S: String;
   const RemoveParenthesizedAccessKeys: Boolean = True): String;
 { Removes access key prefixes ('&') and optionally entire parenthesized access
   keys, which are used in CJK (e.g., 'File(&F)' -> 'File') }
+var
+  I, LookBehindStopIndex: Integer;
 begin
   Result := S;
-  var I := 1;
-  var LookBehindStopIndex := I;
+  I := 1;
+  LookBehindStopIndex := I;
   while I <= Length(Result) do begin
     if Result[I] = '&' then begin
       { Based on Vcl.Menus.StripHotkey. Note that its SysLocale.FarEast check
@@ -1312,59 +1238,18 @@ begin
   { This procedure is 10x faster than using DrawText with the DT_CALCRECT flag }
   if Prefix then
     S := RemoveAccelChar(S, False);
-  GetTextExtentPoint32(DC, PChar(S), Length(S), Size);
+  GetTextExtentPoint32W(DC, PChar(S), Length(S), Size);
   Result := Size.cx;
 end;
 
 function AddPeriod(const S: String): String;
-{ Returns the specified string with a full stop character (U+002E) appended,
-  unless the string is empty, already ends with a sentence-terminating
-  character, ends with a control character (such as CR or LF), or ends with
-  a Thai or Lao character (these do not end sentences with a full stop),
-  in which case the string is returned unchanged. }
 begin
-  if S <> '' then begin
-    { This list is not intended to be exhaustive; it includes characters that
-      are known/expected to be used in Inno Setup .isl translations.
-      Keep the isxfunc.xml AddPeriod topic's table in sync. }
-    case S[High(S)] of
-      #0..#$001F, { Control characters (don't want '.' after trailing CR/LF) }
-      '!',     { Exclamation Mark }
-      '.',     { Full Stop }
-      '?',     { Question Mark }
-      #$0589,  { Armenian Full Stop }
-      #$061F,  { Arabic Question Mark }
-      #$06D4,  { Arabic Full Stop (used in Urdu, not Arabic) }
-      #$0964..#$0965, { Devanagari Danda and Double Danda (used across Indic scripts) }
-      #$0E00..#$0EFF, { Thai and Lao blocks (sentences do not end in a full stop) }
-      #$104A..#$104B, { Myanmar sentence terminators }
-      #$1362,  { Ethiopic Full Stop }
-      #$1367,  { Ethiopic Question Mark }
-      #$17D4..#$17D5, { Khmer sentence terminators }
-      #$17DA,         { Khmer end-of-text mark }
-      #$3002,  { Ideographic Full Stop (used in Japanese and Chinese) }
-      #$FF01,  { Fullwidth Exclamation Mark }
-      #$FF0E,  { Fullwidth Full Stop }
-      #$FF1F:  { Fullwidth Question Mark }
-        ;
-    else
-      Exit(S + '.');
-    end;
-  end;
-  Result := S;
+  Result := Shared.CompilerSupport.AddPeriod(S);
 end;
 
 function GetExceptMessage: String;
-var
-  E: TObject;
 begin
-  E := ExceptObject;
-  if E = nil then
-    Result := '[ExceptObject=nil]'   { should never get here }
-  else if E is Exception then
-    Result := AddPeriod(Exception(E).Message)   { usual case }
-  else
-    Result := E.ClassName;   { shouldn't get here under normal circumstances } 
+  Result := Shared.CompilerSupport.GetExceptMessage;
 end;
 
 function GetPreferredUIFont: String;
@@ -1383,10 +1268,12 @@ begin
 end;
 
 function IsWildcard(const Filename: String): Boolean;
+var
+  I: Integer;
 begin
   { To prevent a false positive result on '\\?\'-prefixed paths, only the last
     path component is checked }
-  for var I := Low(Filename) + PathPathPartLength(Filename, True) to High(Filename) do
+  for I := Low(Filename) + PathPathPartLength(Filename, True) to High(Filename) do
     case Filename[I] of
       '*', '?': Exit(True);
     end;
@@ -1394,66 +1281,8 @@ begin
 end;
 
 function WildcardMatch(const Text, Pattern: PChar): Boolean;
-{ General-purpose wildcard matching function based on the widely used wildcat()
-  code by Rich $alz. In this implementation, however, the only supported
-  pattern matching characters are ? and *.
-  Note that this function uses Unix shell semantics -- e.g. a dot always
-  matches a dot (so a pattern of '*.*' won't match 'file'), and ? always
-  matches exactly 1 character (so '?????' won't match 'file').
-  Also note: The InternalWildcardMatch function can recursively call itself
-  for each non-consecutive * character in the pattern. With enough *
-  characters, the stack could overflow. So ideally the caller should impose a
-  limit on either the length of the pattern string or the number of *
-  characters in it. }
-type
-  TWildcardMatchResult = (wmFalse, wmTrue, wmAbort);
-
-  function InternalWildcardMatch(T, P: PChar): TWildcardMatchResult;
-  begin
-    while P^ <> #0 do begin
-      if (T^ = #0) and (P^ <> '*') then begin
-        Result := wmAbort;
-        Exit;
-      end;
-      case P^ of
-        '?': ;  { Match any character }
-        '*': begin
-               Inc(P);
-               while P^ = '*' do begin
-                 { Consecutive stars act just like one }
-                 Inc(P);
-               end;
-               if P^ = #0 then begin
-                 { Trailing star matches everything }
-                 Result := wmTrue;
-                 Exit;
-               end;
-               while T^ <> #0 do begin
-                 Result := InternalWildcardMatch(T, P);
-                 if Result <> wmFalse then
-                   Exit;
-                 T := PathStrNextChar(T);
-               end;
-               Result := wmAbort;
-               Exit;
-             end;
-      else
-        if T^ <> P^ then begin
-          Result := wmFalse;
-          Exit;
-        end;
-      end;
-      T := PathStrNextChar(T);
-      P := PathStrNextChar(P);
-    end;
-    if T^ = #0 then
-      Result := wmTrue
-    else
-      Result := wmFalse;
-  end;
-
 begin
-  Result := (InternalWildcardMatch(Text, Pattern) = wmTrue);
+  Result := Shared.CompilerSupport.WildcardMatch(Text, Pattern);
 end;
 
 function IntMax(const A, B: Integer): Integer;
@@ -1469,8 +1298,9 @@ function Win32ErrorString(ErrorCode: DWORD): String;
   which allows the function to succeed on errors like 129 }
 var
   Buffer: array[0..1023] of Char;
+  Len: DWORD;
 begin
-  var Len := FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM or
+  Len := FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM or
     FORMAT_MESSAGE_IGNORE_INSERTS or FORMAT_MESSAGE_ARGUMENT_ARRAY, nil,
     ErrorCode, 0, Buffer, SizeOf(Buffer) div SizeOf(Buffer[0]), nil);
   while (Len > 0) and ((Buffer[Len-1] <= ' ') or (Buffer[Len-1] = '.')) do
@@ -1483,12 +1313,12 @@ function DeleteDirTree(const Dir: String): Boolean;
   it. Returns True if successful. }
 var
   H: THandle;
-  FindData: TWin32FindData;
+  FindData: TWin32FindDataW;
   FN: String;
 begin
   if (Dir <> '') and (Pos(#0, Dir) = 0) and  { sanity/safety checks }
      IsDirectoryAndNotReparsePoint(Dir) then begin
-    H := FindFirstFile(PChar(AddBackslash(Dir) + '*'), FindData);
+    H := FindFirstFileW(PChar(AddBackslash(Dir) + '*'), FindData);
     if H <> INVALID_HANDLE_VALUE then begin
       try
         repeat
@@ -1496,19 +1326,19 @@ begin
              (StrComp(FindData.cFileName, '..') <> 0) then begin
             FN := AddBackslash(Dir) + FindData.cFileName;
             if FindData.dwFileAttributes and FILE_ATTRIBUTE_READONLY <> 0 then
-              SetFileAttributes(PChar(FN), FindData.dwFileAttributes and not FILE_ATTRIBUTE_READONLY);
+              SetFileAttributesW(PChar(FN), FindData.dwFileAttributes and not FILE_ATTRIBUTE_READONLY);
             if FindData.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY = 0 then
-              Windows.DeleteFile(PChar(FN))
+              Windows.DeleteFileW(PChar(FN))
             else
               DeleteDirTree(FN);
           end;
-        until not FindNextFile(H, FindData);
+        until not FindNextFileW(H, FindData);
       finally
         Windows.FindClose(H);
       end;
     end;
   end;
-  Result := RemoveDirectory(PChar(Dir));
+  Result := RemoveDirectoryW(PChar(Dir));
 end;
 
 function SetNTFSCompression(const FileOrDir: String; Compress: Boolean): Boolean;
@@ -1523,7 +1353,7 @@ var
   Handle: THandle;
   BytesReturned, LastError: DWORD;
 begin
-  Handle := CreateFile(PChar(FileOrDir), GENERIC_READ or GENERIC_WRITE,
+  Handle := CreateFileW(PChar(FileOrDir), GENERIC_READ or GENERIC_WRITE,
     FILE_SHARE_READ, nil, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
   if Handle <> INVALID_HANDLE_VALUE then begin
     Result := DeviceIoControl(Handle, FSCTL_SET_COMPRESSION, @Compressions[Compress],
@@ -1602,31 +1432,23 @@ end;
 
 function TryStrToBoolean(const S: String; var BoolResult: Boolean): Boolean;
 begin
-  if (S = '0') or (CompareText(S, 'no') = 0) or (CompareText(S, 'false') = 0) then begin
-    BoolResult := False;
-    Result := True;
-  end
-  else if (S = '1') or (CompareText(S, 'yes') = 0) or (CompareText(S, 'true') = 0) then begin
-    BoolResult := True;
-    Result := True;
-  end
-  else
-    Result := False;
+  Result := Shared.CompilerSupport.TryStrToBoolean(S, BoolResult);
 end;
 
 function TryStrToDWord(const S: String; out Value: DWORD): Boolean;
 { Accepts -2147483648 to 4294967295. A negative value wraps around, so '-1'
   becomes $FFFFFFFF. Like StrToInt, a negative hexadecimal value can go down
   to -$FFFFFFFF instead of -$80000000, so '-$FFFFFFFF' becomes 1 }
+var
+  IntegerValue: Integer;
+  UInt64Value: UInt64;
 begin
-  var IntegerValue: Integer;
   Result := TryStrToInt(S, IntegerValue);
   if Result then
     Value := DWORD(IntegerValue)
   else begin
     { Should not use TryStrToUInt: it parses as Int64, so for example
       '-$FFFFFFFFFFFFFFFF' would become 1 }
-    var UInt64Value: UInt64;
     Result := TryStrToUInt64(S, UInt64Value) and (UInt64Value <= High(DWORD));
     if Result then
       Value := DWORD(UInt64Value);
@@ -1635,8 +1457,9 @@ end;
 
 function TryStrToQWord(const S: String; out Value: UInt64): Boolean;
 { Same as TryStrToDWord, but 64-bit }
+var
+  Int64Value: Int64;
 begin
-  var Int64Value: Int64;
   Result := TryStrToInt64(S, Int64Value);
   if Result then
     Value := UInt64(Int64Value)
@@ -1653,7 +1476,7 @@ end;
 
 function MoveFileReplace(const ExistingFileName, NewFileName: String): Boolean;
 begin
-  Result := MoveFileEx(PChar(ExistingFileName), PChar(NewFileName),
+  Result := MoveFileExW(PChar(ExistingFileName), PChar(NewFileName),
     MOVEFILE_REPLACE_EXISTING);
 end;
 
@@ -1673,23 +1496,30 @@ begin
   SecurityAttr.nLength := SizeOf(SecurityAttr);
   SecurityAttr.lpSecurityDescriptor := @SecurityDesc;
   SecurityAttr.bInheritHandle := False;
-  Windows.CreateMutex(@SecurityAttr, False, PChar(MutexName));
+  Windows.CreateMutexW(@SecurityAttr, False, PChar(MutexName));
 end;
 
 function HighContrastActive: Boolean;
+var
+  HighContrast: record
+    cbSize, dwFlags: DWORD;
+    lpszDefaultScheme: PWideChar;
+  end;
 begin
-  var HighContrast: THighContrast;
   HighContrast.cbSize := SizeOf(HighContrast);
   Result := False;
-  if SystemParametersInfo(SPI_GETHIGHCONTRAST, HighContrast.cbSize, @HighContrast, 0) then
+  if SystemParametersInfoW(SPI_GETHIGHCONTRAST, HighContrast.cbSize, @HighContrast, 0) then
     Result := (HighContrast.dwFlags and HCF_HIGHCONTRASTON) <> 0;
 end;
 
 function ClientAreaAnimationsActive: Boolean;
+const
+  SPI_GETCLIENTAREAANIMATION = $1042;
+var
+  Value: BOOL;
 begin
-  var value: BOOL;
   Result := False;
-  if SystemParametersInfo(SPI_GETCLIENTAREAANIMATION, 0, @value, 0) then
+  if SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, @value, 0) then
     Result := value;
 end;
 
@@ -1698,11 +1528,12 @@ var
   WindowsVersionRead: Boolean;
 
 function CurrentWindowsVersionAtLeast(const AMajor, AMinor: Byte; const ABuild: Word = 0): Boolean;
+var
+  OSVersionInfo: TOSVersionInfoW;
 begin
   if not WindowsVersionRead then begin
-    var OSVersionInfo: TOSVersionInfo;
     OSVersionInfo.dwOSVersionInfoSize := SizeOf(OSVersionInfo);
-    GetVersionEx(OSVersionInfo);
+    GetVersionExW(OSVersionInfo);
     WindowsVersion := (Byte(OSVersionInfo.dwMajorVersion) shl 24) or (Byte(OSVersionInfo.dwMinorVersion) shl 16) or Word(OSVersionInfo.dwBuildNumber);
     WindowsVersionRead := True;
   end;
@@ -1717,7 +1548,7 @@ begin
   Result := False;
   if CurrentWindowsVersionAtLeast(10, 0) and (RegOpenKeyExView(rvDefault, HKEY_CURRENT_USER, 'SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize', 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS) then begin
     Size := SizeOf(AppsUseLightTheme);
-    if (RegQueryValueEx(K, 'AppsUseLightTheme', nil, nil, PByte(@AppsUseLightTheme), @Size) = ERROR_SUCCESS) and (AppsUseLightTheme = 0) then
+    if (RegQueryValueExW(K, 'AppsUseLightTheme', nil, nil, PByte(@AppsUseLightTheme), @Size) = ERROR_SUCCESS) and (AppsUseLightTheme = 0) then
       Result := True;
     RegCloseKey(K);
   end;
@@ -1750,8 +1581,9 @@ type
   TFileDispositionInfo = record
     DeleteFile: Boolean;  { actually the Windows BOOLEAN type, also 1-byte }
   end;
+var
+  Info: TFileDispositionInfo;
 begin
-  var Info: TFileDispositionInfo;
   Info.DeleteFile := True;
   Result := SetFileInformationByHandle(H, FileDispositionInfo, @Info,
     SizeOf(Info));
@@ -1805,6 +1637,20 @@ function PerformFileOperationWithRetries(const MaxRetries: Integer; const AlsoRe
   retries remain, it calls Failed and returns False. Op should ensure LastError is always set on
   failure. It is recommended that Failed throws an exception, rather than expecting the caller to
   inspect the return value. Alternatively, Failed can set TryOnceMore to True to allow an extra retry. }
+{$IFDEF FPC}
+  procedure Retry(const LastError: Cardinal; var RetriesLeft: Integer;
+    var NextAction: TFileOperationFailingNextAction);
+  begin
+    if RetriesLeft > 0 then begin
+      Failing(LastError);
+      Dec(RetriesLeft);
+      NextAction := naRetry;
+    end;
+  end;
+begin
+  Result := PerformFileOperationWithRetries(MaxRetries, AlsoRetryOnAlreadyExists,
+    Op, Retry, Failed);
+{$ELSE}
 begin
   Result := PerformFileOperationWithRetries(MaxRetries, AlsoRetryOnAlreadyExists,
     Op,
@@ -1817,6 +1663,7 @@ begin
       end;
     end,
     Failed);
+{$ENDIF}
 end;
 
 function PerformFileOperationWithRetries(const MaxRetries: Integer; const AlsoRetryOnAlreadyExists: Boolean;
@@ -1824,13 +1671,17 @@ function PerformFileOperationWithRetries(const MaxRetries: Integer; const AlsoRe
 { Similar to the other PerformFileOperationWithRetries, but provides fine-grained control to Failing,
   which is now responsible for updating RetriesLeft itself, and can also request an early break.
   Failing's NextAction defaults to *not* retry, but to stop and fail. }
+var
+  RetriesLeft: Integer;
+  LastError: Cardinal;
+  NextAction: TFileOperationFailingNextAction;
+  TryOnceMore: Boolean;
 begin
-  var RetriesLeft := MaxRetries;
-  var LastError: Cardinal;
+  RetriesLeft := MaxRetries;
   while not Op(LastError) do begin
     { Does the error code indicate that it is possibly in use? }
     if LastErrorIndicatesPossiblyInUse(LastError, AlsoRetryOnAlreadyExists) then begin
-      var NextAction := naStopAndFail;
+      NextAction := naStopAndFail;
       Failing(LastError, RetriesLeft, NextAction);
       if NextAction = naStopAndSucceed then
         Break
@@ -1839,7 +1690,7 @@ begin
     end;
     { Some other error occurred, or we ran out of tries }
     SetLastError(LastError);
-    var TryOnceMore := False;
+    TryOnceMore := False;
     Failed(LastError, TryOnceMore);
     if not TryOnceMore then
       Exit(False);
@@ -1861,9 +1712,10 @@ var
     Header: TImageFileHeader;
     OptHeaderMagic: Word;
   end;
+  F: TFile;
 begin
   Result := False;
-  const F = TFile.Create(Filename, fdOpenExisting, faRead, fsRead);
+  F := TFile.Create(Filename, fdOpenExisting, faRead, fsRead);
   try
     if F.Read(DosHeader, SizeOf(DosHeader)) = SizeOf(DosHeader) then begin
       if (DosHeader.Sig[0] = 'M') and (DosHeader.Sig[1] = 'Z') and
@@ -1899,19 +1751,21 @@ begin
 end;
 
 function IsWindowOnTaskbar(const Wnd: HWND): Boolean;
+var
+  RootWnd, ParentWnd: HWND;
 begin
   { Find the "root owner" window, which is what appears in the taskbar.
     We avoid GetAncestor(..., GA_ROOTOWNER) because it's broken in the same
     way as GetParent(): it stops if it reaches a top-level window that doesn't
     have the WS_POPUP style (i.e., a WS_OVERLAPPED window). }
-  var RootWnd := Wnd;
+  RootWnd := Wnd;
   while True do begin
     { Visible WS_EX_APPWINDOW windows have their own taskbar button regardless
       of their root owner's visibility }
     if (GetWindowLong(RootWnd, GWL_EXSTYLE) and WS_EX_APPWINDOW <> 0) and
        (GetWindowLong(RootWnd, GWL_STYLE) and WS_VISIBLE <> 0) then
       Exit(True);
-    var ParentWnd := HWND(GetWindowLongPtr(RootWnd, GWLP_HWNDPARENT));
+    ParentWnd := HWND(GetWindowLongPtr(RootWnd, GWLP_HWNDPARENT));
     if ParentWnd = 0 then
       Break;
     RootWnd := ParentWnd;
@@ -1922,43 +1776,30 @@ begin
 end;
 
 function SetWindowCloaked(const Wnd: HWND; const Cloaked: Boolean): Boolean;
+const
+  DWMWA_CLOAK = 13;
+var
+  Value: BOOL;
 begin
   { Cloaks the window such that it is not visible to the user. The window is
     still composed by DWM. }
   if CurrentWindowsVersionAtLeast(6, 2) then begin
-    const DWMWA_CLOAK: DWORD = 13;
-    var value: BOOL := Cloaked;
+    Value := Cloaked;
     Result := Succeeded(DwmSetWindowAttribute(Wnd, DWMWA_CLOAK, @value, SizeOf(value)));
   end else
     Result := False;
 end;
 
 function CreateInheritableNulDevice(const DesiredAccess: DWORD): THandle;
+var
+  SecurityAttributes: TSecurityAttributes;
 begin
-  var SecurityAttributes: TSecurityAttributes;
   SecurityAttributes.nLength := SizeOf(SecurityAttributes);
   SecurityAttributes.bInheritHandle := True;
   SecurityAttributes.lpSecurityDescriptor := nil;
-  Result := CreateFile('\\.\NUL', DesiredAccess,
+  Result := CreateFileW('\\.\NUL', DesiredAccess,
     FILE_SHARE_READ or FILE_SHARE_WRITE, @SecurityAttributes,
     OPEN_EXISTING, 0, 0);
-end;
-
-{ TSimpleLock }
-
-class function TSimpleLock.Create: TSimpleLock;
-begin
-  Result.FLockValue := 0;
-end;
-
-procedure TSimpleLock.Release;
-begin
-  AtomicExchange(FLockValue, 0);
-end;
-
-function TSimpleLock.TryAcquire: Boolean;
-begin
-  AtomicCmpExchange(FLockValue, 1, 0, Result);
 end;
 
 { TOneShotTimer }
@@ -2013,6 +1854,9 @@ end;
 class procedure TStrongRandom.GenerateBytes(out Buf; const Count: Cardinal);
 const
   BCRYPT_USE_SYSTEM_PREFERRED_RNG = $00000002;
+var
+  I: Cardinal;
+  Status: NTSTATUS;
 begin
   InitBCrypt;
 
@@ -2020,13 +1864,13 @@ begin
     succeeding without (entirely) filling the buffer. We don't actually expect
     that to happen, though. (Not using FillChar here because it takes a signed
     integer for the count.) }
-  var I := Count;
+  I := Count;
   while I > 0 do begin
     Dec(I);
     PByte(@Buf)[I] := 0;
   end;
 
-  const Status = FBCryptGenRandomFunc(0, Buf, Count, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+  Status := FBCryptGenRandomFunc(0, Buf, Count, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
   if Status <> 0 then
     raise Exception.CreateFmt('TStrongRandom: BCryptGenRandom failed (0x%x)',
       [Status]);
@@ -2039,8 +1883,10 @@ end;
 
 class function TStrongRandom.GenerateUInt32Range(const ARange: UInt32): UInt32;
 { Like Delphi's Random function, returns a number in the range 0 to ARange-1 }
+var
+  R: UInt32;
 begin
-  const R = GenerateUInt32;
+  R := GenerateUInt32;
   Result := UInt32((UInt64(R) * ARange) shr 32);
 end;
 
@@ -2050,24 +1896,31 @@ begin
 end;
 
 class procedure TStrongRandom.InitBCrypt;
+var
+  M: HMODULE;
+  P: Pointer;
 begin
   if Assigned(FBCryptGenRandomFunc) then
     Exit;
 
   { If this function is entered by multiple threads concurrently, this will
     call LoadLibrary more than once, but that's fine }
-  const M = LoadLibrary(PChar(AddBackslash(GetSystemDir) + 'bcrypt.dll'));
+  M := LoadLibraryW(PChar(AddBackslash(GetSystemDir) + 'bcrypt.dll'));
   if M = 0 then
     raise Exception.Create('TStrongRandom: Failed to load bcrypt.dll');
 
-  const P = GetProcAddress(M, PAnsiChar('BCryptGenRandom'));
+  P := GetProcAddress(M, PAnsiChar('BCryptGenRandom'));
   if P = nil then
     raise Exception.Create('TStrongRandom: Failed to get address of BCryptGenRandom');
 
   { Make sure the work of LoadLibrary is fully visible before making the
     function pointer visible to other threads }
+  {$IFDEF FPC}
+  System.InterlockedExchange(PPointer(@@FBCryptGenRandomFunc)^, P);
+  {$ELSE}
   MemoryBarrier;
   FBCryptGenRandomFunc := P;
+  {$ENDIF}
 end;
 
 { TFileTimeHelper }
@@ -2090,8 +1943,13 @@ end;
 
 constructor TCreateProcessOutputReader.Create(const ALogProc: TLogProc;
   const ALogProcData: NativeInt; AMode: TOutputMode = omLog);
+var
+  SecurityAttributes: TSecurityAttributes;
+  NulDevice: THandle;
 
   procedure CreatePipeAndSetHandleInformation(var Read, Write: THandle; SecurityAttr: TSecurityAttributes);
+  var
+    TempReadPipe, TempWritePipe: THandle;
   begin
     { CreatePipe docs say no assumptions should be made about the output
       parameter contents (the two handles) when it fails. So specify local
@@ -2100,7 +1958,6 @@ constructor TCreateProcessOutputReader.Create(const ALogProc: TLogProc;
       does fail, the "var" parameters will still have their original 0
       values (which is important because the destructor closes all
       non-zero handles). }
-    var TempReadPipe, TempWritePipe: THandle;
     if not CreatePipe(TempReadPipe, TempWritePipe, @SecurityAttr, 0) then
       raise Exception.CreateFmt('Output redirection error: CreatePipe failed (%d)', [GetLastError]);
     Read := TempReadPipe;
@@ -2124,12 +1981,11 @@ begin
   FLogProcData := ALogProcData;
   FNextLineIsFirstLine := True;
 
-  var SecurityAttributes: TSecurityAttributes;
   SecurityAttributes.nLength := SizeOf(SecurityAttributes);
   SecurityAttributes.bInheritHandle := True;
   SecurityAttributes.lpSecurityDescriptor := nil;
 
-  const NulDevice = CreateInheritableNulDevice(GENERIC_READ);
+  NulDevice := CreateInheritableNulDevice(GENERIC_READ);
   { In case the NUL device is missing (which it inexplicably seems to
     be for some users, per web search), don't treat it as a fatal
     error. Just leave FStdInNulDevice at 0. It's not ideal, but the
@@ -2201,12 +2057,14 @@ end;
 procedure TCreateProcessOutputReader.Read(const LastRead: Boolean);
 
   function FindNewLine(const S: AnsiString; const LastRead: Boolean): Integer;
+  var
+    I, N: Integer;
   begin
     { This will return the position of the first #13 or #10. If a #13 is at
       the very end of the string it's only accepted if we are certain we can't
       be looking at a split #13#10 because there will be no more reads }
-    var N := Length(S);
-    for var I := 1 to N do
+    N := Length(S);
+    for I := 1 to N do
       if ((S[I] = #13) and ((I < N) or LastRead)) or
          (S[I] = #10) then
         Exit(I);
@@ -2214,8 +2072,10 @@ procedure TCreateProcessOutputReader.Read(const LastRead: Boolean);
   end;
 
   procedure LogLine(const CaptureList: TStringList; const S: AnsiString);
+  var
+    UTF8S: String;
   begin
-    var UTF8S := UTF8ToString(S);
+    UTF8S := UTF8ToString(S);
     if CaptureList <> nil then
       CaptureList.Add(UTF8S)
     else begin
@@ -2231,6 +2091,9 @@ procedure TCreateProcessOutputReader.Read(const LastRead: Boolean);
   end;
 
   procedure DoRead(var Pipe: TCreateProcessOutputReaderPipe; const LastRead: Boolean);
+  var
+    TotalBytesAvail, TotalBytesHave, BytesRead, LastError: DWORD;
+    P, N: Integer;
   begin
     if Pipe.OKToRead then begin
 
@@ -2243,10 +2106,9 @@ procedure TCreateProcessOutputReader.Read(const LastRead: Boolean);
         Exit;
       end;
 
-      var TotalBytesAvail: DWORD;
       Pipe.OKToRead := PeekNamedPipe(Pipe.PipeRead, nil, 0, nil, @TotalBytesAvail, nil);
       if not Pipe.OKToRead then begin
-        var LastError := GetLastError;
+        LastError := GetLastError;
         if LastError <> ERROR_BROKEN_PIPE then begin
           Pipe.Buffer := '';
           HandleAndLogErrorFmt('PeekNamedPipe failed (%d).', [LastError]);
@@ -2256,13 +2118,12 @@ procedure TCreateProcessOutputReader.Read(const LastRead: Boolean);
         if TotalBytesAvail > FMaxTotalBytesToRead - FTotalBytesRead then
           TotalBytesAvail := FMaxTotalBytesToRead - FTotalBytesRead;
         { Append newly available data to the incomplete line we might already have }
-        var TotalBytesHave := ULength(Pipe.Buffer);
+        TotalBytesHave := ULength(Pipe.Buffer);
         SetLength(Pipe.Buffer, TotalBytesHave+TotalBytesAvail);
-        var BytesRead: DWORD;
         Pipe.OKToRead := ReadFile(Pipe.PipeRead, Pipe.Buffer[TotalBytesHave+1],
           TotalBytesAvail, BytesRead, nil);
         if not Pipe.OKToRead then begin
-          var LastError := GetLastError;
+          LastError := GetLastError;
           if LastError <> ERROR_BROKEN_PIPE then begin
             Pipe.Buffer := '';
             HandleAndLogErrorFmt('ReadFile failed (%d).', [LastError]);
@@ -2276,7 +2137,7 @@ procedure TCreateProcessOutputReader.Read(const LastRead: Boolean);
 
           { Check for completed lines thanks to the new data }
           while FTotalLinesRead < FMaxTotalLinesToRead do begin
-            var P := FindNewLine(Pipe.Buffer, LastRead);
+            P := FindNewLine(Pipe.Buffer, LastRead);
             if P = 0 then
               Break;
             LogLine(Pipe.CaptureList, Copy(Pipe.Buffer, 1, P-1));
@@ -2305,7 +2166,7 @@ procedure TCreateProcessOutputReader.Read(const LastRead: Boolean);
     end;
 
     if LastRead and (Pipe.Buffer <> '') then begin
-      var N := Length(Pipe.Buffer);
+      N := Length(Pipe.Buffer);
       if Pipe.Buffer[N] = #13 then begin
         { See FindNewLine: the buffer could end with a final #13 which needs to
           be stripped still }
@@ -2314,11 +2175,30 @@ procedure TCreateProcessOutputReader.Read(const LastRead: Boolean);
       LogLine(Pipe.CaptureList, Pipe.Buffer);
     end;
   end;
-  
+
 begin
   DoRead(FStdOut, LastRead);
   if FMode = omCapture then
     DoRead(FStdErr, LastRead);
+end;
+
+function RegRootKeyToUInt32(const RootKey: HKEY): UInt32;
+{ Returns RootKey casted to UInt32 if it appears to be a predefined HKEY_*
+  value: $800000xx or $FFFFFFFF800000xx. Otherwise, returns 0.
+  HKEY_* constants are sign-extended, but root keys converted from UInt32,
+  such as those of registry entries or read back by CrackRegExtraData, are
+  zero-extended. Windows accepts both, so we do as well.
+  But we do not allow anything other than 0 or $FFFFFFFF in the upper 32 bits,
+  regardless of whether Windows allows it. }
+var
+  KeyShifted: UIntPtr;
+begin
+  KeyShifted := RootKey shr 8;
+  if (KeyShifted = $800000)
+     {$IFDEF WIN64} or (KeyShifted = $FFFFFFFF800000) {$ENDIF} then
+    Result := UInt32(RootKey)
+  else
+    Result := 0;
 end;
 
 end.

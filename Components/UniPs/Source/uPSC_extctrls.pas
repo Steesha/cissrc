@@ -30,7 +30,7 @@ procedure SIRegisterTHEADER(Cl: TPSPascalCompiler);
 {$ENDIF}
 procedure SIRegisterTCUSTOMRADIOGROUP(Cl: TPSPascalCompiler);
 procedure SIRegisterTRADIOGROUP(Cl: TPSPascalCompiler);
-{$IFDEF DELPHI14UP}
+{$IF Defined(DELPHI14UP) or Defined(PS_INNO_WINDOWS_TARGET)}
 procedure SIRegisterTCUSTOMLINKLABEL(Cl: TPSPascalCompiler);
 procedure SIRegisterTLINKLABEL(Cl: TPSPascalCompiler);
 {$ENDIF}
@@ -180,7 +180,7 @@ begin
     {$ENDIF}
     RegisterProperty('BevelInner', 'TPanelBevel', iptrw);
     RegisterProperty('BevelOuter', 'TPanelBevel', iptrw);
-    {$IFDEF DELPHI2009UP}
+    {$IF Defined(DELPHI2009UP) or Defined(PS_INNO_WINDOWS_TARGET) or (Defined(FPC) and Defined(SETUPPROJ))}
     RegisterProperty('BevelKind', 'TBevelKind', iptrw);
     {$ENDIF}
     RegisterProperty('BevelWidth', 'TBevelWidth', iptrw);
@@ -324,7 +324,7 @@ begin
   end;
 end;
 
-{$IFDEF DELPHI14UP}
+{$IF Defined(DELPHI14UP) or Defined(PS_INNO_WINDOWS_TARGET)}
 
 procedure SIRegisterTCUSTOMLINKLABEL(Cl: TPSPascalCompiler);
 begin
@@ -372,7 +372,7 @@ begin
   cl.AddTypeS('TBevelWidth', 'LongInt');
   cl.AddTypeS('TBorderWidth', 'LongInt');
   cl.AddTypeS('TSectionEvent', 'procedure(Sender: TObject; ASection, AWidth: Integer)');
-  {$IFDEF DELPHI14UP}
+  {$IF Defined(DELPHI14UP) or Defined(PS_INNO_WINDOWS_TARGET)}
   cl.AddTypeS('TSysLinkType', '(sltURL, sltID)');
   cl.AddTypeS('TSysLinkEvent', 'procedure(Sender: TObject; const Link: string; LinkType: TSysLinkType)');
   {$ENDIF}
@@ -406,7 +406,7 @@ begin
   SIRegisterTCUSTOMRADIOGROUP(Cl);
   SIRegisterTRADIOGROUP(Cl);
   {$ENDIF}
-  {$IFDEF DELPHI14UP}
+  {$IF Defined(DELPHI14UP) or Defined(PS_INNO_WINDOWS_TARGET)}
   SIRegisterTCUSTOMLINKLABEL(Cl);
   SIRegisterTLINKLABEL(Cl);
   {$ENDIF}

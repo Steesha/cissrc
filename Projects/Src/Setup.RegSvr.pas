@@ -26,26 +26,26 @@ procedure DeleteOldTempFiles(const Path: String);
   good time to clean them up. }
 var
   H: THandle;
-  FindData: TWin32FindData;
+  FindData: TWin32FindDataW;
   Filename: String;
 begin
-  H := FindFirstFile(PChar(Path + 'isRS-???.tmp'), FindData);
+  H := FindFirstFileW(PWideChar(Path + 'isRS-???.tmp'), FindData);
   if H <> INVALID_HANDLE_VALUE then begin
     try
       repeat
         { Yes, this StrLIComp is superfluous. When deleting files from
           potentionally the Windows directory I can't help but be *extra*
           careful. :) }
-        if (StrLIComp(FindData.cFileName, 'isRS-', Length('isRS-')) = 0) and
+        if (StrLIComp(PWideChar(@FindData.cFileName[0]), 'isRS-', Length('isRS-')) = 0) and
            (FindData.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY = 0) then begin
-          Filename := Path + FindData.cFileName;
+          Filename := Path + PWideChar(@FindData.cFileName[0]);
           { If the file is read-only, try to strip the attribute }
           if FindData.dwFileAttributes and FILE_ATTRIBUTE_READONLY <> 0 then
-            SetFileAttributes(PChar(Filename), FindData.dwFileAttributes
+            SetFileAttributesW(PWideChar(Filename), FindData.dwFileAttributes
               and not FILE_ATTRIBUTE_READONLY);
           DeleteFile(Filename);
         end;
-      until not FindNextFile(H, FindData);
+      until not FindNextFileW(H, FindData);
     finally
       Windows.FindClose(H);
     end;
@@ -65,16 +65,16 @@ begin
   Attempts := 0;
   for I := 0 to 999 do begin
     NewFilename := Path + Format('isRS-%.3u.tmp', [I]);
-    Attribs := GetFileAttributes(PChar(NewFilename));
+    Attribs := GetFileAttributesW(PWideChar(NewFilename));
     if Attribs <> INVALID_FILE_ATTRIBUTES then begin
       { Skip any directories that happen to named NewFilename }
       if Attribs and FILE_ATTRIBUTE_DIRECTORY <> 0 then
         Continue;
       { If the existing file is read-only, try to strip the attribute }
       if Attribs and FILE_ATTRIBUTE_READONLY <> 0 then
-        SetFileAttributes(PChar(NewFilename), Attribs and not FILE_ATTRIBUTE_READONLY);
+        SetFileAttributesW(PWideChar(NewFilename), Attribs and not FILE_ATTRIBUTE_READONLY);
     end;
-    if MoveFileEx(PChar(Filename), PChar(NewFilename), MOVEFILE_REPLACE_EXISTING) then begin
+    if MoveFileExW(PWideChar(Filename), PWideChar(NewFilename), MOVEFILE_REPLACE_EXISTING) then begin
       Result := NewFilename;
       Break;
     end;

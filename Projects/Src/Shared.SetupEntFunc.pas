@@ -67,17 +67,18 @@ procedure SECompressedBlockWrite(const W: TCompressedBlockWriter; var Buf;
 var
   P: Pointer;
   I: Integer;
+  Len: Cardinal;
 begin
   P := @Buf;
   for I := 1 to NumStrings do begin
-    const Len = ULength(String(P^))*SizeOf(Char);
+    Len := ULength(String(P^))*SizeOf(Char);
     W.Write(Len, SizeOf(Len));
     if Len <> 0 then
       W.Write(Pointer(P^)^, Len);
     Inc(PByte(P), SizeOf(Pointer));
   end;
   for I := 1 to NumAnsiStrings do begin
-    const Len = ULength(AnsiString(P^));
+    Len := ULength(AnsiString(P^));
     W.Write(Len, SizeOf(Len));
     if Len <> 0 then
       W.Write(Pointer(P^)^, Len);
@@ -91,7 +92,7 @@ procedure SECompressedBlockRead(const R: TCompressedBlockReader; var Buf;
 var
   P: Pointer;
   I: Integer;
-  Len: Cardinal;
+  Len, BytesLeft: Cardinal;
   S: String;
   AnsiS: AnsiString;
 begin
@@ -114,7 +115,7 @@ begin
     AnsiString(P^) := AnsiS;
     Inc(PByte(P), SizeOf(Pointer));
   end;
-  const BytesLeft = Count - (Cardinal(NumStrings + NumAnsiStrings) * SizeOf(Pointer));
+  BytesLeft := Count - (Cardinal(NumStrings + NumAnsiStrings) * SizeOf(Pointer));
   { Unlike Count, BytesLeft should be the same in both 32-bit and 64-bit builds }
   R.Read(P^, BytesLeft);
 end;

@@ -12,14 +12,8 @@ unit UnsignedFunc;
 
 interface
 
-{ FRAMEWORK_VCL is available as of Delphi 11.1, so define it manually here when we need it, to
-  support Delphi 10.4 }
-{$IF Defined(ISIDEPROJ) or Defined(SETUPPROJ)}
-  {$DEFINE FRAMEWORK_VCL}
-{$IFEND}
-
 uses
-  {$IFDEF FRAMEWORK_VCL} Windows, UITypes, Controls, Graphics, {$ENDIF} SysUtils;
+  SysUtils;
 
 function ULength(const S: String): Cardinal; overload; inline;
 function ULength(const S: RawByteString): Cardinal; overload; inline;
@@ -28,11 +22,6 @@ function ULength(const S: TBytes): Cardinal; overload; inline;
 procedure UMove(const Source; var Dest; Count: NativeUInt);
 procedure UFillChar(var Dest; Count: NativeUInt; const Value: Integer);
 function UCompareMem(P1, P2: Pointer; Length: NativeUInt): Boolean;
-
-{$IFDEF FRAMEWORK_VCL}
-function UColorToRGB(Color: TColor): TColorRef;
-function UDrawTextBiDiModeFlags(const Control: TControl; const Flags: UINT): UINT;
-{$ENDIF}
 
 implementation
 
@@ -57,16 +46,20 @@ begin
 end;
 
 procedure UMove(const Source; var Dest; Count: NativeUInt);
+var
+  SourceBuf, DestBuf: PByte;
+  Backward: Boolean;
+  SignedCount: NativeInt;
 begin
-  var SourceBuf: PByte := @Source;
-  var DestBuf: PByte := @Dest;
-  const Backward = NativeUInt(DestBuf) > NativeUInt(SourceBuf);
+  SourceBuf := @Source;
+  DestBuf := @Dest;
+  Backward := NativeUInt(DestBuf) > NativeUInt(SourceBuf);
   if Backward then begin
     Inc(SourceBuf, Count);
     Inc(DestBuf, Count);
   end;
   while Count > 0 do begin
-    var SignedCount := High(NativeInt);
+    SignedCount := High(NativeInt);
     if Count < NativeUInt(SignedCount) then
       SignedCount := NativeInt(Count);
     if Backward then begin
@@ -83,10 +76,13 @@ begin
 end;
 
 procedure UFillChar(var Dest; Count: NativeUInt; const Value: Integer);
+var
+  DestBuf: PByte;
+  SignedCount: NativeInt;
 begin
-  var DestBuf: PByte := @Dest;
+  DestBuf := @Dest;
   while Count > 0 do begin
-    var SignedCount := High(NativeInt);
+    SignedCount := High(NativeInt);
     if Count < NativeUInt(SignedCount) then
       SignedCount := NativeInt(Count);
     FillChar(DestBuf^, SignedCount, Value);
@@ -96,19 +92,15 @@ begin
 end;
 
 function UCompareMem(P1, P2: Pointer; Length: NativeUInt): Boolean;
+var
+  SignedLength: NativeInt;
 begin
   Result := True;
   if P1 <> P2 then begin
     while Length > 0 do begin
-      {$IF RtlVersion >= 36.0}
-      var SignedLength := High(NativeInt);
-      if Length < NativeUInt(SignedLength) then
-        SignedLength := NativeInt(Length);
-      {$ELSE}
-      var SignedLength := High(Integer);
+      SignedLength := High(Integer);
       if Length < Cardinal(SignedLength) then
         SignedLength := Integer(Length);
-      {$ENDIF}
       if not CompareMem(P1, P2, SignedLength) then
         Exit(False);
       Dec(Length, SignedLength);
@@ -117,17 +109,5 @@ begin
     end;
   end;
 end;
-
-{$IFDEF FRAMEWORK_VCL}
-function UColorToRGB(Color: TColor): TColorRef;
-begin
-  Result := TColorRef(ColorToRGB(Color));
-end;
-
-function UDrawTextBiDiModeFlags(const Control: TControl; const Flags: UINT): UINT;
-begin
-  Result := UINT(Control.DrawTextBiDiModeFlags(Integer(Flags)));
-end;
-{$ENDIF}
 
 end.

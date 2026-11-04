@@ -221,22 +221,24 @@ function ScriptFuncHeaderKindToStr(const Kind: TScriptFuncHeaderKind): String;
 implementation
 
 uses
-  SysUtils, AnsiStrings;
+  SysUtils{$IFNDEF FPC}, AnsiStrings{$ENDIF};
 
 function ScriptFuncHasParameters(const ScriptFunc: AnsiString): Boolean;
+const
+  C: AnsiString = '(';
 begin
-  const C: AnsiString = '(';
 
   Result := Pos(C, ScriptFunc) <> 0;
 end;
 
 function RemoveScriptFuncHeader(const ScriptFunc: AnsiString; out Kind: TScriptFuncHeaderKind): AnsiString;
+const
+  H1: AnsiString = 'function ';
+  H2: AnsiString = 'procedure ';
+  H3: AnsiString = 'constructor ';
 begin
   Result := ScriptFunc;
 
-  const H1: AnsiString = 'function ';
-  const H2: AnsiString = 'procedure ';
-  const H3: AnsiString = 'constructor ';
 
   if SameText(Copy(Result, 1, Length(H1)), H1) then begin
     Kind := hkFunction;
@@ -252,13 +254,14 @@ begin
 end;
 
 function RemoveISPPScriptFuncHeader(const ScriptFunc: AnsiString; out Kind: TScriptFuncHeaderKind): AnsiString;
+const
+  H1: AnsiString = 'void ';
+  H2: AnsiString = 'str ';
+  H3: AnsiString = 'int ';
+  H4: AnsiString = 'any ';
 begin
   Result := ScriptFunc;
 
-  const H1: AnsiString = 'void ';
-  const H2: AnsiString = 'str ';
-  const H3: AnsiString = 'int ';
-  const H4: AnsiString = 'any ';
 
   if SameText(Copy(Result, 1, Length(H1)), H1) then begin
     Kind := hkISPPVoid;
@@ -278,14 +281,17 @@ end;
 
 { Also present in UIsxclassesParser.pas }
 function ExtractScriptFuncWithoutHeaderName(const ScriptFuncWithoutHeader: AnsiString): AnsiString;
+const
+  C1: AnsiString = '(';
+  C2: AnsiString = ':';
+  C3: AnsiString = ';';
+var
+  P: Integer;
 begin
   Result := ScriptFuncWithoutHeader;
 
-  const C1: AnsiString = '(';
-  const C2: AnsiString = ':';
-  const C3: AnsiString = ';';
 
-  var P := Pos(C1, Result);
+  P := Pos(C1, Result);
   if P = 0 then
     P := Pos(C2, Result);
   if P = 0 then
@@ -297,8 +303,10 @@ begin
 end;
 
 function ExtractISPPScriptFuncWithoutHeaderName(const ScriptFuncWithoutHeader: AnsiString): AnsiString;
+var
+  P: Integer;
 begin
-  const P = Pos(AnsiString('('), ScriptFuncWithoutHeader);
+  P := Pos(AnsiString('('), ScriptFuncWithoutHeader);
   if P = 0 then
     Result := ScriptFuncWithoutHeader
   else
@@ -323,10 +331,11 @@ end;
 {$IFDEF ISIDEPROJ}
 {$IFDEF DEBUG}
 function IsCleanScriptFunc(const ScriptFunc: AnsiString): Boolean;
+const
+  GoodTerminator: AnsiString = ';';
+  BadType1: AnsiString = 'string';
+  BadType2: AnsiString = 'Longint';
 begin
-  const GoodTerminator: AnsiString = ';';
-  const BadType1: AnsiString = 'string';
-  const BadType2: AnsiString = 'Longint';
 
   Result := (Pos(GoodTerminator, ScriptFunc) <> 0) and
             (Pos(BadType1, ScriptFunc) = 0) and (Pos(BadType2, ScriptFunc) = 0) and

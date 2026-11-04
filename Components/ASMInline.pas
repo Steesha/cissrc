@@ -28,7 +28,7 @@ interface
 }
 
 {$IFNDEF CPUX86}
-{$IFNDEF CPUX64}
+{$IF not Defined(CPUX64) and not Defined(CPUX86_64)}
 {$MESSAGE ERROR 'This needs updating for non-x86/x64 builds'}
 { From an Embarcadero presentation about Arm64EC:
   VirtualAlloc will return pages for x64 instructions
@@ -78,8 +78,8 @@ type
   TASMInline = class
   strict private
     class var
-      [volatile] FSharedCodeBlock: Pointer;
-      [volatile] FSharedCodeBlockBytesUsed: Integer;
+      {$IFNDEF FPC}[volatile]{$ENDIF} FSharedCodeBlock: Pointer;
+      {$IFNDEF FPC}[volatile]{$ENDIF} FSharedCodeBlockBytesUsed: Integer;
     class destructor Destroy;
   private
     FBuffer: TMemoryStream;
@@ -191,8 +191,10 @@ end;
 { TASMInline }
 
 class destructor TASMInline.Destroy;
+var
+  P: Pointer;
 begin
-  const P = AtomicExchange(FSharedCodeBlock, nil);
+  P := {$IFDEF FPC}System.InterlockedExchange{$ELSE}AtomicExchange{$ENDIF}(FSharedCodeBlock, nil);
   if Assigned(P) then
     VirtualFree(P, 0, MEM_RELEASE);
 end;
@@ -230,8 +232,9 @@ procedure TASMInline.Relocate(base: pointer);
 var diff, orig: integer;
   i: integer;
   reloc: TReloc;
+  oldpos: Int64;
 begin
-  const oldpos = fbuffer.Position;
+  oldpos := fbuffer.Position;
   try
 
     diff := -(longword(base) - fbase);
@@ -411,8 +414,10 @@ begin
 end;
 
 procedure TASMInline.WriteREX(const W, R, X, B: Boolean);
+var
+  Prefix: Byte;
 begin
-  var Prefix: Byte := $40;
+  Prefix := $40;
   if W then
     Inc(Prefix, $08);
   if R then
@@ -425,25 +430,31 @@ begin
 end;
 
 procedure TASMInline.MovRegReg(const Dest, Src: TRegister64);
+var
+  DestCode, SrcCode: Byte;
 begin
-  const DestCode = RegCode(Dest);
-  const SrcCode = RegCode(Src);
+  DestCode := RegCode(Dest);
+  SrcCode := RegCode(Src);
   WriteREX(True, SrcCode >= 8, False, DestCode >= 8);
   WriteByte($89);
   WriteByte(Byte($C0 or ((SrcCode and 7) shl 3) or (DestCode and 7)));
 end;
 
 procedure TASMInline.MovRegImm64(const Dest: TRegister64; const Value: UInt64);
+var
+  DestCode: Byte;
 begin
-  const DestCode = RegCode(Dest);
+  DestCode := RegCode(Dest);
   WriteREX(True, False, False, DestCode >= 8);
   WriteByte(Byte($B8 + (DestCode and 7)));
   WriteUInt64(Value);
 end;
 
 procedure TASMInline.MovRegMemRSP(const Dest: TRegister64; const Disp: Integer);
+var
+  DestCode: Byte;
 begin
-  const DestCode = RegCode(Dest);
+  DestCode := RegCode(Dest);
   WriteREX(True, DestCode >= 8, False, False);
   WriteByte($8B);
   WriteByte(Byte($84 or ((DestCode and 7) shl 3)));
@@ -452,8 +463,10 @@ begin
 end;
 
 procedure TASMInline.LeaRegMemRSP(const Dest: TRegister64; const Disp: Integer);
+var
+  DestCode: Byte;
 begin
-  const DestCode = RegCode(Dest);
+  DestCode := RegCode(Dest);
   WriteREX(True, DestCode >= 8, False, False);
   WriteByte($8D);
   WriteByte(Byte($84 or ((DestCode and 7) shl 3)));
@@ -462,8 +475,10 @@ begin
 end;
 
 procedure TASMInline.MovMemRSPReg(const Disp: Integer; const Src: TRegister64);
+var
+  SrcCode: Byte;
 begin
-  const SrcCode = RegCode(Src);
+  SrcCode := RegCode(Src);
   WriteREX(True, SrcCode >= 8, False, False);
   WriteByte($89);
   WriteByte(Byte($84 or ((SrcCode and 7) shl 3)));
@@ -497,8 +512,10 @@ begin
 end;
 
 procedure TASMInline.MovqRegXmm(const Dest: TRegister64; const Src: TXmmRegister64);
+var
+  DestCode: Byte;
 begin
-  const DestCode = RegCode(Dest);
+  DestCode := RegCode(Dest);
   WriteByte($66);
   WriteREX(True, Src >= 8, False, DestCode >= 8);
   WriteByte($0F);
@@ -507,8 +524,10 @@ begin
 end;
 
 procedure TASMInline.CallReg(const Reg: TRegister64);
+var
+  RegValue: Byte;
 begin
-  const RegValue = RegCode(Reg);
+  RegValue := RegCode(Reg);
   WriteREX(False, False, False, RegValue >= 8);
   WriteByte($FF);
   WriteByte(Byte($D0 + (RegValue and 7)));
@@ -524,48 +543,52 @@ end;
 function TASMInline.SaveAsMemory: Pointer;
 const
   SharedCodeBlockSize = $4000;  { 16 KB -- far more than anyone should need }
+var
+  NewBlock: Pointer;
+  CodeSize: Int64;
+  SuballocSize, SuballocOffset: Integer;
+  DestPtr: PByte;
 begin
   { Allocate code block if not already done so (thread-safe) }
-  if FSharedCodeBlock = nil then begin
-    const NewBlock = VirtualAlloc(nil, SharedCodeBlockSize, MEM_COMMIT,
+  if {$IFDEF FPC}System.InterlockedCompareExchange(FSharedCodeBlock, nil, nil){$ELSE}FSharedCodeBlock{$ENDIF} = nil then begin
+    NewBlock := VirtualAlloc(nil, SharedCodeBlockSize, MEM_COMMIT,
       PAGE_EXECUTE_READWRITE);
     if NewBlock = nil then
       OutOfMemoryError;
     { Initialize with INT 3 (breakpoint) opcodes }
     FillChar(NewBlock^, SharedCodeBlockSize, $CC);
     FlushInstructionCache(GetCurrentProcess, NewBlock, SharedCodeBlockSize);
-    MemoryBarrier;
-    if AtomicCmpExchange(FSharedCodeBlock, NewBlock, nil) <> nil then
+    {$IFDEF FPC}ReadWriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
+    if {$IFDEF FPC}System.InterlockedCompareExchange{$ELSE}AtomicCmpExchange{$ENDIF}(FSharedCodeBlock, NewBlock, nil) <> nil then
       VirtualFree(NewBlock, 0, MEM_RELEASE);  { another thread beat us to it }
   end;
 
-  const CodeSize = FBuffer.Size;
+  CodeSize := FBuffer.Size;
   if (CodeSize <= 0) or (CodeSize > 1024) then
     raise Exception.Create('TASMInline: Invalid code size');
   { Pad to next multiple of 16 bytes. Do this even if the code size currently
     is a multiple of 16 bytes so that there's always at least one INT 3
     between code sequences -- it's added safety in case a terminating RET or
     JMP is missing. }
-  const SuballocSize = (Integer(CodeSize) or $F) + 1;
+  SuballocSize := (Integer(CodeSize) or $F) + 1;
 
   { Suballocate SuballocSize bytes from the code block (thread-safe) }
-  var SuballocOffset: Integer;
   repeat
-    SuballocOffset := FSharedCodeBlockBytesUsed;
+    SuballocOffset := {$IFDEF FPC}System.InterlockedCompareExchange(FSharedCodeBlockBytesUsed, 0, 0){$ELSE}FSharedCodeBlockBytesUsed{$ENDIF};
     if SuballocSize > SharedCodeBlockSize - SuballocOffset then
       raise Exception.Create('TASMInline: No room left in code block');
-  until AtomicCmpExchange(FSharedCodeBlockBytesUsed,
+  until {$IFDEF FPC}System.InterlockedCompareExchange{$ELSE}AtomicCmpExchange{$ENDIF}(FSharedCodeBlockBytesUsed,
     SuballocOffset + SuballocSize, SuballocOffset) = SuballocOffset;
-  MemoryBarrier;
+  {$IFDEF FPC}ReadWriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
 
   { We now exclusively own SuballocSize bytes at SuballocOffset }
-  const DestPtr = PByte(FSharedCodeBlock) + SuballocOffset;
+  DestPtr := PByte(FSharedCodeBlock) + SuballocOffset;
 {$IFDEF CPUX86}
   Relocate(DestPtr);
 {$ENDIF}
   Move(FBuffer.Memory^, DestPtr^, NativeInt(CodeSize));
   FlushInstructionCache(GetCurrentProcess, DestPtr, SIZE_T(CodeSize));
-  MemoryBarrier;
+  {$IFDEF FPC}ReadWriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
   Result := DestPtr;
 end;
 

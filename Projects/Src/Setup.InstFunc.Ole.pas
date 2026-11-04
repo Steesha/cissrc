@@ -14,7 +14,7 @@ interface
 function CreateShellLink(const Filename, Description, ShortcutTo, Parameters,
   WorkingDir: String; IconFilename: String; const IconIndex, ShowCmd: Integer;
   const HotKey: Word; const AppUserModelID: String;
-  const AppUserModelToastActivatorCLSID: PGUID;
+  const AppUserModelToastActivatorCLSID: {$IFDEF FPC}System.{$ENDIF}PGUID;
   const ExcludeFromShowInNewInstall, PreventPinning: Boolean): String;
 procedure RegisterTypeLibrary(const Filename: String);
 procedure UnregisterTypeLibrary(const Filename: String);
@@ -23,13 +23,18 @@ function UnpinShellLink(const Filename: String): Boolean;
 implementation
 
 uses
-  Windows, ActiveX, ComObj, PropSys, ShlObj,
+  Windows, ActiveX, ComObj, {$IFNDEF FPC}PropSys,{$ENDIF} ShlObj,
   SysUtils,
   PathFunc,
   Shared.CommonFunc,
   Setup.InstFunc, Setup.MainFunc;
 
-procedure AssignWorkingDir(const SL: IShellLink; const WorkingDir: String);
+{$IFDEF FPC}
+type
+  TPropertyKey = ShlObj.PROPERTYKEY;
+{$ENDIF}
+
+procedure AssignWorkingDir(const SL: IShellLinkW; const WorkingDir: String);
 { Assigns the specified working directory to SL. If WorkingDir is empty then
   we select one ourself as best we can. (Leaving the working directory field
   empty is a security risk.) Note: SL.SetPath must be called first. }
@@ -46,7 +51,7 @@ begin
   { Otherwise, try to extract a directory name from the shortcut's target
     filename. We use GetPath to retrieve the filename as it will expand any
     environment strings. }
-  if SL.GetPath(Buf, SizeOf(Buf) div SizeOf(Buf[0]), TWin32FindData(nil^), 0) = S_OK then begin
+  if SL.GetPath(Buf, SizeOf(Buf) div SizeOf(Buf[0]), {$IFDEF FPC}nil{$ELSE}TWin32FindDataW(nil^){$ENDIF}, 0) = S_OK then begin
     Dir := PathExtractDir(PathExpand(Buf));
     if SL.SetWorkingDirectory(PChar(Dir)) = S_OK then
       Exit;
@@ -90,7 +95,7 @@ end;
 function CreateShellLink(const Filename, Description, ShortcutTo, Parameters,
   WorkingDir: String; IconFilename: String; const IconIndex, ShowCmd: Integer;
   const HotKey: Word; const AppUserModelID: String;
-  const AppUserModelToastActivatorCLSID: PGUID;
+  const AppUserModelToastActivatorCLSID: {$IFDEF FPC}System.{$ENDIF}PGUID;
   const ExcludeFromShowInNewInstall, PreventPinning: Boolean): String;
 { Creates a lnk file named Filename, with a description of Description, with a
   HotKey hotkey, which points to ShortcutTo. Filename should be a full path.
@@ -120,13 +125,14 @@ const
 var
   OleResult: HRESULT;
   Obj: IUnknown;
-  SL: IShellLink;
-  PS: PropSys.IPropertyStore;
+  SL: IShellLinkW;
+  PS: {$IFDEF FPC}ShlObj{$ELSE}PropSys{$ENDIF}.IPropertyStore;
   PV: TPropVariant;
   PF: IPersistFile;
+  WideAppUserModelID: WideString;
 begin
   Obj := CreateComObject(CLSID_ShellLink);
-  SL := Obj as IShellLink;
+  SL := Obj as IShellLinkW;
   SL.SetPath(PChar(ShortcutTo));
   SL.SetArguments(PChar(Parameters));
   AssignWorkingDir(SL, WorkingDir);
@@ -147,41 +153,42 @@ begin
     SL.SetHotKey(HotKey);
 
   if (AppUserModelID <> '') or (AppUserModelToastActivatorCLSID <> nil) or ExcludeFromShowInNewInstall or PreventPinning then begin
-    PS := Obj as PropSys.IPropertyStore;
+    PS := Obj as {$IFDEF FPC}ShlObj{$ELSE}PropSys{$ENDIF}.IPropertyStore;
+    PV := Default(TPropVariant);
     { According to MSDN the PreventPinning property should be set before the ID property. In practice
       this doesn't seem to matter - at least not for shortcuts - but do it first anyway. }
     if PreventPinning then begin
       PV.vt := VT_BOOL;
       PV.boolVal := True;
-      OleResult := PS.SetValue(PKEY_AppUserModel_PreventPinning, PV);
+      OleResult := PS.SetValue({$IFDEF FPC}@{$ENDIF}PKEY_AppUserModel_PreventPinning, {$IFDEF FPC}@{$ENDIF}PV);
       if OleResult <> S_OK then
         RaiseOleError('IPropertyStore::SetValue(PKEY_AppUserModel_PreventPinning)', OleResult);
     end;
     if AppUserModelID <> '' then begin
-      const WideAppUserModelID: WideString = AppUserModelID;
+      WideAppUserModelID := AppUserModelID;
       PV.vt := VT_BSTR;
       PV.bstrVal := PWideChar(WideAppUserModelID);
-      OleResult := PS.SetValue(PKEY_AppUserModel_ID, PV);
+      OleResult := PS.SetValue({$IFDEF FPC}@{$ENDIF}PKEY_AppUserModel_ID, {$IFDEF FPC}@{$ENDIF}PV);
       if OleResult <> S_OK then
         RaiseOleError('IPropertyStore::SetValue(PKEY_AppUserModel_ID)', OleResult);
     end;
     if IsWindows10 and (AppUserModelToastActivatorCLSID <> nil) then begin
       PV.vt := VT_CLSID;
       PV.puuid := AppUserModelToastActivatorCLSID;
-      OleResult := PS.SetValue(PKEY_AppUserModel_ToastActivatorCLSID, PV);
+      OleResult := PS.SetValue({$IFDEF FPC}@{$ENDIF}PKEY_AppUserModel_ToastActivatorCLSID, {$IFDEF FPC}@{$ENDIF}PV);
       if OleResult <> S_OK then
         RaiseOleError('IPropertyStore::SetValue(PKEY_AppUserModel_ToastActivatorCLSID)', OleResult);
     end;
     if ExcludeFromShowInNewInstall then begin
       PV.vt := VT_BOOL;
       PV.boolVal := True;
-      OleResult := PS.SetValue(PKEY_AppUserModel_ExcludeFromShowInNewInstall, PV);
+      OleResult := PS.SetValue({$IFDEF FPC}@{$ENDIF}PKEY_AppUserModel_ExcludeFromShowInNewInstall, {$IFDEF FPC}@{$ENDIF}PV);
       if OleResult <> S_OK then
         RaiseOleError('IPropertyStore::SetValue(PKEY_AppUserModel_ExcludeFromShowInNewInstall)', OleResult);
       if IsWindows8 then begin
         PV.vt := VT_UI4;
         PV.ulVal := APPUSERMODEL_STARTPINOPTION_NOPINONINSTALL;
-        OleResult := PS.SetValue(PKEY_AppUserModel_StartPinOption, PV);
+        OleResult := PS.SetValue({$IFDEF FPC}@{$ENDIF}PKEY_AppUserModel_StartPinOption, {$IFDEF FPC}@{$ENDIF}PV);
         if OleResult <> S_OK then
           RaiseOleError('IPropertyStore::SetValue(PKEY_AppUserModel_StartPinOption)', OleResult);
       end;
@@ -200,11 +207,14 @@ begin
 end;
 
 procedure RegisterTypeLibrary(const Filename: String);
+var
+  RedirFilename: String;
+  TypeLib: ITypeLib;
+  OleResult: HRESULT;
 begin
-  const RedirFilename = ApplyRedirForRegistrationOperation(IsCurrentProcess64Bit, Filename);
+  RedirFilename := ApplyRedirForRegistrationOperation(IsCurrentProcess64Bit, Filename);
 
-  var TypeLib: ITypeLib;
-  var OleResult := LoadTypeLib(PChar(RedirFilename), TypeLib);
+  OleResult := LoadTypeLib(PChar(RedirFilename), TypeLib);
   if OleResult <> S_OK then
     RaiseOleError('LoadTypeLib', OleResult);
   OleResult := RegisterTypeLib(TypeLib, PChar(RedirFilename), nil);
@@ -216,22 +226,25 @@ procedure UnregisterTypeLibrary(const Filename: String);
 type
   TUnRegTlbProc = function(const libID: TGUID; wVerMajor, wVerMinor: Word;
     lcid: TLCID; syskind: TSysKind): HResult; stdcall;
+var
+  RedirFilename: String;
+  UnRegTlbProc: TUnRegTlbProc;
+  TypeLib: ITypeLib;
+  OleResult: HRESULT;
+  LibAttr: PTLibAttr;
 begin
-  const RedirFilename = ApplyRedirForRegistrationOperation(IsCurrentProcess64Bit, Filename);
+  RedirFilename := ApplyRedirForRegistrationOperation(IsCurrentProcess64Bit, Filename);
 
   { Dynamically import UnRegisterTypeLib since older OLEAUT32.DLL versions
     don't have this function }
-  var UnRegTlbProc: TUnRegTlbProc;
   @UnRegTlbProc := GetProcAddress(GetModuleHandle('OLEAUT32.DLL'),
     'UnRegisterTypeLib');
   if @UnRegTlbProc = nil then
     Win32ErrorMsg('GetProcAddress');
 
-  var TypeLib: ITypeLib;
-  var OleResult := LoadTypeLib(PChar(RedirFilename), TypeLib);
+  OleResult := LoadTypeLib(PChar(RedirFilename), TypeLib);
   if OleResult <> S_OK then
     RaiseOleError('LoadTypeLib', OleResult);
-  var LibAttr: PTLibAttr;
   OleResult := TypeLib.GetLibAttr(LibAttr);
   if OleResult <> S_OK then
     RaiseOleError('ITypeLib::GetLibAttr', OleResult);
@@ -245,9 +258,25 @@ begin
   end;
 end;
 
+{$IFDEF FPC}
+type
+  IStartMenuPinnedList = interface(IUnknown)
+    ['{4CD19ADA-25A5-4A32-B3B7-347BEE5BE36B}']
+    function RemoveFromList(const Item: IShellItem): HRESULT; stdcall;
+  end;
+
+const
+  IID_StartMenuPinnedList: TGUID = '{4CD19ADA-25A5-4A32-B3B7-347BEE5BE36B}';
+  IID_ShellItem: TGUID = '{43826D1E-E718-42EE-BC55-A1E261C37BFE}';
+  CLSID_StartMenuPin: TGUID = '{A2A9545D-A0C2-42B4-9708-A0B2BADD77C8}';
+
+function SHCreateItemFromParsingName(const Path: PWideChar; const BindContext: IBindCtx;
+  constref IID: TGUID; out Item): HRESULT; stdcall; external 'shell32.dll';
+{$ELSE}
 const
   IID_StartMenuPinnedList: TGUID = SID_IStartMenuPinnedList;
   IID_ShellItem: TGUID = SID_IShellItem;
+{$ENDIF}
 
 { Attempt to unpin a shortcut. Returns True if the shortcut was successfully
   removed from the list of pinned items and/or the taskbar, or if the shortcut
@@ -257,8 +286,9 @@ function UnpinShellLink(const Filename: String): Boolean;
 var
   ShellItem: IShellItem;
   StartMenuPinnedList: IStartMenuPinnedList;
+  ExpandedFilename: String;
 begin
-  const ExpandedFilename = PathExpand(PathConvertSuperToNormal(Filename));
+  ExpandedFilename := PathExpand(PathConvertSuperToNormal(Filename));
   if Succeeded(SHCreateItemFromParsingName(PChar(ExpandedFilename), nil, IID_ShellItem, ShellItem)) and
      Succeeded(CoCreateInstance(CLSID_StartMenuPin, nil, CLSCTX_INPROC_SERVER, IID_StartMenuPinnedList, StartMenuPinnedList)) then
     Result := StartMenuPinnedList.RemoveFromList(ShellItem) = S_OK

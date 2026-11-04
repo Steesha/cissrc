@@ -25,7 +25,7 @@ unit SimpleExpression;
 interface
 
 uses
-  SysUtils;
+  SysUtils, Shared.FPCStringUtils;
 
 type
   ESimpleExpressionError = class(Exception);
@@ -50,7 +50,7 @@ type
       FText: PChar;
       FTokenId: (tiEOF, tiOpenRound, tiCloseRound, tiComma, tiNot, tiAnd, tiOr, tiIdentifier, tiString, tiInteger, tiBoolean);
       FToken: String;
-      function FReadParameters(var Parameters: array of const): Integer;
+      function FReadParameters(var Parameters: array of TVarRec): Integer;
       function FEvalIdentifier(const InLazyBranch: Boolean): Boolean;
       function FEvalFactor(const InLazyBranch: Boolean): Boolean;
       function FEvalTerm(const InLazyBranch: Boolean): Boolean;
@@ -116,15 +116,15 @@ begin
         while CharInSet(FText^ , ['0'..'9', 'A'..'Z', 'a'..'z', '_', '\']) do
           Inc(FText);
         SetString(FToken, P, FText - P);
-        if CompareText(FToken, 'not') = 0 then
+        if InnoCompareText(FToken, 'not') = 0 then
           FTokenId := tiNot
-        else if CompareText(FToken, 'and') = 0 then
+        else if InnoCompareText(FToken, 'and') = 0 then
           FTokenId := tiAnd
-        else if CompareText(FToken, 'or') = 0 then
+        else if InnoCompareText(FToken, 'or') = 0 then
           FTokenId := tiOr
-        else if CompareText(FToken, 'true') = 0 then
+        else if InnoCompareText(FToken, 'true') = 0 then
           FTokenId := tiBoolean
-        else if CompareText(FToken, 'false') = 0 then
+        else if InnoCompareText(FToken, 'false') = 0 then
           FTokenId := tiBoolean
         else
           FTokenId := tiIdentifier;
@@ -162,7 +162,7 @@ begin
   end;
 end;
 
-function TSimpleExpression.FReadParameters(var Parameters: array of const): Integer;
+function TSimpleExpression.FReadParameters(var Parameters: array of TVarRec): Integer;
 const
   ParameterTokens = [tiIdentifier, tiString, tiInteger, tiBoolean];
 var
@@ -174,7 +174,7 @@ begin
     if I <= High(Parameters) then begin
       if FTokenId = tiIdentifier then begin
         { Currently only calls to 'ExpandConstant' are supported in parameter lists }
-        if CompareText(FToken, 'ExpandConstant') <> 0 then
+        if InnoCompareText(FToken, 'ExpandConstant') <> 0 then
           raise ESimpleExpressionError.Create('Can only call function "ExpandConstant" within parameter lists');
         Next;
         if FTokenId <> tiOpenRound then
@@ -193,10 +193,10 @@ begin
         AssignStringToVarRec(Parameters[I], FToken);
       end else if FTokenId = tiInteger then begin
         Parameters[I].VType := vtInteger;
-        Parameters[I].vInteger := StrToInt(FToken);
+        Parameters[I].vInteger := InnoStrToInt(FToken);
       end else begin
         Parameters[I].VType := vtBoolean;
-        Parameters[I].vBoolean := CompareText(FToken, 'true') = 0;
+        Parameters[I].vBoolean := InnoCompareText(FToken, 'true') = 0;
       end;
       Inc(I);
     end else

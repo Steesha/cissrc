@@ -2,7 +2,7 @@ unit PasswordEdit;
 
 {
   Inno Setup
-  Copyright (C) 1997-2025 Jordan Russell
+  Copyright (C) 1997-2026 Jordan Russell
   Portions by Martijn Laan
   For conditions of distribution and use, see LICENSE.TXT.
 
@@ -12,7 +12,7 @@ unit PasswordEdit;
 interface
 
 uses
-  Windows, Classes, Controls, StdCtrls;
+  Windows, Classes, Controls, StdCtrls{$IFDEF FPC}, LCLType{$ENDIF};
 
 type
   TPasswordEdit = class(TCustomEdit)
@@ -21,6 +21,9 @@ type
     procedure SetPassword(Value: Boolean);
   protected
     procedure CreateParams(var Params: TCreateParams); override;
+    {$IFDEF FPC}
+    procedure InitializeWnd; override;
+    {$ENDIF}
   public
     constructor Create(AOwner: TComponent); override;
   published
@@ -30,16 +33,16 @@ type
     property BorderStyle;
     property CharCase;
     property Color;
-    property Ctl3D;
+    {$IFNDEF FPC}property Ctl3D;{$ENDIF}
     property DragCursor;
     property DragMode;
     property Enabled;
     property Font;
     property HideSelection;
     property MaxLength;
-    property OEMConvert;
+    {$IFNDEF FPC}property OEMConvert;{$ENDIF}
     property ParentColor;
-    property ParentCtl3D;
+    {$IFNDEF FPC}property ParentCtl3D;{$ENDIF}
     property ParentFont;
     property ParentShowHint;
     property Password: Boolean read FPassword write SetPassword default True;
@@ -71,6 +74,11 @@ procedure Register;
 
 implementation
 
+{$IFDEF FPC}
+uses
+  NewCtrls;
+{$ENDIF}
+
 procedure Register;
 begin
   RegisterComponents('JR', [TPasswordEdit]);
@@ -91,11 +99,28 @@ begin
     Params.Style := Params.Style or ES_PASSWORD;
 end;
 
+{$IFDEF FPC}
+procedure TPasswordEdit.InitializeWnd;
+var
+  Mask: WPARAM;
+begin
+  Mask := 0;
+  if FPassword then
+    Mask := SendMessageW(Handle, EM_GETPASSWORDCHAR, 0, 0);
+  inherited InitializeWnd;
+  { LCL applies its PasswordChar during initialization. Restore the mask
+    chosen by the native ES_PASSWORD edit. }
+  if FPassword then
+    SendMessageW(Handle, EM_SETPASSWORDCHAR, Mask, 0);
+  InstallEditStyleHandler(Self);
+end;
+{$ENDIF}
+
 procedure TPasswordEdit.SetPassword(Value: Boolean);
 begin
   if FPassword <> Value then begin
     FPassword := Value;
-    RecreateWnd;
+    {$IFDEF FPC}RecreateWnd(Self){$ELSE}RecreateWnd{$ENDIF};
   end;
 end;
 

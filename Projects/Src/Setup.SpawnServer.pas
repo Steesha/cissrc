@@ -12,9 +12,11 @@ unit Setup.SpawnServer;
 interface
 
 uses
-  Windows, SysUtils, Messages;
+  Windows, SysUtils, Messages{$IFDEF FPC}, LMessages{$ENDIF};
 
 type
+  TSpawnWindowMessage = {$IFDEF FPC}TLMessage{$ELSE}TMessage{$ENDIF};
+
   TSpawnServer = class
   private
     FWnd: HWND;
@@ -25,7 +27,7 @@ type
     FExitNowExitCode: DWORD;
     function HandleExec(const IsShellExec: Boolean; const ADataPtr: Pointer;
       const ADataSize: Cardinal): LRESULT;
-    procedure WndProc(var Message: TMessage);
+    procedure WndProc(var Message: TSpawnWindowMessage);
   public
     constructor Create;
     destructor Destroy; override;
@@ -44,7 +46,7 @@ implementation
 {x$DEFINE SPAWNSERVER_RESPAWN_ALWAYS}
 
 uses
-  Classes, Forms, ShellApi, PathFunc, Shared.CommonFunc,
+  Classes, Forms, {$IFDEF FPC}LCLIntf,{$ENDIF} ShellApi, PathFunc, Shared.CommonFunc,
   SetupLdrAndSetup.InstFunc, Setup.InstFunc, Setup.SpawnCommon;
 
 type
@@ -82,7 +84,7 @@ end;
 
 function ExtractString(var Data: TPtrAndSize; var Value: String): Boolean;
 var
-  Len: Longint;
+  Len: Integer;
   P: Pointer;
 begin
   Result := ExtractInteger(Data, Len);
@@ -90,9 +92,9 @@ begin
     if (Len < 0) or (Len > $FFFF) then
       Result := False
     else begin
-      Result := ExtractBytes(Data, Cardinal(Len) * SizeOf(Value[1]), P);
+      Result := ExtractBytes(Data, Cardinal(Len) * SizeOf(WideChar), P);
       if Result then
-        SetString(Value, PChar(P), Len);
+        SetString(Value, PWideChar(P), Len);
     end;
   end;
 end;
@@ -170,7 +172,7 @@ const
   SEE_MASK_NOZONECHECKS = $00800000;
 var
   ExpandedExeFilename, WorkingDir: String;
-  Info: TShellExecuteInfo;
+  Info: TShellExecuteInfoW;
   WaitResult: DWORD;
 begin
   if not SameText(PathExtractExt(AExeFilename), '.exe') then
@@ -182,11 +184,11 @@ begin
   Info.fMask := SEE_MASK_FLAG_NO_UI or SEE_MASK_FLAG_DDEWAIT or
     SEE_MASK_NOCLOSEPROCESS or SEE_MASK_NOZONECHECKS;
   Info.lpVerb := 'runas';
-  Info.lpFile := PChar(ExpandedExeFilename);
-  Info.lpParameters := PChar(AParams);
-  Info.lpDirectory := PChar(WorkingDir);
+  Info.lpFile := PWideChar(ExpandedExeFilename);
+  Info.lpParameters := PWideChar(AParams);
+  Info.lpDirectory := PWideChar(WorkingDir);
   Info.nShow := SW_SHOWNORMAL;
-  if not ShellExecuteEx(@Info) then begin
+  if not ShellExecuteExW(@Info) then begin
     { Don't display error message if user clicked Cancel at UAC dialog }
     if GetLastError = ERROR_CANCELLED then
       Abort;
@@ -249,7 +251,7 @@ end;
 constructor TSpawnServer.Create;
 begin
   inherited;
-  FWnd := AllocateHWnd(WndProc);
+  FWnd := {$IFDEF FPC}LCLIntf.{$ENDIF}AllocateHWnd(WndProc);
   if FWnd = 0 then
     RaiseFunctionFailedError('AllocateHWnd');
 end;
@@ -257,7 +259,7 @@ end;
 destructor TSpawnServer.Destroy;
 begin
   if FWnd <> 0 then
-    DeallocateHWnd(FWnd);
+    {$IFDEF FPC}LCLIntf.{$ENDIF}DeallocateHWnd(FWnd);
   inherited;
 end;
 
@@ -329,23 +331,27 @@ begin
   end;
 end;
 
-procedure TSpawnServer.WndProc(var Message: TMessage);
+procedure TSpawnServer.WndProc(var Message: TSpawnWindowMessage);
 var
   Res: LRESULT;
+  CopyData: PCopyDataStruct;
+  CopyDataMsg: DWORD;
+  Operation: Integer;
 begin
   case Message.Msg of
     WM_COPYDATA:
       begin
         try
-          const CopyDataMsg = DWORD(TWMCopyData(Message).CopyDataStruct.dwData);
+          CopyData := PCopyDataStruct(Message.LParam);
+          CopyDataMsg := DWORD(CopyData^.dwData);
           case CopyDataMsg of
             CD_SpawnServer_Exec,
             CD_SpawnServer_ShellExec:
               begin
                 Message.Result := HandleExec(
                   CopyDataMsg = CD_SpawnServer_ShellExec,
-                  TWMCopyData(Message).CopyDataStruct.lpData,
-                  TWMCopyData(Message).CopyDataStruct.cbData);
+                  CopyData^.lpData,
+                  CopyData^.cbData);
               end;
             else
               Message.Result := SPAWN_MSGRESULT_INVALID_DATA
@@ -363,7 +369,7 @@ begin
         Res := SPAWN_MSGRESULT_INVALID_SEQUENCE_NUMBER;
         if Message.LParam = FSequenceNumber then begin
           Res := SPAWN_MSGRESULT_INVALID_QUERY_OPERATION;
-          const Operation = Integer(Message.WParam);
+          Operation := Integer(Message.WParam);
           case Operation of
             SPAWN_QUERY_STATUS:
               Res := SPAWN_MSGRESULT_SUCCESS_BITS or FCallStatus;

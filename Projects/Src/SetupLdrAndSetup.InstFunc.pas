@@ -53,10 +53,13 @@ function ConvertStringSecurityDescriptorToSecurityDescriptorW(
 function GenerateUniqueName(Path: String; const Extension: String): String;
 
   function UIntToBase36Str(AValue: UInt32; const ADigits: Integer): String;
+  var
+    I: Integer;
+    Digit: UInt32;
   begin
     Result := StringOfChar('0', ADigits);
-    for var I := High(Result) downto Low(Result) do begin
-      var Digit := AValue mod 36;
+    for I := High(Result) downto Low(Result) do begin
+      Digit := AValue mod 36;
       if Digit < 10 then
         Inc(Digit, Ord('0'))
       else
@@ -68,10 +71,12 @@ function GenerateUniqueName(Path: String; const Extension: String): String;
 
 const
   FiveDigitsRange = 36 * 36 * 36 * 36 * 36;
+var
+  Filename: String;
+  AttemptNumber: Integer;
 begin
   Path := AddBackslash(Path);
-  var Filename: String;
-  var AttemptNumber := 0;
+  AttemptNumber := 0;
   repeat
     { If 50 attempts were made and every generated name was found to exist
       already, then stop trying, because something really strange is going
@@ -103,30 +108,38 @@ function CreateTempDir(const Extension: String;
     otherwise creates a normal directory. }
   const
     SDDL_REVISION_1 = 1;
+    {$IF NOT DECLARED(FILE_PERSISTENT_ACLS)}
+    FILE_PERSISTENT_ACLS = $00000008;
+    {$IFEND}
+  var
+    Drive, StringSecurityDescriptor, CurrentUserSid, AccessRights: String;
+    IsUnderWindowsTemp, IsLocalTempToProtect: Boolean;
+    FileSystemFlags: DWORD;
+    pSecurityDescriptor: Pointer;
+    SecurityAttr: TSecurityAttributes;
   begin
     Path := PathExpand(Path);
-    var Drive := PathExtractDrive(Path);
-    var FileSystemFlags: DWORD;
+    Drive := PathExtractDrive(Path);
 
-    if GetVolumeInformation(PChar(AddBackslash(Drive)), nil, 0, nil, DWORD(nil^), FileSystemFlags, nil, 0) and
+    if GetVolumeInformationW(PChar(AddBackslash(Drive)), nil, 0, nil, DWORD(nil^), FileSystemFlags, nil, 0) and
        ((FileSystemFlags and FILE_PERSISTENT_ACLS) <> 0) then begin
-      var IsUnderWindowsTemp := Pos(PathLowercase(AddBackslash(GetSystemWinDir) + 'TEMP\'),
+      IsUnderWindowsTemp := Pos(PathLowercase(AddBackslash(GetSystemWinDir) + 'TEMP\'),
         PathLowercase(Path)) = 1;
-      var IsLocalTempToProtect := LimitCurrentUserSidAccess and (Drive <> '') and
+      IsLocalTempToProtect := LimitCurrentUserSidAccess and (Drive <> '') and
         not PathCharIsSlash(Drive[1]) and
-        (GetDriveType(PChar(AddBackslash(Drive))) <> DRIVE_REMOTE);
+        (GetDriveTypeW(PChar(AddBackslash(Drive))) <> DRIVE_REMOTE);
       Protected := IsUnderWindowsTemp or IsLocalTempToProtect;
     end else
       Protected := False;
 
     if Protected then begin
-      var StringSecurityDescriptor :=
+      StringSecurityDescriptor :=
         // D: adds a Discretionary ACL ("DACL", i.e. access control via SIDs)
         // P: prevents DACL from being modified by inheritable ACEs
         // AI: says automatic propagation of inheritable ACEs to child objects
         //     is supported; always supposed to be set on Windows 2000+ ACLs
         'D:PAI';
-      var CurrentUserSid := GetCurrentUserSid;
+      CurrentUserSid := GetCurrentUserSid;
       if CurrentUserSid = '' then
         CurrentUserSid := 'OW'; // OW: owner rights
       { Omit the CurrentUserSid ACE if the current user is SYSTEM, because
@@ -136,7 +149,7 @@ function CreateTempDir(const Extension: String;
         // OICI: "object and container inherit",
         //    i.e. files and directories created within the new directory
         //    inherit these permissions
-        var AccessRights := 'FA'; // FILE_ALL_ACCESS (Full Control)
+        AccessRights := 'FA'; // FILE_ALL_ACCESS (Full Control)
         if LimitCurrentUserSidAccess then
           AccessRights := 'FRFX'; // FILE_GENERIC_READ | FILE_GENERIC_EXECUTE
         StringSecurityDescriptor := StringSecurityDescriptor +
@@ -146,7 +159,6 @@ function CreateTempDir(const Extension: String;
         '(A;OICI;FA;;;BA)' + // BA: built-in Administrators group
         '(A;OICI;FA;;;SY)'; // SY: local SYSTEM account
 
-      var pSecurityDescriptor: Pointer;
       if not ConvertStringSecurityDescriptorToSecurityDescriptorW(
         PWideChar(StringSecurityDescriptor), SDDL_REVISION_1, pSecurityDescriptor, nil
       ) then begin
@@ -155,18 +167,17 @@ function CreateTempDir(const Extension: String;
         Exit;
       end;
 
-      var SecurityAttr: TSecurityAttributes;
       SecurityAttr.nLength := SizeOf(SecurityAttr);
       SecurityAttr.bInheritHandle := False;
       SecurityAttr.lpSecurityDescriptor := pSecurityDescriptor;
 
-      Result := CreateDirectory(PChar(Path), @SecurityAttr);
+      Result := CreateDirectoryW(PChar(Path), @SecurityAttr);
       if not Result then
         ErrorCode := GetLastError;
 
-      LocalFree(pSecurityDescriptor);
+      LocalFree({$IFDEF FPC}HLOCAL(pSecurityDescriptor){$ELSE}pSecurityDescriptor{$ENDIF});
     end else begin
-      Result := CreateDirectory(PChar(Path), nil);
+      Result := CreateDirectoryW(PChar(Path), nil);
       if not Result then
         ErrorCode := GetLastError;
     end;
@@ -190,8 +201,9 @@ end;
 
 function CreateTempDir(const Extension: String;
   const LimitCurrentUserSidAccess: Boolean): String;
+var
+  Protected: Boolean;
 begin
-  var Protected: Boolean;
   Result := CreateTempDir(Extension, LimitCurrentUserSidAccess, Protected);
 end;
 
@@ -241,13 +253,15 @@ procedure DelayDeleteFile(const Filename: String;
 { Attempts to delete Filename up to MaxTries times, retrying if the file is
   in use. It sleeps FirstRetryDelayMS msec after the first try, and
   SubsequentRetryDelayMS msec after subsequent tries. }
+var
+  I: Integer;
 begin
-  for var I := 0 to MaxTries-1 do begin
+  for I := 0 to MaxTries-1 do begin
     if I = 1 then
       Sleep(FirstRetryDelayMS)
     else if I > 1 then
       Sleep(SubsequentRetryDelayMS);
-    if Windows.DeleteFile(PChar(Filename)) or
+    if Windows.DeleteFileW(PChar(Filename)) or
        (GetLastError = ERROR_FILE_NOT_FOUND) or
        (GetLastError = ERROR_PATH_NOT_FOUND) then
       Break;
@@ -266,7 +280,7 @@ function DetermineDefaultLanguage(const GetLanguageEntryProc: TGetLanguageEntryP
   var
     CodePage: DWORD;
   begin
-    if GetLocaleInfo(ALangID, LOCALE_IDEFAULTANSICODEPAGE or LOCALE_RETURN_NUMBER,
+    if GetLocaleInfoW(ALangID, LOCALE_IDEFAULTANSICODEPAGE or LOCALE_RETURN_NUMBER,
        PChar(@CodePage), SizeOf(CodePage) div SizeOf(Char)) > 0 then
       Result := Integer(CodePage)
     else
@@ -370,14 +384,14 @@ function GetFinalFileName(const Filename: String): String;
 var
   GetFinalPathNameByHandleFunc: function(hFile: THandle; lpszFilePath: PWideChar;
     cchFilePath: DWORD; dwFlags: DWORD): DWORD; stdcall;
-  Attr, FlagsAndAttributes: DWORD;
+  Attr, FlagsAndAttributes, Res: DWORD;
   H: THandle;
   Buf: array[0..4095] of Char;
 begin
   GetFinalPathNameByHandleFunc := GetProcAddress(GetModuleHandle(kernel32),
     'GetFinalPathNameByHandleW');
   if Assigned(GetFinalPathNameByHandleFunc) then begin
-    Attr := GetFileAttributes(PChar(Filename));
+    Attr := GetFileAttributesW(PChar(Filename));
     if Attr <> INVALID_FILE_ATTRIBUTES then begin
       { Backup semantics must be requested in order to open a directory }
       if Attr and FILE_ATTRIBUTE_DIRECTORY <> 0 then
@@ -385,10 +399,10 @@ begin
       else
         FlagsAndAttributes := 0;
       { Use zero access mask and liberal sharing mode to ensure success }
-      H := CreateFile(PChar(Filename), 0, FILE_SHARE_READ or FILE_SHARE_WRITE or
+      H := CreateFileW(PChar(Filename), 0, FILE_SHARE_READ or FILE_SHARE_WRITE or
         FILE_SHARE_DELETE, nil, OPEN_EXISTING, FlagsAndAttributes, 0);
       if H <> INVALID_HANDLE_VALUE then begin
-        const Res = GetFinalPathNameByHandleFunc(H, Buf, SizeOf(Buf) div SizeOf(Buf[0]), 0);
+        Res := GetFinalPathNameByHandleFunc(H, Buf, SizeOf(Buf) div SizeOf(Buf[0]), 0);
         CloseHandle(H);
         if (Res > 0) and (Res < (SizeOf(Buf) div SizeOf(Buf[0])) - 16) then begin
           { ShellExecuteEx fails with error 3 on \\?\UNC\ paths, so try to
@@ -407,7 +421,7 @@ var
   Res: Integer;
   Buf: array[0..MAX_PATH-1] of Char;
 begin
-  DWORD(Res) := GetCurrentDirectory(SizeOf(Buf) div SizeOf(Buf[0]), Buf);
+  DWORD(Res) := GetCurrentDirectoryW(SizeOf(Buf) div SizeOf(Buf[0]), Buf);
   if (Res > 0) and (Res < SizeOf(Buf) div SizeOf(Buf[0])) then
     Result := GetFinalFileName(Buf)
   else begin

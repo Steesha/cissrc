@@ -13,14 +13,14 @@ unit ISPP.Preprocess;
 interface
 
 uses
-  Shared.PreprocInt;
+  Shared.PreprocInt, Shared.FPCStringUtils;
 
 function ISPreprocessScript(var Params: TPreprocessScriptParams): Integer; stdcall;
 
 implementation
 
 uses
-  SysUtils, Shared.CommonFunc, PathFunc,
+  SysUtils, {$IFDEF MSWINDOWS}Shared.CommonFunc{$ELSE}Shared.CompilerSupport{$ENDIF}, PathFunc,
   ISPP.Base, ISPP.Preprocessor, ISPP.Sessions, ISPP.Intf,
   ISPP.IdentMan, ISPP.VarUtils, ISPP.Consts;
 
@@ -88,7 +88,7 @@ var
     else if OptName = 'ISPP:Options' then
       Result := DecodeStringOptions(OptValue, ISPPOptions.Options)
     else if OptName = 'ISPP:VerboseLevel' then
-      ISPPOptions.VerboseLevel := StrToIntDef(OptValue, 0)
+      ISPPOptions.VerboseLevel := InnoStrToIntDef(OptValue, 0)
     else if OptName = 'ISPP:InlineStart' then
       ISPPOptions.InlineStart := OptValue
     else if OptName = 'ISPP:InlineEnd' then
@@ -151,6 +151,7 @@ var
 
   var
     DelimPos: PChar;
+    N: NativeInt;
     Definition: string;
   begin
     Result := True;
@@ -160,7 +161,7 @@ var
         Result := False;
         Break;
       end;
-      const N = DelimPos - Definitions;
+      N := DelimPos - Definitions;
       if N > 0 then begin
         SetString(Definition, Definitions, N);
         ParseDefinition(Definition);
@@ -180,11 +181,12 @@ var
     SBuiltins = {$IFDEF DEBUG} '..\..\Files\ISPPBuiltins.iss' {$ELSE} 'ISPPBuiltins.iss' {$ENDIF};
   var
     DelimPos: PChar;
+    N: NativeInt;
     IncludeFile: String;
   begin
     Result := True;
     IncludeFile := BuiltinsDir + SBuiltins;
-    if FileExists(IncludeFile) then
+    if FileExists({$IFDEF FPC}UTF8Encode(IncludeFile){$ELSE}IncludeFile{$ENDIF}) then
       Include(IncludeFile, True)
     else
       Preprocessor.WarningMsg(SFileNotFound, [SBuiltins]);
@@ -194,7 +196,7 @@ var
         Result := False;
         Break;
       end;
-      const N = DelimPos - IncludeFiles;
+      N := DelimPos - IncludeFiles;
       if N > 0 then begin
         SetString(IncludeFile, IncludeFiles, N);
         Include(IncludeFile, False);
@@ -242,7 +244,7 @@ begin
       MakeStr(V, SourcePath);
       Preprocessor.VarMan.DefineVariable('SourcePath', -1, V, dsPublic);
 
-      MakeStr(V, GetSystemDir);
+      MakeStr(V, {$IFDEF MSWINDOWS}GetSystemDir{$ELSE}''{$ENDIF});
       Preprocessor.VarMan.DefineVariable('SysPath', -1, V, dsPublic);
 
       MakeInt(V, Params.CompilerBinVersion);
@@ -276,15 +278,15 @@ begin
   except
     on E: EPreprocError do {preprocessor (syntax most likely) error}
     begin
-      Params.ErrorProc(Params.CompilerData, PChar(E.Message),
+      Params.ErrorProc(Params.CompilerData, PChar(String(E.Message)),
         PChar(E.FileName), E.LineNumber, E.ColumnNumber);
       Result := ispePreprocessError;
     end;
     on E: Exception do
     begin
       Params.ErrorProc(Params.CompilerData,
-        PChar(Format('Unexpected exception of class %s in ISPP.' +
-        #13#10#13#10'%s', [E.ClassName, AddPeriod(E.Message)])), nil, 0, 0);
+        PChar(InnoFormat('Unexpected exception of class %s in ISPP.' +
+        #13#10#13#10'%s', [E.ClassName, AddPeriod(FromNativeText(E.Message))])), nil, 0, 0);
       Result := ispePreprocessError;
     end;
   end;

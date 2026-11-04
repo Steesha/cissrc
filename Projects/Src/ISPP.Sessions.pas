@@ -25,7 +25,7 @@ procedure QueueFileForDeletion(const FileName: string);
 implementation
 
 uses
-  SysUtils, Classes, ISPP.Stack, Windows;
+  SysUtils, Classes, ISPP.Stack {$IFDEF MSWINDOWS}, Windows{$ENDIF};
 
 procedure WarningMsg(const Msg: string; const Args: array of const);
 var
@@ -77,7 +77,7 @@ begin
   if FTempFiles <> nil then
   begin
     for I := 0 to FTempFiles.Count - 1 do
-      DeleteFile(PChar(FTempFiles[I]));
+      {$IFDEF MSWINDOWS}Windows.DeleteFileW(PWideChar(FTempFiles[I])){$ELSE}SysUtils.DeleteFile(FTempFiles[I]){$ENDIF};
     FTempFiles.Free;
   end;
   inherited;
@@ -107,7 +107,7 @@ begin
     FTempFiles.Duplicates := dupIgnore;
     FTempFiles.Sorted := True;
   end;
-  FTempFiles.Add(FileName);
+  FTempFiles.Add({$IFDEF MSWINDOWS}FileName{$ELSE}UTF8Encode(FileName){$ENDIF});
 end;
 
 var
@@ -141,7 +141,7 @@ begin
   if FlowStack <> nil then
     FlowStack.QueueFile(FileName)
   else
-    DeleteFile(PChar(FileName));
+    {$IFDEF MSWINDOWS}Windows.DeleteFileW(PWideChar(FileName)){$ELSE}SysUtils.DeleteFile(UTF8Encode(FileName)){$ENDIF};
 end;
 
 end.

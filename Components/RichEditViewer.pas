@@ -2,17 +2,20 @@ unit RichEditViewer;
 
 { TRichEditViewer by Jordan Russell and Martijn Laan
 
-  Known problem:
-  If, after assigning rich text to a TRichEditViewer component, you change
-  a property that causes the component's handle to be recreated, all text
-  formatting will be lost (in the interests of code size).
+  Copyright (C) 1997-2026 Jordan Russell
+  Portions by Martijn Laan
+  For conditions of distribution and use, see LICENSE.TXT.
+
+  Preserve rich text when a property change recreates the native control.
 }
 
 interface
 
 uses
   Windows, Messages, RichEdit, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
-  {$IFDEF VCLSTYLES} Vcl.Themes, {$ELSE} Themes, {$ENDIF}
+  {$IFDEF FPC} LCLType, LMessages, {$ELSE}
+    {$IFDEF VCLSTYLES} Vcl.Themes, {$ELSE} Themes, {$ENDIF}
+  {$ENDIF}
   StdCtrls,
   RichEditOleCallback;
 
@@ -27,8 +30,12 @@ type
       FUseRichEdit: Boolean;
       FRichEditLoaded: Boolean;
       FCallback: IRichEditOleCallback;
+      FSavedRTF: AnsiString;
+      FSavedSelection: TCharRange;
+    {$IFNDEF FPC}
     class constructor Create;
     class destructor Destroy;
+    {$ENDIF}
     procedure SetRTFTextProp(const Value: AnsiString);
     procedure SetUseRichEdit(Value: Boolean);
     procedure UpdateBackgroundColor;
@@ -37,8 +44,13 @@ type
     procedure CMSysColorChange(var Message: TMessage); message CM_SYSCOLORCHANGE;
     procedure CNNotify(var Message: TWMNotify); message CN_NOTIFY;
   protected
+    {$IFDEF FPC}
+    class procedure WSRegisterClass; override;
+    {$ELSE}
     procedure CreateParams(var Params: TCreateParams); override;
+    {$ENDIF}
     procedure CreateWnd; override;
+    procedure DestroyWnd; override;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -49,28 +61,64 @@ type
     property UseRichEdit: Boolean read FUseRichEdit write SetUseRichEdit default True;
   end;
 
+  {$IFNDEF FPC}
   TRichEditViewerStyleHook = class(TScrollingStyleHook)
 {$IFDEF VCLSTYLES}
   private
     procedure EMSetBkgndColor(var Message: TMessage); message EM_SETBKGNDCOLOR;
 {$ENDIF}
   end;
+  {$ENDIF}
 
 procedure Register;
 
 implementation
 
 uses
+  {$IFDEF FPC} WSLCLClasses, Win32WSControls, Win32WSStdCtrls, Win32Int, {$ENDIF}
   ShellApi, PathFunc;
 
-{$IF RtlVersion < 36.0}
+{$IF Defined(FPC) or (RtlVersion < 36.0)}
 const
   MSFTEDIT_CLASS = 'RICHEDIT50W';
 {$ENDIF}
 
 type
-{$IF RtlVersion < 36.0}
+{$IFDEF FPC}
+  { RichEdit uses 4-byte packing even on Windows x64 }
+  TNativeEnLink = packed record
+    nmhdr: TNMHdr;
+    msg: UINT;
+    wParam: WPARAM;
+    lParam: LPARAM;
+    chrg: TCharRange;
+  end;
+  PEnLink = ^TNativeEnLink;
+  TGetTextLengthEx = RichEdit.GETTEXTLENGTHEX;
+  TNativeEditStream = packed record
+    dwCookie: DWORD_PTR;
+    dwError: DWORD;
+    pfnCallback: EDITSTREAMCALLBACK;
+  end;
+  {$IFDEF WIN64}
+    {$IF (SizeOf(TNativeEditStream) <> 20) or (SizeOf(TNativeEnLink) <> 52)}
+      {$FATAL Unexpected Windows x64 RichEdit record sizes}
+    {$ENDIF}
+  {$ELSE}
+    {$IF (SizeOf(TNativeEditStream) <> 12) or (SizeOf(TNativeEnLink) <> 32)}
+      {$FATAL Unexpected Windows x86 RichEdit record sizes}
+    {$ENDIF}
+  {$ENDIF}
+  TRichEditWidget = class(TWin32WSCustomMemo)
+  public
+    class function CreateHandle(const AWinControl: TWinControl;
+      const AParams: TCreateParams): HWND; override;
+  end;
+{$ELSE}
+  TNativeEditStream = TEditStream;
+  {$IF RtlVersion < 36.0}
   PEnLink = ^TEnLink;
+  {$ENDIF}
 {$ENDIF}
 
   TTextRange = record
@@ -184,17 +232,17 @@ procedure LoadRichEdit;
   var
     Buf: array[0..MAX_PATH-1] of Char;
   begin
-    GetSystemDirectory(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
-    Result := StrPas(Buf);
+    GetSystemDirectoryW(@Buf[0], Length(Buf));
+    Result := PChar(@Buf[0]);
   end;
 
 begin
   if RichEditUseCount = 0 then begin
     RichEditVersion := 4;
-    RichEditModule := LoadLibrary(PChar(AddBackslash(GetSystemDir) + 'MSFTEDIT.DLL'));
+    RichEditModule := LoadLibraryW(PChar(AddBackslash(GetSystemDir) + 'MSFTEDIT.DLL'));
     if RichEditModule = 0 then begin
       RichEditVersion := 2;
-      RichEditModule := LoadLibrary(PChar(AddBackslash(GetSystemDir) + 'RICHED20.DLL'));
+      RichEditModule := LoadLibraryW(PChar(AddBackslash(GetSystemDir) + 'RICHED20.DLL'));
     end;
   end;
   Inc(RichEditUseCount);
@@ -213,10 +261,58 @@ end;
 
 { TRichEditViewer }
 
+{$IFDEF FPC}
+function RichEditWindowProc(Window: HWND; Msg: UINT; WParam: WPARAM;
+  LParam: LPARAM): LRESULT; stdcall;
+begin
+  { RichEdit must own BeginPaint/EndPaint. LCL's memo paint path validates
+    the update region before calling the native control with a supplied DC. }
+  case Msg of
+    WM_PAINT, WM_ERASEBKGND, WM_PRINTCLIENT:
+      Result := CallDefaultWindowProc(Window, Msg, WParam, LParam);
+  else
+    Result := Win32Int.WindowProc(Window, Msg, WParam, LParam);
+  end;
+end;
+
+class procedure TRichEditViewer.WSRegisterClass;
+begin
+  inherited WSRegisterClass;
+  RegisterWSComponent(TRichEditViewer, TRichEditWidget);
+end;
+
+class function TRichEditWidget.CreateHandle(const AWinControl: TWinControl;
+  const AParams: TCreateParams): HWND;
+var
+  Viewer: TRichEditViewer;
+  Params: TCreateWindowExParams;
+begin
+  Viewer := TRichEditViewer(AWinControl);
+  if not Viewer.UseRichEdit then
+    Exit(inherited CreateHandle(AWinControl, AParams));
+  if not Viewer.FRichEditLoaded then begin
+    LoadRichEdit;
+    Viewer.FRichEditLoaded := True;
+  end;
+
+  PrepareCreateWindow(AWinControl, AParams, Params);
+  if RichEditVersion = 4 then
+    Params.pClassName := 'RICHEDIT50W'
+  else
+    Params.pClassName := 'RichEdit20W';
+  Params.WindowTitle := Params.StrCaption;
+  Params.SubClassWndProc := @RichEditWindowProc;
+  FinishCreateWindow(AWinControl, Params, False);
+  Params.WindowInfo^.needParentPaint := False;
+  Result := Params.Window;
+end;
+{$ELSE}
 class constructor TRichEditViewer.Create;
 begin
   TCustomStyleEngine.RegisterStyleHook(TRichEditViewer, TRichEditViewerStyleHook);
 end;
+
+{$ENDIF}
 
 constructor TRichEditViewer.Create(AOwner: TComponent);
 begin
@@ -225,10 +321,12 @@ begin
   FCallback := TBasicRichEditOleCallback.Create;
 end;
 
+{$IFNDEF FPC}
 class destructor TRichEditViewer.Destroy;
 begin
   TCustomStyleEngine.UnregisterStyleHook(TRichEditViewer, TRichEditViewerStyleHook);
 end;
+{$ENDIF}
 
 destructor TRichEditViewer.Destroy;
 begin
@@ -240,6 +338,7 @@ begin
   end;
 end;
 
+{$IFNDEF FPC}
 procedure TRichEditViewer.CreateParams(var Params: TCreateParams);
 { Based on code from TCustomRichEdit.CreateParams }
 begin
@@ -261,29 +360,75 @@ begin
     StrCat(Params.WinClassName, '/Text');  { don't localize! }
 end;
 
+{$ENDIF}
+
+function StreamSave(dwCookie: DWORD_PTR; pbBuff: PByte;
+  cb: Integer; var pcb: Integer): {$IFDEF FPC}DWORD{$ELSE}Integer{$ENDIF}; stdcall;
+begin
+  try
+    pcb := TMemoryStream(Pointer(dwCookie)).Write(pbBuff^, cb);
+    Result := 0;
+  except
+    pcb := 0;
+    Result := 1;
+  end;
+end;
+
+procedure TRichEditViewer.DestroyWnd;
+var
+  Stream: TMemoryStream;
+  EditStream: TNativeEditStream;
+begin
+  FSavedRTF := '';
+  if FUseRichEdit and HandleAllocated and not (csDestroying in ComponentState) then begin
+    Stream := TMemoryStream.Create;
+    try
+      EditStream.dwCookie := DWORD_PTR(Stream);
+      EditStream.dwError := 0;
+      EditStream.pfnCallback := {$IFDEF FPC}@{$ENDIF}StreamSave;
+      SendMessageW(Handle, EM_STREAMOUT, SF_RTF, LPARAM(@EditStream));
+      if EditStream.dwError <> 0 then
+        raise EStreamError.Create('Cannot preserve rich text before recreating its window');
+      SetString(FSavedRTF, PAnsiChar(Stream.Memory), Stream.Size);
+      SendMessageW(Handle, EM_EXGETSEL, 0, LPARAM(@FSavedSelection));
+    finally
+      Stream.Free;
+    end;
+  end;
+  inherited;
+end;
+
 procedure TRichEditViewer.CreateWnd;
+var
+  Mask: LRESULT;
 begin
   inherited;
   UpdateBackgroundColor;
   if FUseRichEdit then begin
-    const Mask = ENM_LINK or SendMessage(Handle, EM_GETEVENTMASK, 0, 0);
-    SendMessage(Handle, EM_SETEVENTMASK, 0, LPARAM(Mask));
-    SendMessage(Handle, EM_AUTOURLDETECT, WPARAM(True), 0);
-    SendMessage(Handle, EM_SETOLECALLBACK, 0, LPARAM(FCallback));
+    Mask := ENM_LINK or SendMessageW(Handle, EM_GETEVENTMASK, 0, 0);
+    SendMessageW(Handle, EM_SETEVENTMASK, 0, LPARAM(Mask));
+    SendMessageW(Handle, EM_AUTOURLDETECT, WPARAM(True), 0);
+    SendMessageW(Handle, EM_SETOLECALLBACK, 0, LPARAM(FCallback));
+    if FSavedRTF <> '' then begin
+      SetRTFTextProp(FSavedRTF);
+      FSavedRTF := '';
+      SendMessageW(Handle, EM_EXSETSEL, 0, LPARAM(@FSavedSelection));
+    end;
   end;
 end;
 
 procedure TRichEditViewer.UpdateBackgroundColor;
 begin
   if FUseRichEdit and HandleAllocated then
-    SendMessage(Handle, EM_SETBKGNDCOLOR, 0, ColorToRGB(Color));
+    SendMessageW(Handle, EM_SETBKGNDCOLOR, 0,
+      {$IFDEF FPC}GetRGBColorResolvingParent{$ELSE}ColorToRGB(Color){$ENDIF});
 end;
 
 procedure TRichEditViewer.SetUseRichEdit(Value: Boolean);
 begin
   if FUseRichEdit <> Value then begin
     FUseRichEdit := Value;
-    RecreateWnd;
+    {$IFDEF FPC}RecreateWnd(Self){$ELSE}RecreateWnd{$ENDIF};
     if not Value and FRichEditLoaded then begin
       { Decrement the DLL use count when UseRichEdit is set to False }
       FRichEditLoaded := False;
@@ -300,9 +445,11 @@ type
   end;
 
 function StreamLoad(dwCookie: DWORD_PTR; pbBuff: PByte;
-  cb: Integer; var pcb: Integer): Integer; stdcall;
+  cb: Integer; var pcb: Integer): {$IFDEF FPC}DWORD{$ELSE}Integer{$ENDIF}; stdcall;
+var
+  Data: PStreamLoadData;
 begin
-  const Data = PStreamLoadData(dwCookie);
+  Data := PStreamLoadData(dwCookie);
   if cb > Data.BytesLeft then
     cb := Data.BytesLeft;
   Move(Data.Buffer^, pbBuff^, cb);
@@ -315,9 +462,11 @@ end;
 function TRichEditViewer.SetRTFText(const Value: AnsiString): Integer;
 
   function StreamIn(AFormat: WPARAM): Integer;
+  var
+    Data: TStreamLoadData;
+    EditStream: TNativeEditStream;
   begin
-    var Data: TStreamLoadData;
-    Data.Buffer := PByte(@Value[1]);
+    Data.Buffer := PByte(Pointer(Value));
     Data.BytesLeft := Length(Value);
     { Check for UTF-16 BOM }
     if (AFormat and SF_TEXT <> 0) and (Data.BytesLeft >= 2) and
@@ -325,26 +474,35 @@ function TRichEditViewer.SetRTFText(const Value: AnsiString): Integer;
       AFormat := AFormat or SF_UNICODE;
       Inc(Data.Buffer, 2);
       Dec(Data.BytesLeft, 2);
+    end
+    else if (AFormat and SF_TEXT <> 0) and (Length(Value) >= 3) and
+            (Byte(Value[1]) = $EF) and (Byte(Value[2]) = $BB) and (Byte(Value[3]) = $BF) then begin
+      AFormat := AFormat or SF_USECODEPAGE or (WPARAM(CP_UTF8) shl 16);
+      Inc(Data.Buffer, 3);
+      Dec(Data.BytesLeft, 3);
     end;
-    var EditStream: TEditStream;
     EditStream.dwCookie := DWORD_PTR(@Data);
     EditStream.dwError := 0;
-    EditStream.pfnCallback := StreamLoad;
-    SendMessage(Handle, EM_STREAMIN, AFormat, LPARAM(@EditStream));
+    EditStream.pfnCallback := {$IFDEF FPC}@{$ENDIF}StreamLoad;
+    SendMessageW(Handle, EM_STREAMIN, AFormat, LPARAM(@EditStream));
     Result := EditStream.dwError;
   end;
 
 begin
   if not FUseRichEdit then begin
-    Text := String(Value);
+    Text := {$IFDEF FPC}UTF8Encode(UnicodeString(Value)){$ELSE}String(Value){$ENDIF};
     Result := 0;
   end
   else begin
-    SendMessage(Handle, EM_EXLIMITTEXT, 0, LParam($7FFFFFFE));
-    Result := StreamIn(SF_RTF);
-    if Result <> 0 then
+    SendMessageW(Handle, EM_EXLIMITTEXT, 0, LParam($7FFFFFFE));
+    if Copy(Value, 1, 5) = '{\rtf' then begin
+      Result := StreamIn(SF_RTF);
+      if Result <> 0 then
+        Result := StreamIn(SF_TEXT);
+    end else
       Result := StreamIn(SF_TEXT);
 
+    {$IFNDEF FPC}
     var LStyle := StyleServices(Self);
     if not LStyle.Enabled or LStyle.IsSystemStyle then
       LStyle := nil;
@@ -354,15 +512,16 @@ begin
       if StyleTextColor <> ColorToRGB(clWindowText) then
         RecolorAutoForegroundText(StyleTextColor); { Must be done even if SF_TEXT was used above }
     end;
+    {$ENDIF}
   end;
 end;
 
 procedure TRichEditViewer.RecolorAutoForegroundText(const NewTextColor: Integer);
 
-  function GetNewTextColorFormat: TCharFormat2;
+  function GetNewTextColorFormat: TCharFormat2W;
   begin
-    ZeroMemory(@Result, SizeOf(TCharFormat2));
-    Result.cbSize := SizeOf(TCharFormat2);
+    ZeroMemory(@Result, SizeOf(TCharFormat2W));
+    Result.cbSize := SizeOf(TCharFormat2W);
     Result.dwMask := CFM_COLOR; { CFM_COLOR = crTextColor + CFE_AUTOCOLOR }
     Result.crTextColor := TColorRef(NewTextColor);
   end;
@@ -376,33 +535,33 @@ procedure TRichEditViewer.RecolorAutoForegroundText(const NewTextColor: Integer)
     this color is not the auto-color then there is nothing to recolor and
     we're done as well. This happens if a .rtf is for example all red. }
 
+  var
+    SaveSel: TCharRange;
+    CheckFormat, NewTextColorFormat: TCharFormat2W;
   begin
     { The following works even for read-only controls }
-
-    var SaveSel: TCharRange;
-    SendMessage(Handle, EM_EXGETSEL, 0, LPARAM(@SaveSel));
-    SendMessage(Handle, WM_SETREDRAW, 0, 0);
+    SendMessageW(Handle, EM_EXGETSEL, 0, LPARAM(@SaveSel));
+    SendMessageW(Handle, WM_SETREDRAW, 0, 0);
     try
       { Select all. This is because EM_GETCHARFORMAT does not support
         SCF_ALL, unlike EM_SETCHARFORMAT. }
-      SendMessage(Handle, EM_SETSEL, 0, -1);
+      SendMessageW(Handle, EM_SETSEL, 0, -1);
 
-      var CheckFormat: TCharFormat2;
-      ZeroMemory(@CheckFormat, SizeOf(TCharFormat2));
-      CheckFormat.cbSize := SizeOf(TCharFormat2);
+      ZeroMemory(@CheckFormat, SizeOf(TCharFormat2W));
+      CheckFormat.cbSize := SizeOf(TCharFormat2W);
       CheckFormat.dwMask := CFM_COLOR; { CFM_COLOR = crTextColor + CFE_AUTOCOLOR }
-      if (SendMessage(Handle, EM_GETCHARFORMAT, SCF_SELECTION, LPARAM(@CheckFormat)) = 0) or
+      if (SendMessageW(Handle, EM_GETCHARFORMAT, SCF_SELECTION, LPARAM(@CheckFormat)) = 0) or
          ((CheckFormat.dwMask and CFM_COLOR) = 0) then
         Exit(False);
 
       if (CheckFormat.dwEffects and CFE_AUTOCOLOR) <> 0 then begin
-        const NewTextColorFormat = GetNewTextColorFormat;
-        Result := SendMessage(Handle, EM_SETCHARFORMAT, SCF_ALL, LPARAM(@NewTextColorFormat)) <> 0;
+        NewTextColorFormat := GetNewTextColorFormat;
+        Result := SendMessageW(Handle, EM_SETCHARFORMAT, SCF_ALL, LPARAM(@NewTextColorFormat)) <> 0;
       end else
         Result := True; { There's nothing to recolor }
     finally
-      SendMessage(Handle, EM_EXSETSEL, 0, LPARAM(@SaveSel));
-      SendMessage(Handle, WM_SETREDRAW, 1, 0);
+      SendMessageW(Handle, EM_EXSETSEL, 0, LPARAM(@SaveSel));
+      SendMessageW(Handle, WM_SETREDRAW, 1, 0);
       Invalidate;
     end;
   end;
@@ -427,34 +586,38 @@ procedure TRichEditViewer.RecolorAutoForegroundText(const NewTextColor: Integer)
     Issue 1 & 2 can be worked around, but 3 is a showstopper. }
 
     procedure SetSelection(const StartPos, EndPos: Integer);
+    var
+      Range: TCharRange;
     begin
-      var Range: TCharRange;
       Range.cpMin := StartPos;
       Range.cpMax := EndPos;
-      SendMessage(Handle, EM_EXSETSEL, 0, LPARAM(@Range));
+      SendMessageW(Handle, EM_EXSETSEL, 0, LPARAM(@Range));
     end;
 
     function IsAutoColoredAt(const Pos: Integer): Boolean;
+    var
+      Format: TCharFormat2W;
     begin
       SetSelection(Pos, Pos + 1);
-      var Format: TCharFormat2;
-      ZeroMemory(@Format, SizeOf(TCharFormat2));
-      Format.cbSize := SizeOf(TCharFormat2);
+      ZeroMemory(@Format, SizeOf(TCharFormat2W));
+      Format.cbSize := SizeOf(TCharFormat2W);
       Format.dwMask := CFM_COLOR; { CFM_COLOR = crTextColor + CFE_AUTOCOLOR }
-      Result := (SendMessage(Handle, EM_GETCHARFORMAT, SCF_SELECTION, LPARAM(@Format)) <> 0) and
+      Result := (SendMessageW(Handle, EM_GETCHARFORMAT, SCF_SELECTION, LPARAM(@Format)) <> 0) and
                 (Format.dwEffects and CFE_AUTOCOLOR <> 0);
     end;
 
+  var
+    SaveSel: TCharRange;
+    NewTextColorFormat: TCharFormat2W;
+    StartPos, EndPos: Integer;
   begin
     { The following works even for read-only controls }
-
-    var SaveSel: TCharRange;
-    SendMessage(Handle, EM_EXGETSEL, 0, LPARAM(@SaveSel));
-    SendMessage(Handle, WM_SETREDRAW, 0, 0);
+    SendMessageW(Handle, EM_EXGETSEL, 0, LPARAM(@SaveSel));
+    SendMessageW(Handle, WM_SETREDRAW, 0, 0);
     try
-      const NewTextColorFormat = GetNewTextColorFormat;
+      NewTextColorFormat := GetNewTextColorFormat;
 
-      var StartPos := 0;
+      StartPos := 0;
       { Find sections of auto colored text. Do not pay attention to background colors while doing so.
         This exactly replicates the behavior seen when a high-contrast theme is active. }
       while StartPos < TextLength do begin
@@ -463,19 +626,19 @@ procedure TRichEditViewer.RecolorAutoForegroundText(const NewTextColor: Integer)
           Continue;
         end;
         { Found start of auto colored section, look for the end }
-        var EndPos := StartPos + 1;
+        EndPos := StartPos + 1;
         while EndPos < TextLength do begin
           if not IsAutoColoredAt(EndPos) then
             Break;
           Inc(EndPos);
         end;
         SetSelection(StartPos, EndPos);
-        SendMessage(Handle, EM_SETCHARFORMAT, SCF_SELECTION, LPARAM(@NewTextColorFormat));
+        SendMessageW(Handle, EM_SETCHARFORMAT, SCF_SELECTION, LPARAM(@NewTextColorFormat));
         StartPos := EndPos;
       end;
     finally
-      SendMessage(Handle, EM_EXSETSEL, 0, LPARAM(@SaveSel));
-      SendMessage(Handle, WM_SETREDRAW, 1, 0);
+      SendMessageW(Handle, EM_EXSETSEL, 0, LPARAM(@SaveSel));
+      SendMessageW(Handle, WM_SETREDRAW, 1, 0);
       Invalidate;
     end;
   end;
@@ -490,14 +653,17 @@ procedure TRichEditViewer.RecolorAutoForegroundText(const NewTextColor: Integer)
     { See https://learn.microsoft.com/en-us/windows/win32/api/tom/ne-tom-tomconstants }
     tomAutoColor = -9999997;
     tomCharFormat = 13;
+  var
+    RichEditOle: IRichEditOle;
+    TextDocument: ITextDocument;
+    Range: ITextRange;
+    Font: ITextFont;
+    StoryLength, TextLength, PreviousEndPos, Delta, EndPos, TextColor: Integer;
+    SaveReadOnly: Boolean;
   begin
     Result := False;
 
-    var RichEditOle: IRichEditOle;
-    var TextDocument: ITextDocument;
-    var Range: ITextRange;
-    var StoryLength: Integer;
-    if (SendMessage(Handle, EM_GETOLEINTERFACE, 0, LPARAM(@RichEditOle)) = 0) or
+    if (SendMessageW(Handle, EM_GETOLEINTERFACE, 0, LPARAM(@RichEditOle)) = 0) or
        Failed(RichEditOle.QueryInterface(IID_ITextDocument, TextDocument)) or
        Failed(TextDocument.Range(0, 0, Range)) or
        Failed(Range.GetStoryLength(StoryLength)) or
@@ -506,29 +672,25 @@ procedure TRichEditViewer.RecolorAutoForegroundText(const NewTextColor: Integer)
 
     { See https://learn.microsoft.com/en-us/windows/win32/api/tom/nn-tom-itextrange:
       All stories contain an undeletable final CR (0xD) character at the end }
-    const TextLength = StoryLength-1;
+    TextLength := StoryLength-1;
 
-    SendMessage(Handle, WM_SETREDRAW, 0, 0);
-    const SaveReadOnly = ReadOnly;
+    SendMessageW(Handle, WM_SETREDRAW, 0, 0);
+    SaveReadOnly := ReadOnly;
     try
       ReadOnly := False;
-      var PreviousEndPos := 0;
+      PreviousEndPos := 0;
       while True do begin
         { Move the end of the range (which initializes at 0,0) to the end of constant formatting }
-        var Delta: Integer;
         if Failed(Range.MoveEnd(tomCharFormat, 1, Delta)) then { Fails in Wine, see bug 1 above }
           Exit;
 
         { On Wine we cannot trust the value of Delta, see bug 2 above. So we need to calculate
           Delta ourselves. Prevents an endless loop if they fix bug 1 but not bug 2. }
-        var EndPos: Integer;
         if Failed(Range.GetEnd(EndPos)) or
            (EndPos <= PreviousEndPos) then
           Break;
 
         { Recolor the range if the foreground color is automatic }
-        var Font: ITextFont;
-        var TextColor: Integer;
         if Succeeded(Range.GetFont(Font)) and
            Succeeded(Font.GetForeColor(TextColor)) and
            (TextColor = tomAutoColor) then
@@ -544,7 +706,7 @@ procedure TRichEditViewer.RecolorAutoForegroundText(const NewTextColor: Integer)
       Result := True;
     finally
       ReadOnly := SaveReadOnly;
-      SendMessage(Handle, WM_SETREDRAW, 1, 0);
+      SendMessageW(Handle, WM_SETREDRAW, 1, 0);
       Invalidate;
     end;
   end;
@@ -552,28 +714,32 @@ procedure TRichEditViewer.RecolorAutoForegroundText(const NewTextColor: Integer)
   procedure RecolorAutoForegroundText_DropAllColors;
 
   { Simply recolors everything to the desired color }
-
+  var
+    NewTextColorFormat: TCharFormat2W;
   begin
-    const NewTextColorFormat = GetNewTextColorFormat;
-    SendMessage(Handle, EM_SETCHARFORMAT, SCF_ALL, LPARAM(@NewTextColorFormat));
+    NewTextColorFormat := GetNewTextColorFormat;
+    SendMessageW(Handle, EM_SETCHARFORMAT, SCF_ALL, LPARAM(@NewTextColorFormat));
   end;
 
   function GetTextLength: NativeInt;
+  var
+    GetTextLengthEx: TGetTextLengthEx;
   begin
-    var GetTextLengthEx: TGetTextLengthEx;
     ZeroMemory(@GetTextLengthEx, SizeOf(TGetTextLengthEx));
     GetTextLengthEx.flags := GTL_NUMCHARS or GTL_PRECISE;
     GetTextLengthEx.codepage := 1200;
-    Result := SendMessage(Handle, EM_GETTEXTLENGTHEX, WPARAM(@GetTextLengthEx), 0);
+    Result := SendMessageW(Handle, EM_GETTEXTLENGTHEX, WPARAM(@GetTextLengthEx), 0);
     if Result < 0 then
       Result := 0;
   end;
 
+var
+  TextLength: NativeInt;
 begin
   if not FUseRichEdit or not HandleAllocated then
     Exit;
 
-  const TextLength = GetTextLength;
+  TextLength := GetTextLength;
   if TextLength = 0 then
     Exit;
 
@@ -596,8 +762,12 @@ begin
 end;
 
 procedure TRichEditViewer.SetRTFTextProp(const Value: AnsiString);
+var
+  Error: Integer;
 begin
-  SetRTFText(Value);
+  Error := SetRTFText(Value);
+  if Error <> 0 then
+    raise EReadError.CreateFmt('Unable to load rich edit text (%d)', [Error]);
 end;
 
 procedure TRichEditViewer.CMColorChanged(var Message: TMessage);
@@ -616,7 +786,7 @@ procedure TRichEditViewer.CNNotify(var Message: TWMNotify);
 var
   EnLink: PEnLink;
   CharRange: TCharRange;
-  TextRange: TTextRange;
+  TextRange: TTextRangeW;
   Len: Integer;
   URL: String;
 begin
@@ -631,12 +801,12 @@ begin
           SetLength(URL, Len);
           TextRange.chrg := CharRange;
           TextRange.lpstrText := PChar(URL);
-          SetLength(URL, SendMessage(Handle, EM_GETTEXTRANGE, 0, LParam(@TextRange)));
+          SetLength(URL, SendMessageW(Handle, EM_GETTEXTRANGE, 0, LParam(@TextRange)));
           if URL <> '' then begin
             if Assigned(FCustomShellExecute) then
               FCustomShellExecute(Handle, 'open', PChar(URL), nil, nil, SW_SHOWNORMAL)
             else
-              ShellExecute(Handle, 'open', PChar(URL), nil, nil, SW_SHOWNORMAL);
+              ShellExecuteW(Handle, 'open', PChar(URL), nil, nil, SW_SHOWNORMAL);
           end;
         end;
       end;

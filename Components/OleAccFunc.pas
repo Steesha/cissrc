@@ -12,7 +12,7 @@ unit OleAccFunc;
 interface
 
 uses
-  Winapi.Windows;
+  {$IFDEF FPC}Windows{$ELSE}Winapi.Windows{$ENDIF};
 
 var
   NotifyWinEventFunc: procedure(event: DWORD; hwnd: HWND; idObject: DWORD;
@@ -27,7 +27,7 @@ function InitializeOleAcc: Boolean;
 implementation
 
 uses
-  Winapi.ActiveX, System.SysUtils, PathFunc;
+  {$IFDEF FPC}ActiveX, SysUtils,{$ELSE}Winapi.ActiveX, System.SysUtils,{$ENDIF} PathFunc;
 
 var
   OleAccInited: Boolean;
@@ -37,18 +37,27 @@ function InitializeOleAcc: Boolean;
 
   function GetSystemDir: String;
   var
-    Buf: array[0..MAX_PATH-1] of Char;
+    Buf: array[0..MAX_PATH-1] of WideChar;
+    Count: Cardinal;
   begin
-    GetSystemDirectory(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
-    Result := StrPas(Buf);
+    Count := GetSystemDirectoryW(@Buf[0], Length(Buf));
+    if (Count = 0) or (Count >= Length(Buf)) then
+      Exit('');
+    SetString(Result, PWideChar(@Buf[0]), Count);
   end;
 
+var
+  M: HMODULE;
+  SystemDir: String;
 begin
   if not OleAccInited then begin
-    const M = LoadLibrary(PChar(AddBackslash(GetSystemDir) + 'oleacc.dll'));
+    M := 0;
+    SystemDir := GetSystemDir;
+    if SystemDir <> '' then
+      M := LoadLibraryW(PWideChar(AddBackslash(SystemDir) + 'oleacc.dll'));
     if M <> 0 then begin
-      LresultFromObjectFunc := GetProcAddress(M, 'LresultFromObject');
-      CreateStdAccessibleObjectFunc := GetProcAddress(M, 'CreateStdAccessibleObject');
+      {$IFDEF FPC}PPointer(@@LresultFromObjectFunc)^{$ELSE}LresultFromObjectFunc{$ENDIF} := GetProcAddress(M, 'LresultFromObject');
+      {$IFDEF FPC}PPointer(@@CreateStdAccessibleObjectFunc)^{$ELSE}CreateStdAccessibleObjectFunc{$ENDIF} := GetProcAddress(M, 'CreateStdAccessibleObject');
       if Assigned(LresultFromObjectFunc) and
          Assigned(CreateStdAccessibleObjectFunc) then
         OleAccAvailable := True;
@@ -60,21 +69,27 @@ end;
 
 { Note: This COM initialization code based on code from DBTables }
 var
-  SaveInitProc: Pointer;
+  {$IFNDEF FPC}SaveInitProc: Pointer;{$ENDIF}
   NeedToUninitialize: Boolean;
 
 procedure InitCOM;
 begin
+  {$IFNDEF FPC}
   if SaveInitProc <> nil then TProcedure(SaveInitProc);
+  {$ENDIF}
   NeedToUninitialize := SUCCEEDED(CoInitialize(nil));
 end;
 
 initialization
   if not IsLibrary then begin
+    {$IFDEF FPC}
+    InitCOM;
+    {$ELSE}
     SaveInitProc := InitProc;
     InitProc := @InitCOM;
+    {$ENDIF}
   end;
-  NotifyWinEventFunc := GetProcAddress(GetModuleHandle(user32), 'NotifyWinEvent');
+  {$IFDEF FPC}PPointer(@@NotifyWinEventFunc)^{$ELSE}NotifyWinEventFunc{$ENDIF} := GetProcAddress(GetModuleHandle(user32), 'NotifyWinEvent');
 
 finalization
   if NeedToUninitialize then

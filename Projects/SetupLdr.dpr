@@ -1,5 +1,7 @@
 program SetupLdr;
 
+{$IFDEF FPC}{$APPTYPE GUI}{$ENDIF}
+
 {
   Inno Setup
   Copyright (C) 1997-2026 Jordan Russell
@@ -36,10 +38,14 @@ uses
 {$WEAKLINKRTTI ON}
 
 { The compiler may delete one of the icons included here }
+{$IFDEF INNO_SOURCE_RESOURCES}
+{$I SetupLdr.Resources.inc}
+{$ELSE}
 {$R Res\Setup.icon.res}
 {$R Res\Setup.icon.dark.res}
 {$R Res\SetupLdr.version.res}
 {$R Res\SetupLdr.offsettable.res}
+{$ENDIF}
 
 const
   { Exit codes that are returned by SetupLdr.
@@ -78,11 +84,13 @@ begin
 end;
 
 function MsgBox(const Text: String; const Flags: UINT): Integer;
+var
+  Caption: String;
 begin
-  var Caption := 'Setup';
+  Caption := 'Setup';
   if ActiveLanguage <> -1 then
     Caption := SetupMessages[msgSetupAppTitle];
-  Result := MessageBox(0, PChar(Text), PChar(Caption), Flags);
+  Result := MessageBoxW(0, PChar(Text), PChar(Caption), Flags);
 end;
 
 procedure ShowExceptionMsg;
@@ -94,11 +102,14 @@ begin
 end;
 
 procedure ProcessCommandLine(var SelfFilename: String);
+var
+  SilentOrVerySilent, WantToSuppressMsgBoxes: Boolean;
+  ParamName, ParamValue: String;
+  I: Integer;
 begin
-  var SilentOrVerySilent := False;
-  var WantToSuppressMsgBoxes := False;
-  for var I := 1 to NewParamCount do begin
-    var ParamName, ParamValue: String;
+  SilentOrVerySilent := False;
+  WantToSuppressMsgBoxes := False;
+  for I := 1 to NewParamCount do begin
     SplitNewParamStr(I, ParamName, ParamValue);
     if SameText(ParamName, '/SP-') or SameText(ParamName, '/SPAWNWND=') then
       InitDisableStartupPrompt := True
@@ -187,7 +198,8 @@ end;
 procedure ExecAndWait(const Filename, Parms: String; var ExitCode: Integer);
 var
   CmdLine: String;
-  StartupInfo: TStartupInfo;
+  StartupInfo: TStartupInfoW;
+  WorkingDir: String;
   ProcessInfo: TProcessInformation;
 begin
   CmdLine := '"' + Filename + '" ' + Parms;
@@ -195,11 +207,11 @@ begin
   { Pass current directory in "final" reparsed form so that Setup won't have
     trouble accessing the directory after enabling RedirectionGuard if there's
     an untrusted redirect in the path. }
-  const WorkingDir = GetFinalCurrentDir;
+  WorkingDir := GetFinalCurrentDir;
 
   FillChar(StartupInfo, SizeOf(StartupInfo), 0);
   StartupInfo.cb := SizeOf(StartupInfo);
-  if not CreateProcess(nil, PChar(CmdLine), nil, nil, False, 0, nil,
+  if not CreateProcessW(nil, PChar(CmdLine), nil, nil, False, 0, nil,
      PChar(WorkingDir), StartupInfo, ProcessInfo) then
     RaiseLastError(msgLdrCannotExecTemp);
   CloseHandle(ProcessInfo.hThread);
@@ -245,6 +257,8 @@ var
   MemInfo: TMemoryBasicInformation;
   ChangedProtection: Boolean;
   OrigProtect: DWORD;
+  Writeable: Boolean;
+  Offset: SIZE_T;
 begin
   { Get system's page size }
   GetSystemInfo(SysInfo);
@@ -259,7 +273,7 @@ begin
       We do not want to trigger guard pages and confuse the application. }
     if (MemInfo.State = MEM_COMMIT) and (MemInfo.Protect and PAGE_GUARD = 0) then begin
       ChangedProtection := False;
-      var Writeable := True;
+      Writeable := True;
 
       { Determine if the pages in this region are nonwriteable }
       if (MemInfo.Protect = PAGE_NOACCESS) or
@@ -278,7 +292,7 @@ begin
       { Write to every page in the region.
         This forces the page to be in RAM and swapped to the paging file. }
       if Writeable then begin
-        var Offset: SIZE_T := 0;
+        Offset := 0;
         while Offset < MemInfo.RegionSize do begin
           Touch(PInteger(PByte(MemInfo.BaseAddress) + Offset)^);
           Inc(Offset, SysInfo.dwPageSize);
@@ -408,6 +422,10 @@ end;
 
 var
   SourceF, DestF: TFile;
+  SelfFilename: String;
+  M: HMODULE;
+  SetupEncryptionHeaderCRC: Integer;
+  CryptKey: TSetupEncryptionKey;
   OffsetTable: TSetupLdrOffsetTable;
   TempDir: String;
   S: String;
@@ -427,15 +445,15 @@ begin
       is ejected. }
     RunImageLocally(HInstance);
 
-    var SelfFilename := NewParamStr(0);
+    SelfFilename := NewParamStr(0);
 
     ProcessCommandLine(SelfFilename);
 
     SourceF := TFile.Create(SelfFilename, fdOpenExisting, faRead, fsRead);
     try
-      var M: HMODULE := 0;
+      M := 0;
       if not PathSame(SelfFilename, NewParamStr(0)) then begin { Can only happen on DEBUG }
-        M := LoadLibraryEx(PChar(SelfFilename), 0, LOAD_LIBRARY_AS_DATAFILE);
+        M := LoadLibraryExW(PChar(SelfFilename), 0, LOAD_LIBRARY_AS_DATAFILE);
         if M = 0 then
           raise Exception.Create('LoadLibraryEx failed');
       end;
@@ -459,13 +477,11 @@ begin
       if TestID <> SetupID then
         SetupCorruptError;
 
-      var SetupEncryptionHeaderCRC: Longint;
       SourceF.ReadBuffer(SetupEncryptionHeaderCRC, SizeOf(SetupEncryptionHeaderCRC));
       SourceF.ReadBuffer(SetupEncryptionHeader, SizeOf(SetupEncryptionHeader));
       if SetupEncryptionHeaderCRC <> GetCRC32(SetupEncryptionHeader, SizeOf(SetupEncryptionHeader)) then
         SetupCorruptError;
 
-      var CryptKey: TSetupEncryptionKey;
       if SetupEncryptionHeader.EncryptionUse = euFull then begin
         if InitPassword = '' then
           raise Exception.Create(SMissingPassword);
@@ -591,7 +607,7 @@ begin
           systems), so use DelayDeleteFile to delete it. }
         DelayDeleteFile(TempFile, 13, 50, 250);
       if TempDir <> '' then
-        RemoveDirectory(PChar(TempDir));
+        RemoveDirectoryW(PChar(TempDir));
       if SetupLdrWnd <> 0 then
         { SetupLdrWnd must be destroyed before RestartComputer is called,
           otherwise SetupLdrWndProc would deny the shutdown request }

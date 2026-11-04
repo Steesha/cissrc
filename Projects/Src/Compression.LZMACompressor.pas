@@ -14,51 +14,32 @@ interface
 
 uses
   Windows, SysUtils,
-  Compression.Base;
+  Compression.Base, Compression.LZMAEncoderProps;
 
 function LZMAInitCompressFunctions(Module: HMODULE): Boolean;
 function LZMAGetLevel(const Value: String; var Level: Integer): Boolean;
 
 const
-  clLZMAFast = 1;
-  clLZMANormal = 2;
-  clLZMAMax = 3;
-  clLZMAUltra = 4;
-  clLZMAUltra64 = 5;
+  clLZMAFast = Compression.LZMAEncoderProps.clLZMAFast;
+  clLZMANormal = Compression.LZMAEncoderProps.clLZMANormal;
+  clLZMAMax = Compression.LZMAEncoderProps.clLZMAMax;
+  clLZMAUltra = Compression.LZMAEncoderProps.clLZMAUltra;
+  clLZMAUltra64 = Compression.LZMAEncoderProps.clLZMAUltra64;
 
 type
   { Internally-used types }
   TLZMASRes = type Integer;
   TLZMACompressorCustomWorker = class;
 
-  TLZMACompressorProps = class(TCompressorProps)
+  TLZMACompressorProps = class(Compression.LZMAEncoderProps.TLZMACompressorProps)
   public
-    Algorithm: Integer;
-    BlockSize: Integer;
-    BTMode: Integer;
-    DictionarySize: Cardinal;
-    NumBlockThreads: Integer;
-    NumFastBytes: Integer;
-    NumThreads: Integer;
-    NumThreadGroups: Integer;
     WorkerProcessCheckTrust: Boolean;
     WorkerProcessOnCheckedTrust: TProc<Boolean>;
     WorkerProcessFilename: String;
-    constructor Create;
   end;
 
   { Internally-used records }
-  TLZMAEncoderProps = record
-    Algorithm: Integer;
-    BlockSize: Integer;
-    BTMode: Integer;
-    NumHashBytes: Integer;
-    DictionarySize: Cardinal;
-    NumBlockThreads: Integer;
-    NumFastBytes: Integer;
-    NumThreads: Integer;
-    NumThreadGroups: Integer;
-  end;
+  TLZMAEncoderProps = Compression.LZMAEncoderProps.TLZMAEncoderProps;
   TLZMACompressorRingBuffer = record
     Count: Integer;         { updated by reader and writer using InterlockedExchangeAdd only }
     WriterOffset: Integer;  { accessed only by writer thread }
@@ -277,19 +258,7 @@ end;
 
 function LZMAGetLevel(const Value: String; var Level: Integer): Boolean;
 begin
-  Result := True;
-  if CompareText(Value, 'fast') = 0 then
-    Level := clLZMAFast
-  else if CompareText(Value, 'normal') = 0 then
-    Level := clLZMANormal
-  else if CompareText(Value, 'max') = 0 then
-    Level := clLZMAMax
-  else if CompareText(Value, 'ultra') = 0 then
-    Level := clLZMAUltra
-  else if CompareText(Value, 'ultra64') = 0 then
-    Level := clLZMAUltra64
-  else
-    Result := False;
+  Result := Compression.LZMAEncoderProps.LZMAGetLevel(Value, Level);
 end;
 
 function LZMACreateEvent(const ManualReset: BOOL): TLZMAHandle32;
@@ -428,13 +397,6 @@ begin
 end;
 
 { TLZMACompressorProps }
-
-constructor TLZMACompressorProps.Create;
-begin
-  inherited;
-  Algorithm := -1;
-  BTMode := -1;
-end;
 
 { TLZMACompressorCustomWorker }
 
@@ -886,26 +848,11 @@ end;
 
 procedure TLZMACompressor.InitializeProps(const CompressionLevel: Integer;
   const ACompressorProps: TCompressorProps);
-const
-  algorithm: array [clLZMAFast..clLZMAUltra64] of Integer = (0, 1, 1, 1, 1);
-  dicSize: array [clLZMAFast..clLZMAUltra64] of Cardinal = (32 shl 10, 2 shl 20, 8 shl 20, 32 shl 20, 64 shl 20);
-  numFastBytes: array [clLZMAFast..clLZMAUltra64] of Integer = (32, 32, 64, 64, 64);
-  btMode: array [clLZMAFast..clLZMAUltra64] of Integer = (0, 1, 1, 1, 1);
-  numHashBytes: array [Boolean] of Integer = (5, 4);
 var
   EncProps: TLZMAEncoderProps;
   Props: TLZMACompressorProps;
 begin
-  if (CompressionLevel < Low(algorithm)) or (CompressionLevel > High(algorithm)) then
-    LZMAInternalError('TLZMACompressor.Create got invalid CompressionLevel ' + IntToStr(CompressionLevel));
-
-  FillChar(EncProps, SizeOf(EncProps), 0);
-  EncProps.Algorithm := algorithm[CompressionLevel];
-  EncProps.BTMode := btMode[CompressionLevel];
-  EncProps.DictionarySize := dicSize[CompressionLevel];
-  EncProps.NumBlockThreads := -1;
-  EncProps.NumFastBytes := numFastBytes[CompressionLevel];
-  EncProps.NumThreads := -1;
+  EncProps := ResolveLZMAEncoderProps(CompressionLevel, ACompressorProps);
 
   var WorkerProcessCheckTrust := False;
   var WorkerProcessOnCheckedTrust: TProc<Boolean> := nil;
@@ -913,26 +860,10 @@ begin
 
   if ACompressorProps is TLZMACompressorProps then begin
     Props := (ACompressorProps as TLZMACompressorProps);
-    if Props.Algorithm <> -1 then
-      EncProps.Algorithm := Props.Algorithm;
-    EncProps.BlockSize := Props.BlockSize;
-    if Props.BTMode <> -1 then
-      EncProps.BTMode := Props.BTMode;
-    if Props.DictionarySize <> 0 then
-      EncProps.DictionarySize := Props.DictionarySize;
-    if Props.NumBlockThreads <> 0 then
-      EncProps.NumBlockThreads := Props.NumBlockThreads;
-    if Props.NumFastBytes <> 0 then
-      EncProps.NumFastBytes := Props.NumFastBytes;
-    if Props.NumThreads <> 0 then
-      EncProps.NumThreads := Props.NumThreads;
-    EncProps.NumThreadGroups := Props.NumThreadGroups;
     WorkerProcessCheckTrust := Props.WorkerProcessCheckTrust;
     WorkerProcessOnCheckedTrust := Props.WorkerProcessOnCheckedTrust;
     WorkerProcessFilename := Props.WorkerProcessFilename;
   end;
-
-  EncProps.NumHashBytes := numHashBytes[EncProps.BTMode = 1];
 
   if WorkerProcessFilename <> '' then begin
     const LZMAWorker = TLZMAWorkerProcess.Create(@FEvents);

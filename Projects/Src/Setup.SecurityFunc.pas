@@ -41,6 +41,7 @@ type
     TrusteeType: DWORD;  { TRUSTEE_TYPE }
     ptstrName: PWideChar;
   end;
+  PExplicitAccessW = ^TExplicitAccessW;
   TExplicitAccessW = record
     grfAccessPermissions: DWORD;
     grfAccessMode: DWORD;  { ACCESS_MODE }
@@ -63,7 +64,7 @@ var
     SecurityInfo: SECURITY_INFORMATION; ppsidOwner, ppsidGroup: PSID;
     ppDacl, ppSacl: PACL): DWORD; stdcall;
   SetEntriesInAclW: function(cCountOfExplicitEntries: ULONG;
-    const pListOfExplicitEntries: TExplicitAccessW; OldAcl: PACL;
+    pListOfExplicitEntries: PExplicitAccessW; OldAcl: PACL;
     var NewAcl: PACL): DWORD; stdcall;
   SD: PSECURITY_DESCRIPTOR;
   Dacl, NewDacl: PACL;
@@ -83,7 +84,7 @@ begin
   end;
 
   ExplicitAccess := nil;
-  Result := GetNamedSecurityInfoW(PChar(ObjectName), ObjectType,
+  Result := GetNamedSecurityInfoW(PWideChar(ObjectName), ObjectType,
     DACL_SECURITY_INFORMATION, nil, nil, @Dacl, nil, SD);
   if Result <> ERROR_SUCCESS then
     Exit;
@@ -108,11 +109,11 @@ begin
       PSID(ExplicitAccess[I].Trustee.ptstrName) := Sid;
       Inc(E);
     end;
-    Result := SetEntriesInAclW(ULONG(EntryCount), ExplicitAccess[0], Dacl, NewDacl);
+    Result := SetEntriesInAclW(ULONG(EntryCount), PExplicitAccessW(ExplicitAccess), Dacl, NewDacl);
     if Result <> ERROR_SUCCESS then
       Exit;
     try
-      Result := SetNamedSecurityInfoW(PChar(ObjectName), ObjectType,
+      Result := SetNamedSecurityInfoW(PWideChar(ObjectName), ObjectType,
         DACL_SECURITY_INFORMATION, nil, nil, NewDacl, nil);
     finally
       LocalFree(HLOCAL(NewDacl));
@@ -143,7 +144,7 @@ const
 var
   Attr, Inheritance, ErrorCode: DWORD;
 begin
-  Attr := GetFileAttributes(PChar(Filename));
+  Attr := GetFileAttributesW(PWideChar(Filename));
   if Attr = INVALID_FILE_ATTRIBUTES then begin
     Result := False;
     Exit;
@@ -167,8 +168,11 @@ const
   SE_REGISTRY_KEY = 4;
   SE_REGISTRY_WOW64_32KEY = 12;
   SE_REGISTRY_WOW64_64KEY = 13;
+var
+  ObjType, ErrorCode: DWORD;
+  ObjName: String;
 begin
-  var ObjType: DWORD := SE_REGISTRY_KEY;
+  ObjType := SE_REGISTRY_KEY;
   case RegView of
     {$IFDEF WIN64}
     rv32Bit: ObjType := SE_REGISTRY_WOW64_32KEY;
@@ -177,7 +181,6 @@ begin
     {$ENDIF}
   end;
 
-  var ObjName: String;
   case RegRootKeyToUInt32(RootKey) of
     UInt32(HKEY_CLASSES_ROOT): ObjName := 'CLASSES_ROOT';
     UInt32(HKEY_CURRENT_USER): ObjName := 'CURRENT_USER';
@@ -191,7 +194,7 @@ begin
   end;
   ObjName := ObjName + '\' + Subkey;
 
-  const ErrorCode = InternalGrantPermission(ObjType, ObjName,
+  ErrorCode := InternalGrantPermission(ObjType, ObjName,
     Entries, EntryCount, CONTAINER_INHERIT_ACE);
   SetLastError(ErrorCode);
   Result := (ErrorCode = ERROR_SUCCESS);

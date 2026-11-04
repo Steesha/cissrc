@@ -10,18 +10,20 @@ unit ISSigFunc;
   text-based keys
 }
 
+{$IFDEF FPC}{$MODESWITCH NESTEDPROCVARS}{$ENDIF}
+
 interface
 
 uses
-  Windows, SysUtils, Classes, ECDSA, SHA256;
+  {$IFDEF MSWINDOWS} Windows, {$ENDIF} SysUtils, Classes, ECDSA, SHA256;
 
 type
   TISSigVerifySignatureResult = (vsrSuccess, vsrMalformed, vsrKeyNotFound,
     vsrBad);
   TISSigImportKeyResult = (ikrSuccess, ikrMalformed, ikrNotPrivateKey);
-  TISSigVerifySignatureFileMissingErrorProc = reference to procedure(const Filename: String);
-  TISSigVerifySignatureSigFileMissingErrorProc = reference to procedure(const Filename, SigFilename: String);
-  TISSigVerifySignatureVerificationFailedErrorProc = reference to procedure(const Filename, SigFilename: String; const VerifyResult: TISSigVerifySignatureResult);
+  TISSigVerifySignatureFileMissingErrorProc = {$IFNDEF FPC}reference to {$ENDIF}procedure(const Filename: String) {$IFDEF FPC}is nested{$ENDIF};
+  TISSigVerifySignatureSigFileMissingErrorProc = {$IFNDEF FPC}reference to {$ENDIF}procedure(const Filename, SigFilename: String) {$IFDEF FPC}is nested{$ENDIF};
+  TISSigVerifySignatureVerificationFailedErrorProc = {$IFNDEF FPC}reference to {$ENDIF}procedure(const Filename, SigFilename: String; const VerifyResult: TISSigVerifySignatureResult) {$IFDEF FPC}is nested{$ENDIF};
 
 { Preferred, hardened functions for loading/saving .issig and key file text }
 function ISSigLoadTextFromFile(const AFilename: String): String;
@@ -102,16 +104,20 @@ function CalcHashToSign(const AIncludeFileNameAndTag: Boolean; const AFileName: 
   const AFileHash: TSHA256Digest; const AFileTag: String): TSHA256Digest;
 
   procedure SHA256UpdateWithString(var Context: TSHA256Context; const S: String);
+  var
+    U: UTF8String;
+    N: UInt32;
   begin
-    const U = UTF8String(S);
-    const N = UInt32(Length(U));
+    U := UTF8Encode(S);
+    N := UInt32(Length(U));
     SHA256Update(Context, N, SizeOf(N));
     if N > 0 then
       SHA256Update(Context, Pointer(U)^, N*SizeOf(U[1]));
   end;
 
+var
+  Context: TSHA256Context;
 begin
-  var Context: TSHA256Context;
   SHA256Init(Context);
   if AIncludeFileNameAndTag then begin
     SHA256UpdateWithString(Context, AFileName);
@@ -152,13 +158,16 @@ procedure ISSigWipeString(var S: String);
   pass strings that reference string literals (which have a reference count of
   -1) or strings with multiple references; they will not be wiped, and when
   DEBUG is defined, an exception will be raised. }
+var
+  T: String;
+  RefCount: NativeInt;
 begin
   if S = '' then
     Exit;
 
-  var T := S;
+  T := S;
   S := '';
-  const RefCount = StringRefCount(T);
+  RefCount := StringRefCount(T);
   if RefCount = 1 then
     FillChar(T[Low(T)], Length(T) * SizeOf(T[Low(T)]), 0)
   else begin
@@ -176,7 +185,7 @@ procedure ZeroUTF8String(var S: UTF8String);
 { Primitive UTF8String wiper for internal use only. Does not clear the string;
   only overwrites contents with zeros. }
 begin
-  if (S <> '') and (StringRefCount(S) = 1) then
+  if (Length(S) <> 0) and (StringRefCount(RawByteString(S)) = 1) then
     FillChar(S[Low(S)], Length(S), 0);
 end;
 
@@ -189,10 +198,13 @@ function ISSigLoadTextFromFile(const AFilename: String): String;
 var
   { One extra character here is intentional }
   InBuf: array[0..ISSigTextFileLengthLimit] of AnsiChar;
+  InBufCount, I: Integer;
+  F: TFileStream;
+  UTF8Text, UTF8RoundTrip: UTF8String;
+  UTF16Text: String;
 begin
   try
-    var InBufCount: Integer;
-    const F = TFileStream.Create(AFilename, fmOpenRead or fmShareDenyWrite);
+    F := TFileStream.Create({$IFDEF FPC}UTF8Encode(AFilename){$ELSE}AFilename{$ENDIF}, fmOpenRead or fmShareDenyWrite);
     try
       InBufCount := Integer(F.Read(InBuf, SizeOf(InBuf)));
     finally
@@ -203,18 +215,16 @@ begin
 
     { Defense-in-depth: Reject any non-CRLF control characters up front, as well
       as any byte values that are never used in UTF-8 encoding }
-    for var I := 0 to InBufCount-1 do
+    for I := 0 to InBufCount-1 do
       if not CharInSet(InBuf[I], [#10, #13] + NonControlASCIICharsSet + UTF8HighCharsSet) then
         Exit('');
 
-    var UTF8Text, UTF8RoundTrip: UTF8String;
-    var UTF16Text: String;
     try
       SetString(UTF8Text, InBuf, InBufCount);
-      UTF16Text := String(UTF8Text);
+      UTF16Text := UTF8Decode(UTF8Text);
 
       { Do round-trip check to catch invalid sequences }
-      UTF8RoundTrip := UTF8String(UTF16Text);
+      UTF8RoundTrip := UTF8Encode(UTF16Text);
       if UTF8RoundTrip <> UTF8Text then
         Exit('');
 
@@ -231,13 +241,15 @@ begin
 end;
 
 procedure ISSigSaveTextToFile(const AFilename, AText: String);
+var
+  F: TFileStream;
+  U: UTF8String;
 begin
-  const F = TFileStream.Create(AFilename, fmCreate or fmShareExclusive);
+  F := TFileStream.Create({$IFDEF FPC}UTF8Encode(AFilename){$ELSE}AFilename{$ENDIF}, fmCreate or fmShareExclusive);
   try
-    var U: UTF8String;
     try
-      U := UTF8String(AText);
-      if U <> '' then
+      U := UTF8Encode(AText);
+      if Length(U) <> 0 then
         F.WriteBuffer(U[Low(U)], Length(U));
     finally
       ZeroUTF8String(U);
@@ -249,31 +261,35 @@ end;
 
 function ISSigCreateSignatureText(const AKey: TECDSAKey;
   const AFileName: String; const AFileSize: Int64; const AFileHash: TSHA256Digest): String;
+const
+  AFileTag = ''; { Should be a parameter in the future }
+var
+  UTF8FileName: UTF8String;
+  C: AnsiChar;
+  PublicKey: TECDSAPublicKey;
+  HashToSign: TSHA256Digest;
+  Sig: TECDSASignature;
 begin
-  const AFileTag = ''; { Should be a parameter in the future }
-
   { Ensure unverifiable signature files can't be created accidentally }
-  const UTF8FileName = UTF8String(AFileName);
+  UTF8FileName := UTF8Encode(AFileName);
   if Length(UTF8FileName) > 1000 then
     raise Exception.Create('File name is too long');
-  if String(UTF8FileName) <> AFileName then
+  if UTF8Decode(UTF8FileName) <> AFileName then
     raise Exception.Create('File name contains invalid surrogate pairs');
-  for var C in UTF8FileName do
+  for C in UTF8FileName do
     if not (C in ((NonControlASCIICharsSet - ['"']) + UTF8HighCharsSet)) then { Note this rejects quotes }
       raise Exception.Create('File name contains invalid characters');
 
   { File size is limited to 16 digits (enough for >9 EB) }
-  if (AFileSize < 0) or (AFileSize > {$IF CompilerVersion >= 36.0} 9_999_999_999_999_999 {$ELSE} 9999999999999999 {$ENDIF} ) then
+  if (AFileSize < 0) or (AFileSize > 9999999999999999) then
     raise Exception.Create('File size out of range');
 
-  var PublicKey: TECDSAPublicKey;
   AKey.ExportPublicKey(PublicKey);
 
-  const HashToSign = CalcHashToSign(True, AFileName, AFileSize, AFileHash, AFileTag);
-  var Sig: TECDSASignature;
+  HashToSign := CalcHashToSign(True, AFileName, AFileSize, AFileHash, AFileTag);
   AKey.SignHash(HashToSign, Sig);
 
-  Result := Format(
+  Result := {$IFDEF FPC}UnicodeFormat{$ELSE}Format{$ENDIF}(
     'format issig-v2'#13#10 +
     'file-name "%s"'#13#10 +
     'file-size %d'#13#10 +
@@ -323,16 +339,22 @@ var
     Format, FileName, FileSize, FileHash, FileTag, KeyID, Sig_r, Sig_s: String;
     Version: Integer;
   end;
+  SS: TStringScanner;
+  KeyUsed, K: TECDSAKey;
+  KeyID, UnverifiedFileHash, HashToSign: TSHA256Digest;
+  PublicKey: TECDSAPublicKey;
+  UnverifiedFileName, UnverifiedFileTag: String;
+  UnverifiedFileSize: Int64;
+  Sig: TECDSASignature;
 begin
   ClearVerifyOutParams(AFileName, AFileSize, AFileHash, AKeyUsedID);
-  var AFileTag := ''; { Should be a parameter in the future }
 
   if Length(AText) > ISSigTextFileLengthLimit then
     Exit(vsrMalformed)
   else if Length(AAllowedKeys) = 0 then
     Exit(vsrKeyNotFound);
 
-  var SS := TStringScanner.Create(AText);
+  SS := TStringScanner.Create(AText);
   if not ConsumeLineValue(SS, 'format', TextValues.Format, 8, 8, NonControlASCIICharsSet) or
      not FormatToVersion(TextValues.Format, TextValues.Version) or
      ((TextValues.Version >= 2) and not ConsumeLineValue(SS, 'file-name', TextValues.FileName, 0, MaxInt,
@@ -353,10 +375,9 @@ begin
     Exit(vsrMalformed);
 
   { Find the key that matches the key ID }
-  var KeyUsed: TECDSAKey := nil;
-  const KeyID = SHA256DigestFromString(TextValues.KeyID);
-  for var K in AAllowedKeys do begin
-    var PublicKey: TECDSAPublicKey;
+  KeyUsed := nil;
+  KeyID := SHA256DigestFromString(TextValues.KeyID);
+  for K in AAllowedKeys do begin
     K.ExportPublicKey(PublicKey);
     if SHA256DigestsEqual(KeyID, CalcKeyID(PublicKey)) then begin
       KeyUsed := K;
@@ -366,20 +387,18 @@ begin
   if KeyUsed = nil then
     Exit(vsrKeyNotFound);
 
-  const UnverifiedFileName = TextValues.FileName;
-  const UnverifiedFileSize = StrToInt64(TextValues.FileSize);
-  const UnverifiedFileHash = SHA256DigestFromString(TextValues.FileHash);
-  const UnverifiedFileTag = TextValues.FileTag;
-  const HashToSign = CalcHashToSign(TextValues.Version >= 2, UnverifiedFileName,
+  UnverifiedFileName := TextValues.FileName;
+  UnverifiedFileSize := StrToInt64({$IFDEF FPC}AnsiString(TextValues.FileSize){$ELSE}TextValues.FileSize{$ENDIF});
+  UnverifiedFileHash := SHA256DigestFromString(TextValues.FileHash);
+  UnverifiedFileTag := TextValues.FileTag;
+  HashToSign := CalcHashToSign(TextValues.Version >= 2, UnverifiedFileName,
     UnverifiedFileSize, UnverifiedFileHash, UnverifiedFileTag);
-  var Sig: TECDSASignature;
   Sig.Sig_r := ECDSAInt256FromString(TextValues.Sig_r);
   Sig.Sig_s := ECDSAInt256FromString(TextValues.Sig_s);
   if KeyUsed.VerifySignature(HashToSign, Sig) then begin
     AFileName := UnverifiedFileName;
     AFileSize := UnverifiedFileSize;
     AFileHash := UnverifiedFileHash;
-    AFileTag := UnverifiedFileTag;
     AKeyUsedID := TextValues.KeyID;
     Result := vsrSuccess;
   end else
@@ -389,8 +408,9 @@ end;
 function ISSigVerifySignatureText(const AAllowedKeys: array of TECDSAKey;
   const AText: String; out AFileName: String; out AFileSize: Int64;
   out AFileHash: TSHA256Digest): TISSigVerifySignatureResult;
+var
+  KeyUsedID: String;
 begin
-  var KeyUsedID: String;
   Result := ISSigVerifySignatureText(AAllowedKeys, AText, AFileName, AFileSize, AFileHash, KeyUsedID);
 end;
 
@@ -407,11 +427,22 @@ function ISSigVerifySignature(const AFilename: String; const AAllowedKeys: array
     on files in directories that don't have "list" permission. There is, however,
     one other difference: FileExists allows wildcards, but this function does
     not. }
+  {$IFDEF MSWINDOWS}
+  var
+    Attr: Cardinal;
   begin
-    var Attr := GetFileAttributes(PChar(Name));
+    Attr := GetFileAttributesW(PChar(Name));
     Result := (Attr <> INVALID_FILE_ATTRIBUTES) and (Attr and faDirectory = 0);
   end;
+  {$ELSE}
+  begin
+    Result := FileExists(UTF8Encode(Name));
+  end;
+  {$ENDIF}
 
+var
+  SigFilename, SigText: String;
+  VerifyResult: TISSigVerifySignatureResult;
 begin
   ClearVerifyOutParams(AExpectedFileName, AExpectedFileSize, AExpectedFileHash, AKeyUsedID);
 
@@ -419,14 +450,14 @@ begin
     AFileMissingErrorProc(AFilename);
     Exit(False);
   end;
-  const SigFilename = AFilename + ISSigExt;
+  SigFilename := AFilename + ISSigExt;
   if not NewFileExists(SigFilename) then begin
     if Assigned(ASigFileMissingErrorProc) then
       ASigFileMissingErrorProc(AFilename, SigFilename);
     Exit(False);
   end;
-  const SigText = ISSigLoadTextFromFile(SigFilename);
-  const VerifyResult = ISSigVerifySignatureText(AAllowedKeys, SigText,
+  SigText := ISSigLoadTextFromFile(SigFilename);
+  VerifyResult := ISSigVerifySignatureText(AAllowedKeys, SigText,
     AExpectedFileName, AExpectedFileSize, AExpectedFileHash, AKeyUsedID);
   Result := VerifyResult = vsrSuccess;
   if not Result and Assigned(AVerificationFailedErrorProc) then
@@ -438,8 +469,9 @@ function ISSigVerifySignature(const AFilename: String; const AAllowedKeys: array
   const AFileMissingErrorProc: TISSigVerifySignatureFileMissingErrorProc;
   const ASigFileMissingErrorProc: TISSigVerifySignatureSigFileMissingErrorProc;
   const AVerificationFailedErrorProc: TISSigVerifySignatureVerificationFailedErrorProc): Boolean;
+var
+  KeyUsedID: String;
 begin
-  var KeyUsedID: String;
   Result := ISSigVerifySignature(AFilename, AAllowedKeys, AExpectedFileName, AExpectedFileSize,
     AExpectedFileHash, KeyUsedID, AFileMissingErrorProc, ASigFileMissingErrorProc,
     AVerificationFailedErrorProc);
@@ -447,12 +479,13 @@ end;
 
 procedure ISSigExportPrivateKeyText(const AKey: TECDSAKey;
   var APrivateKeyText: String);
+var
+  PrivateKey: TECDSAPrivateKey;
+  PrivateDStr: String;
 begin
-  var PrivateKey: TECDSAPrivateKey;
   try
     AKey.ExportPrivateKey(PrivateKey);
 
-    var PrivateDStr: String;
     try
       PrivateDStr := ECDSAInt256ToString(PrivateKey.Private_d);
 
@@ -461,7 +494,7 @@ begin
         With concatenation, there is no buffering. The strings are copied
         directly into a newly-allocated string sized to fit the result exactly
         (no reallocations). }
-      APrivateKeyText := Format(
+      APrivateKeyText := {$IFDEF FPC}UnicodeFormat{$ELSE}Format{$ENDIF}(
         'format issig-private-key'#13#10 +
         'key-id %s'#13#10 +
         'public-x %s'#13#10 +
@@ -481,12 +514,13 @@ end;
 
 procedure ISSigExportPublicKeyText(const AKey: TECDSAKey;
   var APublicKeyText: String);
+var
+  PublicKey: TECDSAPublicKey;
 begin
-  var PublicKey: TECDSAPublicKey;
   try
     AKey.ExportPublicKey(PublicKey);
 
-    APublicKeyText := Format(
+    APublicKeyText := {$IFDEF FPC}UnicodeFormat{$ELSE}Format{$ENDIF}(
       'format issig-public-key'#13#10 +
       'key-id %s'#13#10 +
       'public-x %s'#13#10 +
@@ -513,15 +547,17 @@ var
   TextValues: record
     Format, KeyID, Public_x, Public_y, Private_d: String;
   end;
+  SS: TStringScanner;
+  HasPrivateKey: Boolean;
 begin
   Result := ikrMalformed;
   if Length(AText) > ISSigTextFileLengthLimit then
     Exit;
 
-  var SS := TStringScanner.Create(AText);
+  SS := TStringScanner.Create(AText);
   if not ConsumeLineValue(SS, 'format', TextValues.Format, 16, 17, NonControlASCIICharsSet) then
     Exit;
-  var HasPrivateKey := False;
+  HasPrivateKey := False;
   if TextValues.Format = 'issig-private-key' then
     HasPrivateKey := True
   else if TextValues.Format = 'issig-public-key' then
@@ -568,8 +604,9 @@ end;
 
 function ISSigParsePublicKeyText(const AText: String;
   out APublicKey: TECDSAPublicKey): TISSigImportKeyResult;
+var
+  PrivateKey: TECDSAPrivateKey;  { only PublicKey part is used }
 begin
-  var PrivateKey: TECDSAPrivateKey;  { only PublicKey part is used }
   Result := InternalParseKeyText(AText, PrivateKey, False);
   if Result = ikrSuccess then
     APublicKey := PrivateKey.PublicKey;
@@ -577,8 +614,9 @@ end;
 
 function ISSigImportKeyText(const AKey: TECDSAKey; const AText: String;
   const ANeedPrivateKey: Boolean): TISSigImportKeyResult;
+var
+  PrivateKey: TECDSAPrivateKey;
 begin
-  var PrivateKey: TECDSAPrivateKey;
   try
     Result := InternalParseKeyText(AText, PrivateKey, ANeedPrivateKey);
     if Result = ikrSuccess then begin
@@ -594,8 +632,9 @@ end;
 
 function ISSigImportPublicKey(const AKey: TECDSAKey;
   const AKeyID, APublicX, APublicY: String): TISSigImportKeyResult;
+var
+  PublicKey: TECDSAPublicKey;
 begin
-  var Publickey: TECDSAPublickey;
   PublicKey.Public_x := ECDSAInt256FromString(APublicX);
   PublicKey.Public_y := ECDSAInt256FromString(APublicY);
 
@@ -621,8 +660,9 @@ begin
 end;
 
 function ISSigIsValidKeyIDForPublicXY(const AKeyID, APublicX, APublicY: String): Boolean;
+var
+  PublicKey: TECDSAPublicKey;
 begin
-  var PublicKey: TECDSAPublicKey;
   PublicKey.Public_x := ECDSAInt256FromString(APublicX);
   PublicKey.Public_y := ECDSAInt256FromString(APublicY);
 
@@ -633,11 +673,12 @@ end;
 function ISSigCalcStreamHash(const AStream: TStream): TSHA256Digest;
 var
   Buf: array[0..$FFFF] of Byte;
+  Context: TSHA256Context;
+  BytesRead: Cardinal;
 begin
-  var Context: TSHA256Context;
   SHA256Init(Context);
   while True do begin
-    const BytesRead = Cardinal(AStream.Read(Buf, SizeOf(Buf)));
+    BytesRead := Cardinal(AStream.Read(Buf, SizeOf(Buf)));
     if BytesRead = 0 then
       Break;
     SHA256Update(Context, Buf, BytesRead);

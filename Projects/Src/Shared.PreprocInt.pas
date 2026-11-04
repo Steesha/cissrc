@@ -12,7 +12,7 @@ unit Shared.PreprocInt;
 interface
 
 uses
-  Windows;
+  {$IFDEF MSWINDOWS} Windows {$ELSE} Shared.PlatformTypes {$ENDIF};
 
 const
   ispeSuccess = 0;

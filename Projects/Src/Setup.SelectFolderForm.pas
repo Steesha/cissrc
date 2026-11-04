@@ -43,7 +43,7 @@ uses
   PathFunc, SetupLdrAndSetup.Messages, Shared.SetupMessageIDs, Setup.MainFunc,
   Setup.WizardForm;
 
-{$R *.DFM}
+{$R *.dfm}
 
 function ShowSelectFolderDialog(const StartMenu, AppendDir: Boolean;
   var Path: String; const NewFolderName: String): Boolean;

@@ -75,9 +75,11 @@ begin
 end;
 
 destructor TCompressionHandler.Destroy;
+var
+  I: Integer;
 begin
   if Assigned(FCachedCompressors) then begin
-    for var I := FCachedCompressors.Count-1 downto 0 do
+    for I := FCachedCompressors.Count-1 downto 0 do
       TCustomCompressor(FCachedCompressors[I]).Free;
     FreeAndNil(FCachedCompressors);
   end;
@@ -109,20 +111,26 @@ procedure TCompressionHandler.NewSlice(const Filename: String);
 
   function GenerateSliceFilename(const Compiler: TSetupCompiler;
     const ASlice: Integer): String;
+  var
+    SlicesPerDisk, Major, Minor: Integer;
+    OutputBaseFilename: String;
   begin
-    var SlicesPerDisk := Compiler.GetSlicesPerDisk;
-    var OutputBaseFilename := Compiler.GetOutputBaseFilename;
-    var Major := ASlice div SlicesPerDisk + 1;
-    var Minor := ASlice mod SlicesPerDisk;
+    SlicesPerDisk := Compiler.GetSlicesPerDisk;
+    OutputBaseFilename := Compiler.GetOutputBaseFilename;
+    Major := ASlice div SlicesPerDisk + 1;
+    Minor := ASlice mod SlicesPerDisk;
     if SlicesPerDisk = 1 then
-      Result := Format('%s-%d.bin', [OutputBaseFilename, Major])
+      Result := {$IFDEF FPC}UnicodeFormat{$ELSE}Format{$ENDIF}('%s-%d.bin', [OutputBaseFilename, Major])
     else
-      Result := Format('%s-%d%s.bin', [OutputBaseFilename, Major,
+      Result := {$IFDEF FPC}UnicodeFormat{$ELSE}Format{$ENDIF}('%s-%d%s.bin', [OutputBaseFilename, Major,
         Chr(Ord('a') + Minor)]);
   end;
 
+var
+  DiskSliceSize: Int64;
+  DiskHeader: TDiskSliceHeader;
 begin
-  var DiskSliceSize := FCompiler.GetDiskSliceSize;
+  DiskSliceSize := FCompiler.GetDiskSliceSize;
   EndSlice;
   Inc(FCurSlice);
   if (FCurSlice > 0) and not FCompiler.GetDiskSpanning then
@@ -133,7 +141,6 @@ begin
     FDestFile := TFile.Create(FCompiler.GetOutputDir +
       GenerateSliceFilename(FCompiler, FCurSlice), fdCreateAlways, faReadWrite, fsNone);
     FDestFile.WriteBuffer(DiskSliceID, SizeOf(DiskSliceID));
-    var DiskHeader: TDiskSliceHeader;
     DiskHeader.TotalSize := 0;
     FDestFile.WriteBuffer(DiskHeader, SizeOf(DiskHeader));
     FSliceBaseOffset := 0;
@@ -165,13 +172,14 @@ procedure TCompressionHandler.NewChunk(const ACompressorClass: TCustomCompressor
   procedure SelectCompressor;
   var
     C: TCustomCompressor;
+    I: Integer;
   begin
     { No current compressor, or changing compressor classes? }
     if (FCompressor = nil) or (FCompressor.ClassType <> ACompressorClass) then begin
       FCompressor := nil;
       { Search cache for requested class }
-      for var I := FCachedCompressors.Count-1 downto 0 do begin
-        C := FCachedCompressors[I];
+      for I := FCachedCompressors.Count-1 downto 0 do begin
+        C := TCustomCompressor(FCachedCompressors[I]);
         if C.ClassType = ACompressorClass then begin
           FCompressor := C;
           Break;
@@ -233,6 +241,7 @@ procedure TCompressionHandler.CompressFile(const SourceFile: TFile;
 var
   Context: TSHA256Context;
   AddrOffset: UInt32;
+  BufSize: Cardinal;
   Buf: array[0..65535] of Byte;
   { ^ *must* be the same buffer size used in Setup (TFileExtractor), otherwise
     the TransformCallInstructions call will break }
@@ -240,7 +249,7 @@ begin
   SHA256Init(Context);
   AddrOffset := 0;
   while Bytes > 0 do begin
-    var BufSize: Cardinal := SizeOf(Buf);
+    BufSize := SizeOf(Buf);
     if Bytes < BufSize then
       BufSize := Cardinal(Bytes);
 

@@ -25,7 +25,70 @@ type
 implementation
 
 uses
-  ActiveX, oleacc, SysUtils, Classes, StdCtrls, OleAccFunc;
+  ActiveX, {$IFDEF FPC}Variants, VarUtils,{$ELSE}oleacc,{$ENDIF} SysUtils, Classes, StdCtrls, OleAccFunc;
+
+{$IFDEF FPC}
+const
+  CHILDID_SELF = 0;
+  OBJID_CLIENT = DWORD($FFFFFFFC);
+  EVENT_OBJECT_STATECHANGE = $800A;
+  STATE_SYSTEM_UNAVAILABLE = $01;
+  STATE_SYSTEM_CHECKED = $10;
+  STATE_SYSTEM_MIXED = $20;
+  ROLE_SYSTEM_OUTLINE = $23;
+  ROLE_SYSTEM_STATICTEXT = $29;
+  ROLE_SYSTEM_CHECKBUTTON = $2C;
+  ROLE_SYSTEM_RADIOBUTTON = $2D;
+
+type
+  { COM takes the child VARIANT by value. Use the unmanaged record for that
+    ABI so FPC does not apply managed-parameter lifetime rules. }
+  TMSAAChild = TVarData;
+  TMSAAVariant = TVarData;
+  TMSAABstr = PWideChar;
+  TMSAADispatch = Pointer;
+  {$IFDEF CPU64}
+    {$IF SizeOf(TMSAAChild) <> 24}{$FATAL Unexpected Win64 VARIANT size}{$ENDIF}
+  {$ELSE}
+    {$IF SizeOf(TMSAAChild) <> 16}{$FATAL Unexpected Win32 VARIANT size}{$ENDIF}
+  {$ENDIF}
+
+  { Method order follows IAccessible in oleacc.h }
+  IAccessible = interface(IDispatch)
+    ['{618736E0-3C3D-11CF-810C-00AA00389B71}']
+    function get_accParent(out ppdispParent: TMSAADispatch): HRESULT; stdcall;
+    function get_accChildCount(out pcountChildren: Integer): HRESULT; stdcall;
+    function get_accChild(varChild: TMSAAChild; out ppdispChild: TMSAADispatch): HRESULT; stdcall;
+    function get_accName(varChild: TMSAAChild; out pszName: TMSAABstr): HRESULT; stdcall;
+    function get_accValue(varChild: TMSAAChild; out pszValue: TMSAABstr): HRESULT; stdcall;
+    function get_accDescription(varChild: TMSAAChild; out pszDescription: TMSAABstr): HRESULT; stdcall;
+    function get_accRole(varChild: TMSAAChild; out pvarRole: TMSAAVariant): HRESULT; stdcall;
+    function get_accState(varChild: TMSAAChild; out pvarState: TMSAAVariant): HRESULT; stdcall;
+    function get_accHelp(varChild: TMSAAChild; out pszHelp: TMSAABstr): HRESULT; stdcall;
+    function get_accHelpTopic(out pszHelpFile: TMSAABstr; varChild: TMSAAChild; out pidTopic: Integer): HRESULT; stdcall;
+    function get_accKeyboardShortcut(varChild: TMSAAChild; out pszKeyboardShortcut: TMSAABstr): HRESULT; stdcall;
+    function get_accFocus(out pvarID: TMSAAVariant): HRESULT; stdcall;
+    function get_accSelection(out pvarChildren: TMSAAVariant): HRESULT; stdcall;
+    function get_accDefaultAction(varChild: TMSAAChild; out pszDefaultAction: TMSAABstr): HRESULT; stdcall;
+    function accSelect(flagsSelect: Integer; varChild: TMSAAChild): HRESULT; stdcall;
+    function accLocation(out pxLeft: Integer; out pyTop: Integer; out pcxWidth: Integer;
+      out pcyHeight: Integer; varChild: TMSAAChild): HRESULT; stdcall;
+    function accNavigate(navDir: Integer; varStart: TMSAAChild; out pvarEnd: TMSAAVariant): HRESULT; stdcall;
+    function accHitTest(xLeft: Integer; yTop: Integer; out pvarID: TMSAAVariant): HRESULT; stdcall;
+    function accDoDefaultAction(varChild: TMSAAChild): HRESULT; stdcall;
+    function put_accName(varChild: TMSAAChild; pszName: TMSAABstr): HRESULT; stdcall;
+    function put_accValue(varChild: TMSAAChild; pszValue: TMSAABstr): HRESULT; stdcall;
+  end;
+
+function AllocMSAABstr(const Value: PWideChar; Length: Cardinal): TMSAABstr;
+  stdcall; external 'oleaut32.dll' name 'SysAllocStringLen';
+{$ELSE}
+type
+  TMSAAChild = OleVariant;
+  TMSAAVariant = OleVariant;
+  TMSAABstr = WideString;
+  TMSAADispatch = IDispatch;
+{$ENDIF}
 
 type
   TNewCheckListBoxAccess = class(TNewCheckListBox);
@@ -43,30 +106,32 @@ type
       flags: Word; var dispParams; varResult: Pointer;
       excepInfo: Pointer; argErr: Pointer): HRESULT; stdcall;
     { IAccessible }
-    function get_accParent(out ppdispParent: IDispatch): HRESULT; stdcall;
+    function get_accParent(out ppdispParent: TMSAADispatch): HRESULT; stdcall;
     function get_accChildCount(out pcountChildren: Integer): HRESULT; stdcall;
-    function get_accChild(varChild: OleVariant; out ppdispChild: IDispatch): HRESULT; stdcall;
-    function get_accName(varChild: OleVariant; out pszName: WideString): HRESULT; stdcall;
-    function get_accValue(varChild: OleVariant; out pszValue: WideString): HRESULT; stdcall;
-    function get_accDescription(varChild: OleVariant; out pszDescription: WideString): HRESULT; stdcall;
-    function get_accRole(varChild: OleVariant; out pvarRole: OleVariant): HRESULT; stdcall;
-    function get_accState(varChild: OleVariant; out pvarState: OleVariant): HRESULT; stdcall;
-    function get_accHelp(varChild: OleVariant; out pszHelp: WideString): HRESULT; stdcall;
-    function get_accHelpTopic(out pszHelpFile: WideString; varChild: OleVariant; out pidTopic: Integer): HRESULT; stdcall;
-    function get_accKeyboardShortcut(varChild: OleVariant; out pszKeyboardShortcut: WideString): HRESULT; stdcall;
-    function get_accFocus(out pvarID: OleVariant): HRESULT; stdcall;
-    function get_accSelection(out pvarChildren: OleVariant): HRESULT; stdcall;
-    function get_accDefaultAction(varChild: OleVariant; out pszDefaultAction: WideString): HRESULT; stdcall;
-    function accSelect(flagsSelect: Integer; varChild: OleVariant): HRESULT; stdcall;
+    function get_accChild(varChild: TMSAAChild; out ppdispChild: TMSAADispatch): HRESULT; stdcall;
+    function get_accName(varChild: TMSAAChild; out pszName: TMSAABstr): HRESULT; stdcall;
+    function get_accValue(varChild: TMSAAChild; out pszValue: TMSAABstr): HRESULT; stdcall;
+    function get_accDescription(varChild: TMSAAChild; out pszDescription: TMSAABstr): HRESULT; stdcall;
+    function get_accRole(varChild: TMSAAChild; out pvarRole: TMSAAVariant): HRESULT; stdcall;
+    function get_accState(varChild: TMSAAChild; out pvarState: TMSAAVariant): HRESULT; stdcall;
+    function get_accHelp(varChild: TMSAAChild; out pszHelp: TMSAABstr): HRESULT; stdcall;
+    function get_accHelpTopic(out pszHelpFile: TMSAABstr; varChild: TMSAAChild; out pidTopic: Integer): HRESULT; stdcall;
+    function get_accKeyboardShortcut(varChild: TMSAAChild; out pszKeyboardShortcut: TMSAABstr): HRESULT; stdcall;
+    function get_accFocus(out pvarID: TMSAAVariant): HRESULT; stdcall;
+    function get_accSelection(out pvarChildren: TMSAAVariant): HRESULT; stdcall;
+    function get_accDefaultAction(varChild: TMSAAChild; out pszDefaultAction: TMSAABstr): HRESULT; stdcall;
+    function accSelect(flagsSelect: Integer; varChild: TMSAAChild): HRESULT; stdcall;
     function accLocation(out pxLeft: Integer; out pyTop: Integer; out pcxWidth: Integer;
-      out pcyHeight: Integer; varChild: OleVariant): HRESULT; stdcall;
-    function accNavigate(navDir: Integer; varStart: OleVariant; out pvarEnd: OleVariant): HRESULT; stdcall;
-    function accHitTest(xLeft: Integer; yTop: Integer; out pvarID: OleVariant): HRESULT; stdcall;
-    function accDoDefaultAction(varChild: OleVariant): HRESULT; stdcall;
-    function put_accName(varChild: OleVariant; const pszName: WideString): HRESULT; stdcall;
-    function put_accValue(varChild: OleVariant; const pszValue: WideString): HRESULT; stdcall;
+      out pcyHeight: Integer; varChild: TMSAAChild): HRESULT; stdcall;
+    function accNavigate(navDir: Integer; varStart: TMSAAChild; out pvarEnd: TMSAAVariant): HRESULT; stdcall;
+    function accHitTest(xLeft: Integer; yTop: Integer; out pvarID: TMSAAVariant): HRESULT; stdcall;
+    function accDoDefaultAction(varChild: TMSAAChild): HRESULT; stdcall;
+    function put_accName(varChild: TMSAAChild; {$IFNDEF FPC}const{$ENDIF} pszName: TMSAABstr): HRESULT; stdcall;
+    function put_accValue(varChild: TMSAAChild; {$IFNDEF FPC}const{$ENDIF} pszValue: TMSAABstr): HRESULT; stdcall;
+    {$IFNDEF FPC}
     function IAccessible.Set_accName = put_accName;
     function IAccessible.Set_accValue = put_accValue;
+    {$ENDIF}
   public
     constructor Create(AControl: TNewCheckListBox);
     destructor Destroy; override;
@@ -95,6 +160,8 @@ begin
 end;
 
 function TNewCheckListBoxMSAAHelper.HandleMSAAGetObject(var Message: TMessage): Boolean;
+var
+  AccObject: IAccessible;
 begin
   { Per docs, lParam must be casted to DWORD (32 bits) because it may be
     sign-extended in a 64-bit process. Bail when destroying: the window
@@ -110,7 +177,7 @@ begin
       end;
     end;
     { Keep our own reference to ensure release even if LresultFromObject fails }
-    const AccObject: IAccessible = TAccObject(FAccObjectInstance);
+    AccObject := TAccObject(FAccObjectInstance);
     Message.Result := LresultFromObjectFunc(IAccessible, Message.WParam,
       AccObject);
   end;
@@ -179,7 +246,7 @@ begin
   Result := E_NOTIMPL;
 end;
 
-function TAccObject.accDoDefaultAction(varChild: OleVariant): HRESULT;
+function TAccObject.accDoDefaultAction(varChild: TMSAAChild): HRESULT;
 begin
   { A list box's default action is Double Click, which is useless for a
     list of check boxes }
@@ -187,31 +254,31 @@ begin
 end;
 
 function TAccObject.accHitTest(xLeft, yTop: Integer;
-  out pvarID: OleVariant): HRESULT;
+  out pvarID: TMSAAVariant): HRESULT;
 begin
   Result := FStdAcc.accHitTest(xLeft, yTop, pvarID);
 end;
 
 function TAccObject.accLocation(out pxLeft, pyTop, pcxWidth,
-  pcyHeight: Integer; varChild: OleVariant): HRESULT;
+  pcyHeight: Integer; varChild: TMSAAChild): HRESULT;
 begin
   Result := FStdAcc.accLocation(pxLeft, pyTop, pcxWidth, pcyHeight, varChild);
 end;
 
-function TAccObject.accNavigate(navDir: Integer; varStart: OleVariant;
-  out pvarEnd: OleVariant): HRESULT;
+function TAccObject.accNavigate(navDir: Integer; varStart: TMSAAChild;
+  out pvarEnd: TMSAAVariant): HRESULT;
 begin
   Result := FStdAcc.accNavigate(navDir, varStart, pvarEnd);
 end;
 
 function TAccObject.accSelect(flagsSelect: Integer;
-  varChild: OleVariant): HRESULT;
+  varChild: TMSAAChild): HRESULT;
 begin
   Result := FStdAcc.accSelect(flagsSelect, varChild);
 end;
 
-function TAccObject.get_accChild(varChild: OleVariant;
-  out ppdispChild: IDispatch): HRESULT;
+function TAccObject.get_accChild(varChild: TMSAAChild;
+  out ppdispChild: TMSAADispatch): HRESULT;
 begin
   Result := FStdAcc.get_accChild(varChild, ppdispChild);
 end;
@@ -221,58 +288,58 @@ begin
   Result := FStdAcc.get_accChildCount(pcountChildren);
 end;
 
-function TAccObject.get_accDefaultAction(varChild: OleVariant;
-  out pszDefaultAction: WideString): HRESULT;
+function TAccObject.get_accDefaultAction(varChild: TMSAAChild;
+  out pszDefaultAction: TMSAABstr): HRESULT;
 begin
   { See accDoDefaultAction }
   pszDefaultAction := '';
   Result := S_FALSE;
 end;
 
-function TAccObject.get_accDescription(varChild: OleVariant;
-  out pszDescription: WideString): HRESULT;
+function TAccObject.get_accDescription(varChild: TMSAAChild;
+  out pszDescription: TMSAABstr): HRESULT;
 begin
   Result := FStdAcc.get_accDescription(varChild, pszDescription);
 end;
 
-function TAccObject.get_accFocus(out pvarID: OleVariant): HRESULT;
+function TAccObject.get_accFocus(out pvarID: TMSAAVariant): HRESULT;
 begin
   Result := FStdAcc.get_accFocus(pvarID);
 end;
 
-function TAccObject.get_accHelp(varChild: OleVariant;
-  out pszHelp: WideString): HRESULT;
+function TAccObject.get_accHelp(varChild: TMSAAChild;
+  out pszHelp: TMSAABstr): HRESULT;
 begin
   Result := FStdAcc.get_accHelp(varChild, pszHelp);
 end;
 
-function TAccObject.get_accHelpTopic(out pszHelpFile: WideString;
-  varChild: OleVariant; out pidTopic: Integer): HRESULT;
+function TAccObject.get_accHelpTopic(out pszHelpFile: TMSAABstr;
+  varChild: TMSAAChild; out pidTopic: Integer): HRESULT;
 begin
   Result := FStdAcc.get_accHelpTopic(pszHelpFile, varChild, pidTopic);
 end;
 
-function TAccObject.get_accKeyboardShortcut(varChild: OleVariant;
-  out pszKeyboardShortcut: WideString): HRESULT;
+function TAccObject.get_accKeyboardShortcut(varChild: TMSAAChild;
+  out pszKeyboardShortcut: TMSAABstr): HRESULT;
 begin
   Result := FStdAcc.get_accKeyboardShortcut(varChild, pszKeyboardShortcut);
 end;
 
-function TAccObject.get_accName(varChild: OleVariant;
-  out pszName: WideString): HRESULT;
+function TAccObject.get_accName(varChild: TMSAAChild;
+  out pszName: TMSAABstr): HRESULT;
 begin
   Result := FStdAcc.get_accName(varChild, pszName);
 end;
 
-function TAccObject.get_accParent(out ppdispParent: IDispatch): HRESULT;
+function TAccObject.get_accParent(out ppdispParent: TMSAADispatch): HRESULT;
 begin
   Result := FStdAcc.get_accParent(ppdispParent);
 end;
 
-function TAccObject.get_accRole(varChild: OleVariant;
-  out pvarRole: OleVariant): HRESULT;
+function TAccObject.get_accRole(varChild: TMSAAChild;
+  out pvarRole: TMSAAVariant): HRESULT;
 begin
-  VariantInit(pvarRole);
+  VariantInit({$IFDEF FPC}TVarData(pvarRole){$ELSE}pvarRole{$ENDIF});
   if FControl = nil then begin
     Result := E_FAIL;
     Exit;
@@ -301,17 +368,21 @@ begin
   end;
 end;
 
-function TAccObject.get_accSelection(out pvarChildren: OleVariant): HRESULT;
+function TAccObject.get_accSelection(out pvarChildren: TMSAAVariant): HRESULT;
 begin
   Result := FStdAcc.get_accSelection(pvarChildren);
 end;
 
-function TAccObject.get_accState(varChild: OleVariant;
-  out pvarState: OleVariant): HRESULT;
+function TAccObject.get_accState(varChild: TMSAAChild;
+  out pvarState: TMSAAVariant): HRESULT;
+var
+  IsItem: Boolean;
+  Item: Integer;
+  ItemState: TItemState;
 begin
-  const IsItem = (TVarData(varChild).VType = VT_I4) and
+  IsItem := (TVarData(varChild).VType = VT_I4) and
     (TVarData(varChild).VInteger <> CHILDID_SELF);
-  const Item = TVarData(varChild).VInteger;
+  Item := TVarData(varChild).VInteger;
 
   Result := FStdAcc.get_accState(varChild, pvarState);
   { ^ On 64-bit, Delphi passes our own copy of varChild, and
@@ -322,7 +393,7 @@ begin
     if (Result = S_OK) and IsItem and
        (TVarData(pvarState).VType = VT_I4) and
        Assigned(FControl) then begin
-      const ItemState = FControl.ItemStates[Item-1];
+      ItemState := FControl.ItemStates[Item-1];
       if ItemState.ItemType <> itGroup then begin
         case ItemState.State of
           cbChecked: TVarData(pvarState).VInteger := TVarData(pvarState).VInteger or STATE_SYSTEM_CHECKED;
@@ -337,10 +408,14 @@ begin
   end;
 end;
 
-function TAccObject.get_accValue(varChild: OleVariant;
-  out pszValue: WideString): HRESULT;
+function TAccObject.get_accValue(varChild: TMSAAChild;
+  out pszValue: TMSAABstr): HRESULT;
+{$IFDEF FPC}
+var
+  Value: UnicodeString;
+{$ENDIF}
 begin
-  pszValue := '';
+  pszValue := {$IFDEF FPC}nil{$ELSE}''{$ENDIF};
   if FControl = nil then begin
     Result := E_FAIL;
     Exit;
@@ -356,7 +431,14 @@ begin
       Not sure if any screen readers will actually use this, seeing as we
       aren't a real tree view control. }
     try
+      {$IFDEF FPC}
+      Value := IntToStr(FControl.ItemStates[TVarData(varChild).VInteger-1].Level);
+      pszValue := AllocMSAABstr(PWideChar(Value), Length(Value));
+      if pszValue = nil then
+        Exit(E_OUTOFMEMORY);
+      {$ELSE}
       pszValue := IntToStr(FControl.ItemStates[TVarData(varChild).VInteger-1].Level);
+      {$ENDIF}
       Result := S_OK;
     except
       Result := E_INVALIDARG;
@@ -364,14 +446,14 @@ begin
   end;
 end;
 
-function TAccObject.put_accName(varChild: OleVariant;
-  const pszName: WideString): HRESULT;
+function TAccObject.put_accName(varChild: TMSAAChild;
+  {$IFNDEF FPC}const{$ENDIF} pszName: TMSAABstr): HRESULT;
 begin
   Result := S_FALSE;
 end;
 
-function TAccObject.put_accValue(varChild: OleVariant;
-  const pszValue: WideString): HRESULT;
+function TAccObject.put_accValue(varChild: TMSAAChild;
+  {$IFNDEF FPC}const{$ENDIF} pszValue: TMSAABstr): HRESULT;
 begin
   Result := S_FALSE;
 end;

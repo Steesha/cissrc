@@ -12,7 +12,7 @@ unit ISPP.CTokenizer;
 
 interface
 
-uses SysUtils;
+uses SysUtils, Shared.FPCStringUtils;
 
 type
 
@@ -170,16 +170,20 @@ function TCTokenizer.InternalNextToken: TTokenKind;
   end;
 
   function GetEscapeSequencesString(QuoteChar: Char): string;
+  var
+    P: PChar;
+    S: String;
+    C: Byte;
+    I: Integer;
   begin
     Inc(FExpr);
     Result := '';
     while True do begin
-      const P = FExpr;
-      while not CharInSet(FExpr^, [#0, '\', QuoteChar]) do
+      P := FExpr;
+      while (FExpr^ <> #0) and (FExpr^ <> '\') and (FExpr^ <> QuoteChar) do
         Inc(FExpr);
       Unterminated;
       { FExpr^ is now '\' or QuoteChar }
-      var S: String;
       SetString(S, P, FExpr - P);
       Result := Result + S;
       if FExpr^ = QuoteChar then begin
@@ -192,8 +196,8 @@ function TCTokenizer.InternalNextToken: TTokenKind;
       case FExpr^ of
         '0'..'7':// octal 400 = $100
           begin
-            var C: Byte := 0;
-            var I := 0;
+            C := 0;
+            I := 0;
             while CharInSet(FExpr^, ['0'..'7']) and (I < 3) do begin
               Inc(I);
               C := Byte((C shl 3) + (Ord(FExpr^) - Ord('0')));
@@ -213,8 +217,8 @@ function TCTokenizer.InternalNextToken: TTokenKind;
         'x':
           begin
             Inc(FExpr);
-            var C: Byte := 0;
-            var I := 0;
+            C := 0;
+            I := 0;
             while CharInSet(FExpr^, ['0'..'9', 'A'..'F', 'a'..'f']) and (I < 2) do begin
               Inc(I);
               C := Byte(C shl 4);
@@ -241,16 +245,18 @@ function TCTokenizer.InternalNextToken: TTokenKind;
   end;
 
   function GetPascalString(QuoteChar: Char): string;
+  var
+    P: PChar;
+    S: String;
   begin
     Inc(FExpr);
     Result := '';
     while True do begin
-      const P = FExpr;
-      while not CharInSet(FExpr^, [#0, QuoteChar]) do
+      P := FExpr;
+      while (FExpr^ <> #0) and (FExpr^ <> QuoteChar) do
         Inc(FExpr);
       Unterminated;
       { FExpr^ is now QuoteChar }
-      var S: String;
       SetString(S, P, FExpr - P);
       Result := Result + S;
       Inc(FExpr);
@@ -496,12 +502,12 @@ function TCTokenizer.NextTokenExpect(Expected: TTokenKinds): TTokenKind;
     case T of
       tkIdent:
         if Found then
-          Result := Format('identifier "%s"', [TokenString])
+          Result := InnoFormat('identifier "%s"', [TokenString])
         else
           Result := 'identifier';
       tkNumber:
         if Found then
-          Result := Format('number %d (0x%0:.2x)', [TokenInt])
+          Result := InnoFormat('number %d (0x%0:.2x)', [TokenInt])
         else
           Result := 'number';
     else
@@ -522,6 +528,8 @@ var
   I: TTokenKind;
   C: Integer;
 begin
+  M1 := '';
+  M2 := '';
   Result := NextToken;
   if not (Result in Expected) then
   begin
@@ -552,7 +560,7 @@ begin
       end
       else
         M1 := M2;
-    Error(Capitalize(Format('%s expected but %s found', [M1, GetFriendlyTokenDesc(Token, True)])));
+    Error(Capitalize(InnoFormat('%s expected but %s found', [M1, GetFriendlyTokenDesc(Token, True)])));
   end;
 end;
 
@@ -563,17 +571,19 @@ end;
 
 
 procedure TCTokenizer.Error(const Message: string);
+var
+  E: EParsingError;
 begin
-  var E := EParsingError.Create(Message);
+  E := EParsingError.Create(ToNativeText(Message));
   if FExprOffset <> -1 then
-    E.Position := Integer(FExprOffset + FExpr - FExprStart) + 1;
+    E.Position := Integer(FExprOffset + (FExpr - FExprStart)) + 1;
   raise E;
 end;
 
 procedure TCTokenizer.ErrorFmt(const Message: string;
   Args: array of const);
 begin
-  Error(Format(Message, Args));
+  Error(InnoFormat(Message, Args));
 end;
 
 procedure TCTokenizer.IllegalChar(C: Char);

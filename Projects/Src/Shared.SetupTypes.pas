@@ -14,7 +14,7 @@ unit Shared.SetupTypes;
 interface
 
 uses
-  Windows, SysUtils, Classes, ECDSA, Shared.Struct;
+  {$IFDEF MSWINDOWS} Windows, {$ENDIF} SysUtils, Classes, ECDSA, Shared.Struct, Shared.FPCStringUtils;
 
 const
   { Predefined page identifiers }
@@ -55,21 +55,21 @@ const
   CodeRootKeyFlag64Bit = $02000000;
   CodeRootKeyValidFlags = CodeRootKeyFlag32Bit or CodeRootKeyFlag64Bit;
 
-  HKEY_AUTO = HKEY(1); { Any UInt32 value will work as long as it isn't 0 and doesn't match a predefined key handle (8xxxxxxx) nor includes any of the CodeRootKeyValidFlags flags. }
+  HKEY_AUTO = {$IFDEF MSWINDOWS}HKEY(1){$ELSE}UInt32(1){$ENDIF}; { Any UInt32 value will work as long as it isn't 0 and doesn't match a predefined key handle (8xxxxxxx) nor includes any of the CodeRootKeyValidFlags flags. }
 
 function StringsToCommaString(const Strings: TStrings): String;
 procedure SetStringsFromCommaString(const Strings: TStrings; const Value: String);
 function StrToSetupVersionData(const S: String; var VerData: TSetupVersionData): Boolean;
 procedure HandleRenamedConstants(var Cnst: String; const RenamedConstantCallback: TRenamedConstantCallback);
 procedure SetISSigAllowedKey(var ISSigAllowedKeys: AnsiString; const KeyIndex: Integer);
-function GetISSigAllowedKeys([ref] const ISSigAvailableKeys: TArrayOfECDSAKey;
+function GetISSigAllowedKeys({$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} ISSigAvailableKeys: TArrayOfECDSAKey;
   const ISSigAllowedKeys: AnsiString): TArrayOfECDSAKey;
 function IsExcluded(Text: String; const AExcludes: TStrings): Boolean;
 
 implementation
 
 uses
-  PathFunc, Shared.CommonFunc;
+  {$IFDEF MSWINDOWS} PathFunc, {$ENDIF} Shared.CompilerSupport;
 
 function QuoteStringIfNeeded(const S: String): String;
 { Used internally by StringsToCommaString. Adds quotes around the string if
@@ -116,12 +116,12 @@ var
   I: Integer;
   S: String;
 begin
-  if (Strings.Count = 1) and (Strings[0] = '') then
+  if (Strings.Count = 1) and (Length(Strings[0]) = 0) then
     Result := '""'
   else begin
     Result := '';
     for I := 0 to Strings.Count-1 do begin
-      S := QuoteStringIfNeeded(Strings[I]);
+      S := QuoteStringIfNeeded(FromNativeText(Strings[I]));
       if I = 0 then
         Result := S
       else
@@ -176,7 +176,7 @@ begin
             Inc(P);
           SetString(S, PStart, P - PStart);
         end;
-        Strings.Add(S);
+        Strings.Add(ToNativeText(S));
         while CharInSet(P^, [#1..' ']) do
           Inc(P);
         if P^ = #0 then
@@ -207,7 +207,7 @@ function StrToSetupVersionData(const S: String; var VerData: TSetupVersionData):
     Z := Lowercase(Str);
     I := Pos('sp', Z);
     if I <> 0 then begin
-      J := StrToInt(Copy(Z, I+2, Maxint));
+      J := InnoStrToInt(Copy(Z, I+2, Maxint));
       if (J < Low(Byte)) or (J > High(Byte)) then
         Abort;
       ServicePack := Word(J shl 8);
@@ -219,7 +219,7 @@ function StrToSetupVersionData(const S: String; var VerData: TSetupVersionData):
     I := Pos('.', Z);
     if I = Length(Z) then Abort;
     if I <> 0 then begin
-      J := StrToInt(Copy(Z, 1, I-1));
+      J := InnoStrToInt(Copy(Z, 1, I-1));
       if (J < 0) or (J > 127) then
         Abort;
       Ver.Major := Byte(J);
@@ -230,18 +230,18 @@ function StrToSetupVersionData(const S: String; var VerData: TSetupVersionData):
         I := Length(Z)+1;
       B := Copy(Z, I+1, Maxint);
       Z := Copy(Z, 1, I-1);
-      J := StrToInt(Z);
+      J := InnoStrToInt(Z);
       if (J < 0) or (J > 99) then Abort;
       Ver.Minor := Byte(J);
       if HasBuild then begin
-        J := StrToInt(B);
+        J := InnoStrToInt(B);
         if (J < Low(Ver.Build)) or (J > High(Ver.Build)) then
           Abort;
         Ver.Build := Word(J);
       end;
     end
     else begin  { no minor version specified }
-      J := StrToInt(Z);
+      J := InnoStrToInt(Z);
       if (J < 0) or (J > 127) then
         Abort;
       Ver.Major := Byte(J);
@@ -303,32 +303,39 @@ end;
 procedure SetISSigAllowedKey(var ISSigAllowedKeys: AnsiString; const KeyIndex: Integer);
 { ISSigAllowedKeys should start out empty. If you then only use this function
   to update it, regular string comparison can be used for comparisons. }
+var
+  ByteIndex, BitIndex: Integer;
 begin
-  const ByteIndex = KeyIndex div 8;
+  ByteIndex := KeyIndex div 8;
   while ByteIndex >= Length(ISSigAllowedKeys) do
     ISSigAllowedKeys := ISSigAllowedKeys + #0;
-  const BitIndex = KeyIndex mod 8;
+  BitIndex := KeyIndex mod 8;
   ISSigAllowedKeys[ByteIndex+1] := AnsiChar(Byte(ISSigAllowedKeys[ByteIndex+1]) or (1 shl BitIndex));
 end;
 
 function IsISSigAllowedKey(const ISSigAllowedKeys: AnsiString; const KeyIndex: Integer): Boolean;
+var
+  ByteIndex, BitIndex: Integer;
 begin
-  const ByteIndex = KeyIndex div 8;
+  ByteIndex := KeyIndex div 8;
   if ByteIndex >= Length(ISSigAllowedKeys) then
     Exit(False);
-  const BitIndex = KeyIndex mod 8;
+  BitIndex := KeyIndex mod 8;
   Result := Byte(ISSigAllowedKeys[ByteIndex+1]) and (1 shl BitIndex) <> 0;
 end;
 
-function GetISSigAllowedKeys([ref] const ISSigAvailableKeys: TArrayOfECDSAKey;
+function GetISSigAllowedKeys({$IFDEF FPC}constref{$ELSE}[ref] const{$ENDIF} ISSigAvailableKeys: TArrayOfECDSAKey;
   const ISSigAllowedKeys: AnsiString): TArrayOfECDSAKey;
 { Returns all keys if ISSigAllowedKeys is empty! }
+var
+  NAvailable, NAdded, KeyIndex: Integer;
 begin
-  if ISSigAllowedKeys <> '' then begin
-    const NAvailable = Length(ISSigAvailableKeys);
+  if Length(ISSigAllowedKeys) <> 0 then begin
+    NAvailable := Length(ISSigAvailableKeys);
+    Result := nil;
     SetLength(Result, NAvailable);
-    var NAdded := 0;
-    for var KeyIndex := 0 to NAvailable-1 do begin
+    NAdded := 0;
+    for KeyIndex := 0 to NAvailable-1 do begin
       if IsISSigAllowedKey(ISSigAllowedKeys, Integer(KeyIndex)) then begin
         Result[NAdded] := ISSigAvailableKeys[KeyIndex];
         Inc(NAdded);
@@ -345,7 +352,7 @@ function IsExcluded(Text: String; const AExcludes: TStrings): Boolean;
   begin
     Result := 0;
     while True do begin
-      S := PathStrScan(S, '\');
+      S := StrScan(S, '\');
       if S = nil then
         Break;
       Inc(Result);
@@ -353,44 +360,53 @@ function IsExcluded(Text: String; const AExcludes: TStrings): Boolean;
     end;
   end;
 
+var
+  T, P, TStart, TEnd: PChar;
+  TB, PB, I, J, ExcludeIndex: Integer;
+  MatchFront: Boolean;
+  AExclude: String;
 begin
   if AExcludes.Count > 0 then begin
+    {$IFDEF MSWINDOWS}
     Text := PathLowercase(Text);
+    {$ELSE}
+    Text := UnicodeLowerCase(Text);
+    {$ENDIF}
     UniqueString(Text);
-    const T = PChar(Text);
-    const TB = CountBackslashes(T);
+    T := PChar(Text);
+    TB := CountBackslashes(T);
 
-    for var AExclude in AExcludes do begin
-      var P := PChar(AExclude);
+    for ExcludeIndex := 0 to AExcludes.Count - 1 do begin
+      AExclude := FromNativeText(AExcludes[ExcludeIndex]);
+      P := PChar(AExclude);
 
       { Leading backslash in an exclude pattern means 'match at the front
         instead of the end' }
-      var MatchFront := False;
+      MatchFront := False;
       if P^ = '\' then begin
         MatchFront := True;
         Inc(P);
       end;
 
-      const PB = CountBackslashes(P);
+      PB := CountBackslashes(P);
       { The text must contain at least as many backslashes as the pattern
         for a match to be possible }
       if TB >= PB then begin
-        var TStart := T;
-        var TEnd: PChar;
+        TStart := T;
         if not MatchFront then begin
           { If matching at the end, advance TStart so that TStart and P point
             to the same number of components }
-          for var I := 1 to TB - PB do
-            TStart := PathStrScan(TStart, '\') + 1;
+          for I := 1 to TB - PB do
+            TStart := StrScan(TStart, '\') + 1;
           TEnd := nil;
         end
         else begin
           { If matching at the front, clip T to the same number of
             components as P }
           TEnd := T;
-          for var J := 1 to PB do
-            TEnd := PathStrScan(TEnd, '\') + 1;
-          TEnd := PathStrScan(TEnd, '\');
+          for J := 1 to PB do
+            TEnd := StrScan(TEnd, '\') + 1;
+          TEnd := StrScan(TEnd, '\');
           if Assigned(TEnd) then
             TEnd^ := #0;
         end;

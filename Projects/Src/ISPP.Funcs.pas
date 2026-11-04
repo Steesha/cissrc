@@ -13,19 +13,23 @@ unit ISPP.Funcs;
 interface
 
 uses
-  Windows, Classes,
-  ISPP.VarUtils, ISPP.Intf, ISPP.Preprocessor;
+  {$IFDEF MSWINDOWS}Windows,{$ENDIF} Classes,
+  ISPP.VarUtils, ISPP.Intf, ISPP.Preprocessor, Shared.FPCStringUtils;
 
 procedure RegisterFunctions(Preproc: TPreprocessor);
 
 implementation
 
 uses
-  SysUtils, IniFiles, Registry, Math,
+  SysUtils, IniFiles, {$IFDEF MSWINDOWS}Registry,{$ELSE}Process, Pipes, Contnrs, BaseUnix,{$ENDIF} Math,
   MD5, SHA1, SHA256, PathFunc, UnsignedFunc,
-  Shared.FileClass, Shared.CommonFunc,
-  ISPP.Sessions, ISPP.Base, ISPP.IdentMan;
+  Shared.FileClass, {$IFDEF MSWINDOWS}Shared.CommonFunc{$ELSE}Shared.CompilerSupport{$ENDIF},
+  ISPP.Sessions, ISPP.Base, ISPP.IdentMan, Shared.VerInfoFunc;
 
+{$IFNDEF MSWINDOWS}
+const
+  IsWin64 = False;
+{$ELSE}
 {$IFDEF WIN64}
 const
   IsWin64 = True;
@@ -33,17 +37,26 @@ const
 var
   IsWin64: Boolean;
 {$ENDIF}
+{$ENDIF}
 
 function PrependPath(const Ext: NativeInt; const Filename: String): String;
+var
+  Preprocessor: TPreprocessor;
 begin
-  var Preprocessor := TObject(Ext) as TPreprocessor;
-  Result := PathExpand(Preprocessor.PrependDirName(Filename,
-    Preprocessor.SourcePath));
+  Preprocessor := TObject(Ext) as TPreprocessor;
+  Result := Preprocessor.PrependDirName(Filename, Preprocessor.SourcePath);
+  {$IFDEF MSWINDOWS}
+  Result := PathExpand(Result);
+  {$ELSE}
+  Result := UTF8Decode(ExpandFileName(UTF8Encode(Result)));
+  {$ENDIF}
 end;
 
 function CheckParams(const Params: IIsppFuncParams;
   Types: array of TIsppVarType; Minimum: Integer; var Error: TIsppFuncResult;
   AllowManyArgs: Boolean = False): Boolean;
+var
+  I: NativeInt;
 begin
   FillChar(Error, SizeOf(TIsppFuncResult), 0);
   Result := False;
@@ -55,7 +68,7 @@ begin
     Exit;
   end else
     with IInternalFuncParams(Params) do
-      for var I := 0 to Min(Params.GetCount - 1, High(Types)) do
+      for I := 0 to Min(Params.GetCount - 1, High(Types)) do
       begin
         if (Types[I] = evSpecial) or (Get(I)^.Typ = evNull) then
           Continue;
@@ -84,10 +97,10 @@ begin
         if GetCount > 1 then
           ResPtr^ := Get(1)^
         else
-          FuncResult.RaiseError(PChar(E.Message));
+          FuncResult.RaiseError(PChar(String(E.Message)));
       end;
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -100,7 +113,7 @@ begin
       ResPtr^ := ToStr(Get(0)^);
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -110,10 +123,10 @@ begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
-      MakeBool(ResPtr^, NewFileExists(PrependPath(Ext, Get(0).AsStr)));
+      MakeBool(ResPtr^, {$IFDEF MSWINDOWS}NewFileExists(PrependPath(Ext, Get(0).AsStr)){$ELSE}SysUtils.FileExists(UTF8Encode(PrependPath(Ext, Get(0).AsStr))){$ENDIF});
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -122,10 +135,10 @@ begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
-      MakeBool(ResPtr^, Shared.CommonFunc.DirExists(PrependPath(Ext, Get(0).AsStr)));
+      MakeBool(ResPtr^, {$IFDEF MSWINDOWS}Shared.CommonFunc.DirExists(PrependPath(Ext, Get(0).AsStr)){$ELSE}DirectoryExists(UTF8Encode(PrependPath(Ext, Get(0).AsStr))){$ENDIF});
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -134,10 +147,10 @@ begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
-      MakeBool(ResPtr^, ForceDirectories(PrependPath(Ext, Get(0).AsStr)));
+      MakeBool(ResPtr^, ForceDirectories({$IFDEF FPC}UTF8Encode({$ENDIF}PrependPath(Ext, Get(0).AsStr){$IFDEF FPC}){$ENDIF}));
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -150,7 +163,7 @@ begin
   try
     with IInternalFuncParams(Params) do
     begin
-      if FindFirst(PrependPath(Ext, Get(0).AsStr), faAnyFile, SearchRec) = 0 then begin
+      if FindFirst(ToNativeText(PrependPath(Ext, Get(0).AsStr)), faAnyFile, SearchRec) = 0 then begin
         try
           MakeInt(ResPtr^, SearchRec.Size);
         finally
@@ -161,7 +174,7 @@ begin
     end
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -174,16 +187,16 @@ begin
   if CheckParams(Params, [evStr, evStr, evStr, evStr], 3, Result) then
   try
     with IInternalFuncParams(Params) do
-      with TIniFile.Create(PrependPath(Ext, Get(0).AsStr)) do
+      with TIniFile.Create(ToNativeText(PrependPath(Ext, Get(0).AsStr))) do
       try
         if GetCount < 4 then Default := '' else Default := Get(3).AsStr;
-        MakeStr(ResPtr^, ReadString(Get(1).AsStr, Get(2).AsStr, Default));
+        MakeStr(ResPtr^, FromNativeText(ReadString(ToNativeText(Get(1).AsStr), ToNativeText(Get(2).AsStr), ToNativeText(Default))));
       finally
         Free
       end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -193,13 +206,13 @@ begin
   if CheckParams(Params, [evStr, evStr, evStr, evSpecial], 4, Result) then
   try
     with IInternalFuncParams(Params) do
-      with TIniFile.Create(PrependPath(Ext, Get(0).AsStr)) do
+      with TIniFile.Create(ToNativeText(PrependPath(Ext, Get(0).AsStr))) do
       try
         case Get(3).Typ of
-          evInt: WriteInt64(Get(1).AsStr, Get(2).AsStr, Get(3).AsInt64);
-          evStr: WriteString(Get(1).AsStr, Get(2).AsStr, Get(3).AsStr);
+          evInt: WriteInt64(ToNativeText(Get(1).AsStr), ToNativeText(Get(2).AsStr), Get(3).AsInt64);
+          evStr: WriteString(ToNativeText(Get(1).AsStr), ToNativeText(Get(2).AsStr), ToNativeText(Get(3).AsStr));
         else
-          WriteString(Get(1).AsStr, Get(2).AsStr, '');
+          WriteString(ToNativeText(Get(1).AsStr), ToNativeText(Get(2).AsStr), '');
         end;
         ResPtr^ := NULL;
       finally
@@ -207,13 +220,14 @@ begin
       end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 {ReadReg(<root:int>,<key:str>,[<name:str>,<default:str>])}
 function ReadReg(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+{$IFDEF MSWINDOWS}
 const
   { These are based on CodeRootKey* from Shared.SetupTypes }
   ISPPRootKeyFlagMask  = $7F000000;
@@ -263,7 +277,7 @@ begin
           case GetDataType(Name) of
             rdString, rdExpandString: MakeStr(ResPtr^, ReadString(Name));
             rdInteger: MakeInt(ResPtr^, ReadInteger(Name));
-            {$IF RtlVersion >= 36.0}
+            {$IF Defined(FPC) or (Declared(RtlVersion) and (RtlVersion >= 36.0))}
             rdInt64: MakeInt(ResPtr^, ReadInt64(Name));
             {$ENDIF}
           else
@@ -277,8 +291,13 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
+{$ELSE}
+begin
+  if CheckParams(Params, [evInt, evStr, evStr, evSpecial], 2, Result) then
+    FuncResult.RaiseError('ReadReg requires a Windows host');
+{$ENDIF}
 end;
 
 function GetEnvFunc(Ext: NativeInt; const Params: IIsppFuncParams;
@@ -287,10 +306,10 @@ begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
-      MakeStr(ResPtr^, GetEnv(Get(0).AsStr));
+      MakeStr(ResPtr^, {$IFDEF MSWINDOWS}GetEnv(Get(0).AsStr){$ELSE}UTF8Decode(GetEnvironmentVariable(UTF8Encode(Get(0).AsStr))){$ENDIF});
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -301,32 +320,36 @@ function SetupSetting(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
 
   function Find(L: TStrings; const S: string): string;
+  var
+    InSetupSection: Boolean;
+    I, J: Integer;
+    N: String;
   begin
-    var InSetupSection := False;
+    InSetupSection := False;
     Result := '';
     with L do
-      for var I := 0 to Count - 1 do
+      for I := 0 to Count - 1 do
       begin
-        if Trim(Strings[I]) = '' then Continue;
+        if Length(Trim(Strings[I])) = 0 then Continue;
         if InSetupSection then
         begin
           if (Trim(Strings[I])[1] = '[') then
           begin
-            if not SameText(Trim(Strings[I]), SSetup) then
+            if not InnoSameText(FromNativeText(Trim(Strings[I])), SSetup) then
               InSetupSection := False;
             Continue;
           end;
-          const J = Pos('=', Strings[I]);
+          J := Pos('=', Strings[I]);
           if J = 0 then Continue;
-          const N = Trim(Copy(Strings[I], 1, J - 1));
-          if CompareText(N, S) = 0 then
+          N := FromNativeText(Trim(Copy(Strings[I], 1, J - 1)));
+          if InnoCompareText(N, S) = 0 then
           begin
-            Result := Trim(Copy(Strings[I], J + 1, MaxInt));
+            Result := FromNativeText(Trim(Copy(Strings[I], J + 1, MaxInt)));
             Break;
           end;
         end
         else
-          if SameText(Trim(Strings[I]), SSetup) then
+          if InnoSameText(FromNativeText(Trim(Strings[I])), SSetup) then
             InSetupSection := True;
       end;
   end;
@@ -340,7 +363,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -349,33 +372,37 @@ function SetSetupSetting(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
 
   procedure DoSet(L: TStrings; const S, V: string);
+  var
+    InSetupSection: Boolean;
+    FirstSetupSectionLine, I, J: Integer;
+    N: String;
   begin
-    var FirstSetupSectionLine := -1;
-    var InSetupSection := False;
+    FirstSetupSectionLine := -1;
+    InSetupSection := False;
     with L do
     begin
-      for var I := 0 to Count - 1 do
+      for I := 0 to Count - 1 do
       begin
-        if Trim(Strings[I]) = '' then Continue;
+        if Length(Trim(Strings[I])) = 0 then Continue;
         if InSetupSection then
         begin
           if (Trim(Strings[I])[1] = '[') then
           begin
-            if not SameText(Trim(Strings[I]), SSetup) then
+            if not InnoSameText(FromNativeText(Trim(Strings[I])), SSetup) then
               InSetupSection := False;
             Continue;
           end;
-          const J = Pos('=', Strings[I]);
+          J := Pos('=', Strings[I]);
           if J = 0 then Continue;
-          const N = Trim(Copy(Strings[I], 1, J - 1));
-          if CompareText(N, S) = 0 then
+          N := FromNativeText(Trim(Copy(Strings[I], 1, J - 1)));
+          if InnoCompareText(N, S) = 0 then
           begin
-            Strings[I] := S + '=' + V;
+            Strings[I] := ToNativeText(S + '=' + V);
             Exit;
           end;
         end
         else
-          if SameText(Trim(Strings[I]), SSetup) then
+          if InnoSameText(FromNativeText(Trim(Strings[I])), SSetup) then
           begin
             InSetupSection := True;
             if FirstSetupSectionLine < 0 then
@@ -384,7 +411,7 @@ function SetSetupSetting(Ext: NativeInt; const Params: IIsppFuncParams;
       end;
       if FirstSetupSectionLine < 0 then
         FirstSetupSectionLine := L.Add(SSetup);
-      L.Insert(FirstSetupSectionLine + 1, S + '=' + V);
+      L.Insert(FirstSetupSectionLine + 1, ToNativeText(S + '=' + V));
     end;
   end;
 
@@ -398,7 +425,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -419,10 +446,10 @@ begin
       S := Get(0).AsStr;
       for I := 0 to Count - 1 do
       begin
-        N := Trim(Strings[I]);
+        N := FromNativeText(Trim(Strings[I]));
         if (N <> '') and (N[1] = '[') then
         begin
-          DoCount := CompareText(Copy(N, 2, Length(N) - 2), S) = 0;
+          DoCount := InnoCompareText(Copy(N, 2, Length(N) - 2), S) = 0;
           Continue;
         end;
         if DoCount and (N <> '') and (N[1] <> ';') then Inc(J);
@@ -431,7 +458,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -448,7 +475,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -465,7 +492,8 @@ function FindLine(Ext: NativeInt; const Params: IIsppFuncParams;
       fwMatch: Result := PathStrCompare(PChar(Str), Length(Str), PChar(Substr), Length(Substr), not Sensitive) = 0;
       fwBegin: Result := PathStartsWith(Str, Substr, not Sensitive);
       fwEnd: Result := PathEndsWith(Str, Substr, not Sensitive);
-      fwContains: Result := PathStrFind(PChar(Str), Length(Str), PChar(Substr), Length(Substr), not Sensitive) <> -1;
+      fwContains: Result := (Substr = '') or ((Length(Str) >= Length(Substr)) and
+        (PathStrFind(PChar(Str), Length(Str), PChar(Substr), Length(Substr), not Sensitive) <> -1));
     else
       raise Exception.Create('FindLine Meets: invalid Where');
     end;
@@ -479,7 +507,10 @@ const
   FIND_TRIM       = $20;
 var
   Strs: array[0..2] of string;
-  StrCount: Integer;
+  StrCount, StartFromLine, I: Integer;
+  Lines: TStrings;
+  Line: String;
+  Found, MoreFound: Boolean;
   Flags: array[0..2] of Integer;
 begin
   if CheckParams(Params, [evInt, evStr, evInt, evStr, evInt, evStr, evInt], 2, Result) then
@@ -488,7 +519,7 @@ begin
 
     with IInternalFuncParams(Params) do
     begin
-      var StartFromLine := Get(0).AsInteger;
+      StartFromLine := Get(0).AsInteger;
       if StartFromLine < 0 then
         StartFromLine := 0;
 
@@ -512,20 +543,20 @@ begin
         end
       end;
 
-      const Lines = TPreprocessor(Ext).StringList;
+      Lines := TPreprocessor(Ext).StringList;
 
-      for var I := StartFromLine to Lines.Count-1 do begin
-        var Line := Lines[I];
+      for I := StartFromLine to Lines.Count-1 do begin
+        Line := FromNativeText(Lines[I]);
         if Flags[0] and FIND_TRIM <> 0 then { As documented, the FIND_TRIM flag must be used on Flags[0] }
           Line := Trim(Line);
 
-        var Found := Meets(Line, Strs[0], Flags[0] and FIND_SENSITIVE <> 0,
+        Found := Meets(Line, Strs[0], Flags[0] and FIND_SENSITIVE <> 0,
           TFindWhere(Flags[0] and FIND_WHEREMASK)) xor (Flags[0] and FIND_NOT <> 0);
 
         if (StrCount > 1) and
            (((Flags[1] and FIND_OR <> 0{OR}) and not Found) or
             ((Flags[1] and FIND_OR = 0{AND}) and Found)) then begin
-          const MoreFound = Meets(Line, Strs[1], Flags[1] and FIND_SENSITIVE <> 0,
+          MoreFound := Meets(Line, Strs[1], Flags[1] and FIND_SENSITIVE <> 0,
             TFindWhere(Flags[1] and FIND_WHEREMASK)) xor (Flags[1] and FIND_NOT <> 0);
           if Flags[1] and FIND_OR <> 0 then
             Found := Found or MoreFound
@@ -536,7 +567,7 @@ begin
         if (StrCount > 2) and
            (((Flags[2] and FIND_OR <> 0{OR}) and not Found) or
             ((Flags[2] and FIND_OR = 0{AND}) and Found)) then begin
-          const MoreFound = Meets(Line, Strs[2], Flags[2] and FIND_SENSITIVE <> 0,
+          MoreFound := Meets(Line, Strs[2], Flags[2] and FIND_SENSITIVE <> 0,
             TFindWhere(Flags[2] and FIND_WHEREMASK)) xor (Flags[2] and FIND_NOT <> 0);
           if Flags[2] and FIND_OR <> 0 then
             Found := Found or MoreFound
@@ -554,10 +585,11 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
+{$IFDEF MSWINDOWS}
 function Exec(const Filename, Params: String; WorkingDir: String;
   const WaitUntilTerminated: Boolean; const ShowCmd: Word;
   const Preprocessor: TPreprocessor; const OutputReader: TCreateProcessOutputReader;
@@ -567,6 +599,8 @@ var
   WorkingDirP: PChar;
   StartupInfo: TStartupInfo;
   ProcessInfo: TProcessInformation;
+  InheritHandles: Boolean;
+  CreationFlags: DWORD;
 begin
   {This function is a combination of InstFuncs' InstExec and Compile's InternalSignCommand }
 
@@ -579,8 +613,8 @@ begin
       CmdLine := Filename;
     if Params <> '' then
       CmdLine := CmdLine + ' ' + Params;
-    if SameText(PathExtractExt(Filename), '.bat') or
-       SameText(PathExtractExt(Filename), '.cmd') then begin
+    if InnoSameText(PathExtractExt(Filename), '.bat') or
+       InnoSameText(PathExtractExt(Filename), '.cmd') then begin
       { See InstExec for explanation }
       CmdLine := '"' + AddBackslash(GetSystemDir) + 'cmd.exe" /C "' + CmdLine + '"'
     end;
@@ -597,17 +631,18 @@ begin
   else
     WorkingDirP := nil;
 
-  var InheritHandles := False;
-  var dwCreationFlags: DWORD := CREATE_DEFAULT_ERROR_MODE;
+  InheritHandles := False;
+  CreationFlags := CREATE_DEFAULT_ERROR_MODE;
 
   if (OutputReader <> nil) and WaitUntilTerminated then begin
     OutputReader.UpdateStartupInfo(StartupInfo);
     InheritHandles := True;
-    dwCreationFlags := dwCreationFlags or CREATE_NO_WINDOW;
+    CreationFlags := CreationFlags or CREATE_NO_WINDOW;
   end;
 
-  Result := CreateProcess(nil, PChar(CmdLine), nil, nil, InheritHandles,
-    dwCreationFlags, nil, WorkingDirP, StartupInfo, ProcessInfo);
+  UniqueString(CmdLine);
+  Result := CreateProcessW(nil, PWideChar(CmdLine), nil, nil, InheritHandles,
+    CreationFlags, nil, WorkingDirP, TStartupInfoW(StartupInfo), ProcessInfo);
   if not Result then begin
     DWORD(ResultCode) := GetLastError;
     Exit;
@@ -644,14 +679,142 @@ begin
   end;
 end;
 
-procedure ExecLog(const S: String; const Error, FirstLine: Boolean; const Data: NativeInt);
+{$ELSE}
+var
+  AsyncProcesses: TObjectList;
+
+function ExecNative(const Filename, Params, WorkingDir: String;
+  const WaitUntilTerminated: Boolean; const Preprocessor: TPreprocessor;
+  out ResultCode: Integer; out FirstLine: String): Boolean;
+var
+  Child: TProcess;
+  OutputPending, ErrorPending: RawByteString;
+  Executable: String;
+  I: Integer;
+
+  procedure Drain(const Pipe: TInputPipeStream; var Pending: RawByteString;
+    const IsError, Flush: Boolean);
+  var
+    Buffer: array[0..4095] of AnsiChar;
+    Count, Newline: Integer;
+    Chunk: RawByteString;
+
+    procedure Emit(const Bytes: RawByteString);
+    var
+      Line: String;
+    begin
+      Line := UTF8Decode(Bytes);
+      if IsError then
+        Preprocessor.WarningMsg('%s', [Line])
+      else begin
+        if (FirstLine = '') and (Trim(Line) <> '') then
+          FirstLine := Line;
+        Preprocessor.StatusMsg('Exec output: %s', [Line]);
+      end;
+    end;
+
+  begin
+    Count := Min(Pipe.NumBytesAvailable, SizeOf(Buffer));
+    if Count > 0 then begin
+      Count := Pipe.Read(Buffer, Count);
+      if Count > 0 then begin
+        SetString(Chunk, PAnsiChar(@Buffer[0]), Count);
+        Pending := Pending + Chunk;
+        repeat
+          Newline := Pos(#10, Pending);
+          if Newline = 0 then
+            Break;
+          Chunk := Copy(Pending, 1, Newline - 1);
+          if (Length(Chunk) <> 0) and (Chunk[Length(Chunk)] = #13) then
+            SetLength(Chunk, Length(Chunk) - 1);
+          Emit(Chunk);
+          Delete(Pending, 1, Newline);
+        until False;
+      end;
+    end;
+    if Flush and (Length(Pending) <> 0) then
+      Emit(Pending);
+  end;
+
 begin
-  var Preprocessor := TPreprocessor(Data);
+  if AsyncProcesses <> nil then
+    for I := AsyncProcesses.Count - 1 downto 0 do
+      if not TProcess(AsyncProcesses[I]).Running then
+        AsyncProcesses.Delete(I);
+  FirstLine := '';
+  ResultCode := -1;
+  Child := TProcess.Create(nil);
+  try
+    if Filename = '>' then begin
+      CommandToList(UTF8Encode(Params), Child.Parameters);
+      if Child.Parameters.Count > 0 then begin
+        Child.Executable := Child.Parameters[0];
+        Child.Parameters.Delete(0);
+      end;
+    end else begin
+      Executable := Filename;
+      if (Length(Executable) >= 2) and (Executable[1] = '"') and
+         (Executable[Length(Executable)] = '"') then
+        Executable := Copy(Executable, 2, Length(Executable) - 2);
+      Child.Executable := UTF8Encode(Executable);
+      CommandToList(UTF8Encode(Params), Child.Parameters);
+      if WorkingDir = '' then
+        Child.CurrentDirectory := ExtractFileDir(UTF8Encode(Executable));
+    end;
+    if WorkingDir <> '' then
+      Child.CurrentDirectory := UTF8Encode(WorkingDir);
+    if WaitUntilTerminated then
+      Child.Options := [poUsePipes];
+    try
+      Child.Execute;
+    except
+      on E: EProcess do begin
+        Preprocessor.WarningMsg('%s', [UTF8Decode(E.Message)]);
+        Exit(False);
+      end;
+    end;
+    if WaitUntilTerminated then begin
+      Child.CloseInput;
+      while Child.Running do begin
+        Drain(Child.Output, OutputPending, False, False);
+        Drain(Child.Stderr, ErrorPending, True, False);
+        Preprocessor.CallIdleProc;
+        if (Child.Output.NumBytesAvailable = 0) and (Child.Stderr.NumBytesAvailable = 0) then
+          Sleep(10);
+      end;
+      while (Child.Output.NumBytesAvailable > 0) or (Child.Stderr.NumBytesAvailable > 0) do begin
+        Drain(Child.Output, OutputPending, False, False);
+        Drain(Child.Stderr, ErrorPending, True, False);
+      end;
+      Drain(Child.Output, OutputPending, False, True);
+      Drain(Child.Stderr, ErrorPending, True, True);
+      ResultCode := Child.ExitCode;
+    end else begin
+      if AsyncProcesses = nil then
+        AsyncProcesses := TObjectList.Create;
+      AsyncProcesses.Add(Child);
+      Child := nil;
+    end;
+    Result := True;
+  finally
+    Child.Free;
+  end;
+end;
+{$ENDIF}
+
+{$IFDEF MSWINDOWS}
+procedure ExecLog(const S: String; const Error, FirstLine: Boolean; const Data: NativeInt);
+var
+  Preprocessor: TPreprocessor;
+begin
+  Preprocessor := TPreprocessor(Data);
   if Error then
     Preprocessor.WarningMsg(S)
   else
     Preprocessor.StatusMsg('Exec output: %s', [S]);
 end;
+
+{$ENDIF}
 
 {
   int Exec(str FileName, str Params, str WorkingDir, int Wait, int ShowCmd)
@@ -659,23 +822,35 @@ end;
 
 function ExecFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  ParamsS, WorkingDir: String;
+  ResultCode: Integer;
+  Success, WaitUntilTerminated: Boolean;
+  {$IFDEF MSWINDOWS}
+  ShowCmd: Word;
+  Preprocessor: TPreprocessor;
+  OutputReader: TCreateProcessOutputReader;
+  {$ELSE}
+  FirstLine: String;
+  {$ENDIF}
 begin
   if CheckParams(Params, [evStr, evStr, evStr, evInt, evInt], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var ParamsS, WorkingDir: String;
-      var WaitUntilTerminated := True;
-      var ShowCmd: Word := SW_SHOWNORMAL;
+      {$IFDEF MSWINDOWS}
+      ParamsS := '';
+      WorkingDir := '';
+      WaitUntilTerminated := True;
+      ShowCmd := SW_SHOWNORMAL;
       if GetCount > 1 then ParamsS := Get(1).AsStr;
       if GetCount > 2 then WorkingDir := PrependPath(Ext, Get(2).AsStr);
       if (GetCount > 3) and (Get(3).Typ <> evNull) then WaitUntilTerminated := Get(3).AsBoolean;
       if (GetCount > 4) and (Get(4).Typ <> evNull) then ShowCmd := Get(4).AsWord;
-      var Preprocessor := TPreprocessor(Ext);
-      var ResultCode: Integer;
-      var OutputReader := TCreateProcessOutputReader.Create(ExecLog, NativeInt(Preprocessor));
+      Preprocessor := TPreprocessor(Ext);
+      OutputReader := TCreateProcessOutputReader.Create(ExecLog, NativeInt(Preprocessor));
       try
-        var Success := Exec(Get(0).AsStr, ParamsS, WorkingDir, WaitUntilTerminated,
+        Success := Exec(Get(0).AsStr, ParamsS, WorkingDir, WaitUntilTerminated,
           ShowCmd, Preprocessor, OutputReader, ResultCode);
         if not WaitUntilTerminated then
           MakeBool(ResPtr^, Success)
@@ -684,10 +859,23 @@ begin
       finally
         OutputReader.Free;
       end;
+      {$ELSE}
+      ParamsS := '';
+      WorkingDir := '';
+      if GetCount > 1 then ParamsS := Get(1).AsStr;
+      if GetCount > 2 then WorkingDir := PrependPath(Ext, Get(2).AsStr);
+      WaitUntilTerminated := (GetCount <= 3) or (Get(3).Typ = evNull) or Get(3).AsBoolean;
+      Success := ExecNative(Get(0).AsStr, ParamsS, WorkingDir, WaitUntilTerminated,
+        TPreprocessor(Ext), ResultCode, FirstLine);
+      if WaitUntilTerminated then
+        MakeInt(ResPtr^, ResultCode)
+      else
+        MakeBool(ResPtr^, Success);
+      {$ENDIF}
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -698,13 +886,18 @@ type
     Line: String;
   end;
 
+{$IFDEF MSWINDOWS}
 procedure ExecAndGetFirstLineLog(const S: String; const Error, FirstLine: Boolean; const Data: NativeInt);
+var
+  Data2: PExecAndGetFirstLineLogData;
 begin
-  var Data2 := PExecAndGetFirstLineLogData(Data);
-  if not Error and (Data2.Line = '') and (S.Trim <> '') then
+  Data2 := PExecAndGetFirstLineLogData(Data);
+  if not Error and (Data2.Line = '') and (Trim(S) <> '') then
     Data2.Line := S;
   ExecLog(S, Error, FirstLine, NativeInt(Data2.Preprocessor));
 end;
+
+{$ENDIF}
 
 {
   str ExecAndGetFirstLine(str FileName, str Params, str WorkingDir,)
@@ -712,21 +905,31 @@ end;
 
 function ExecAndGetFirstLineFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  ParamsS, WorkingDir: String;
+  ResultCode: Integer;
+  Success: Boolean;
+  {$IFDEF MSWINDOWS}
+  Data: TExecAndGetFirstLineLogData;
+  OutputReader: TCreateProcessOutputReader;
+  {$ELSE}
+  FirstLine: String;
+  {$ENDIF}
 begin
   if CheckParams(Params, [evStr, evStr, evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var ParamsS, WorkingDir: String;
+      {$IFDEF MSWINDOWS}
+      ParamsS := '';
+      WorkingDir := '';
       if GetCount > 1 then ParamsS := Get(1).AsStr;
       if GetCount > 2 then WorkingDir := PrependPath(Ext, Get(2).AsStr);
-      var Data: TExecAndGetFirstLineLogData;
       Data.Preprocessor := TPreprocessor(Ext);
       Data.Line := '';
-      var ResultCode: Integer;
-      var OutputReader := TCreateProcessOutputReader.Create(ExecAndGetFirstLineLog, NativeInt(@Data));
+      OutputReader := TCreateProcessOutputReader.Create(ExecAndGetFirstLineLog, NativeInt(@Data));
       try
-        var Success := Exec(Get(0).AsStr, ParamsS, WorkingDir, True,
+        Success := Exec(Get(0).AsStr, ParamsS, WorkingDir, True,
           SW_SHOWNORMAL, Data.Preprocessor, OutputReader, ResultCode);
         if Success then
           MakeStr(ResPtr^, Data.Line)
@@ -737,10 +940,22 @@ begin
       finally
         OutputReader.Free;
       end;
+      {$ELSE}
+      ParamsS := '';
+      WorkingDir := '';
+      if GetCount > 1 then ParamsS := Get(1).AsStr;
+      if GetCount > 2 then WorkingDir := PrependPath(Ext, Get(2).AsStr);
+      Success := ExecNative(Get(0).AsStr, ParamsS, WorkingDir, True,
+        TPreprocessor(Ext), ResultCode, FirstLine);
+      if Success then
+        MakeStr(ResPtr^, FirstLine)
+      else
+        ResPtr^.Typ := evNull;
+      {$ENDIF}
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -753,7 +968,7 @@ begin
       MakeInt(ResPtr^, Length(Get(0).AsStr));
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -786,7 +1001,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -801,7 +1016,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -814,7 +1029,7 @@ begin
       MakeStr(ResPtr^, LowerCase(Get(0).AsStr));
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -827,65 +1042,60 @@ begin
       MakeStr(ResPtr^, UpperCase(Get(0).AsStr));
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function RPosFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  Haystack, Needle: String;
+  I, NeedleLength: Integer;
 begin
   if CheckParams(Params, [evStr, evStr], 2, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      MakeInt(ResPtr^, Get(1).AsStr.LastIndexOf(Get(0).AsStr) + 1);
+      Haystack := Get(1).AsStr;
+      Needle := Get(0).AsStr;
+      NeedleLength := Length(Needle);
+      I := Length(Haystack) - NeedleLength + 1;
+      if NeedleLength = 0 then
+        I := 0
+      else
+        while I > 0 do begin
+          if CompareMem(@Haystack[I], PChar(Needle), NeedleLength * SizeOf(Char)) then
+            Break;
+          Dec(I);
+        end;
+      if I < 0 then
+        I := 0;
+      MakeInt(ResPtr^, I);
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function GetVersionNumbersStringFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
 var
-  Filename: string;
-  VersionHandle: Cardinal;
-  SIZE: Cardinal;
-  S: UINT;
-  Buf: Pointer;
-  FI: PVSFixedFileInfo;
+  Version: TFileVersionNumbers;
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
       ResPtr^.Typ := evNull;
-      Filename := PrependPath(Ext, Get(0).AsStr);
-      Size := GetFileVersionInfoSize(PChar(Filename), VersionHandle);
-      if Size > 0 then
-      begin
-        GetMem(Buf, Size);
-        try
-          if GetFileVersionInfo(PChar(Filename), VersionHandle, Size, Buf) and
-             VerQueryValue(Buf, '\', Pointer(FI), S) and
-             (S >= SizeOf(TVSFixedFileInfo)) then
-          begin
-            MakeStr(ResPtr^,
-              IntToStr((FI.dwFileVersionMS and $FFFF0000) shr 16) + '.' +
-              IntToStr(FI.dwFileVersionMS and $FFFF) + '.' +
-              IntToStr((FI.dwFileVersionLS and $FFFF0000) shr 16) + '.' +
-              IntToStr(FI.dwFileVersionLS and $FFFF)
-              );
-          end;
-        finally
-          FreeMem(Buf)
-        end;
-      end
+      if GetVersionNumbers(PrependPath(Ext, Get(0).AsStr), Version) then
+        MakeStr(ResPtr^,
+          InnoIntToStr(Version.MS shr 16) + '.' + InnoIntToStr(Version.MS and $FFFF) + '.' +
+          InnoIntToStr(Version.LS shr 16) + '.' + InnoIntToStr(Version.LS and $FFFF));
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -895,10 +1105,15 @@ begin
   if CheckParams(Params, [evInt, evInt], 2, Result) then
   try
     with IInternalFuncParams(Params) do
-      MakeInt(ResPtr^, CompareUInt64(UInt64(Get(0).AsInt64), UInt64(Get(1).AsInt64)));
+      if UInt64(Get(0).AsInt64) < UInt64(Get(1).AsInt64) then
+        MakeInt(ResPtr^, -1)
+      else if UInt64(Get(0).AsInt64) > UInt64(Get(1).AsInt64) then
+        MakeInt(ResPtr^, 1)
+      else
+        MakeInt(ResPtr^, 0);
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -914,12 +1129,13 @@ begin
         MakeInt(ResPtr^, 0)
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function GetStringFileInfoFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+{$IFDEF MSWINDOWS}
 var
   Buf: Pointer;
 
@@ -928,8 +1144,8 @@ var
     InfoBuf: Pointer;
     InfoBufSize: Cardinal;
   begin
-    Result := VerQueryValue(Buf, PChar('\StringFileInfo\' + IntToHex(LoWord(Lang), 4) +
-      IntToHex(HiWord(Lang), 4) +
+    Result := VerQueryValueW(Buf, PChar('\StringFileInfo\' + InnoIntToHex(LoWord(Lang), 4) +
+      InnoIntToHex(HiWord(Lang), 4) +
       '\' + Name), InfoBuf, InfoBufSize) and (InfoBufSize > 0);
     if Result then SetString(Value, PChar(InfoBuf), InfoBufSize - 1)
   end;
@@ -939,7 +1155,8 @@ type
   PUINTArray = ^TUINTArray;
 var
   Filename: string;
-  VersionHandle: Cardinal;
+  VersionHandle, Size: Cardinal;
+  I, LangCount: Integer;
   Langs: PUINTArray;
   Lang, LangsSize: UINT;
   Value: string;
@@ -952,12 +1169,12 @@ begin
       Success := False;
       ResPtr^.Typ := evNull;
       Filename := PrependPath(Ext, Get(0).AsStr);
-      const Size = GetFileVersionInfoSize(PChar(Filename), VersionHandle);
+      Size := GetFileVersionInfoSizeW(PChar(Filename), VersionHandle);
       if Size > 0 then
       begin
         GetMem(Buf, Size);
         try
-          if GetFileVersionInfo(PChar(Filename), VersionHandle, Size, Buf) then
+          if GetFileVersionInfoW(PChar(Filename), VersionHandle, Size, Buf) then
           begin
             if GetCount > 2 then
             begin
@@ -966,11 +1183,11 @@ begin
             end
             else
             begin
-              if VerQueryValue(Buf, PChar('\VarFileInfo\Translation'), Pointer(Langs),
+              if VerQueryValueW(Buf, PChar('\VarFileInfo\Translation'), Pointer(Langs),
                 LangsSize) then
               begin
-                const LangCount = LangsSize div 4;
-                for var I := 0 to LangCount - 1 do
+                LangCount := LangsSize div SizeOf(UINT);
+                for I := 0 to LangCount - 1 do
                 begin
                   Success := GetStringFileInfo(Langs[I], Get(1).AsStr, Value);
                   if Success then Break;
@@ -987,8 +1204,29 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
+{$ELSE}
+var
+  InternalParams: IInternalFuncParams;
+  Translation: Cardinal;
+  Value: String;
+begin
+  if CheckParams(Params, [evStr, evStr, evInt], 2, Result) then
+  try
+    InternalParams := IInternalFuncParams(Params);
+    InternalParams.ResPtr^.Typ := evNull;
+    Translation := 0;
+    if InternalParams.GetCount > 2 then
+      Translation := InternalParams.Get(2).AsCardinal;
+    if GetVersionString(PrependPath(Ext, InternalParams.Get(0).AsStr),
+       InternalParams.Get(1).AsStr, InternalParams.GetCount > 2, Translation, Value) then
+      MakeStr(InternalParams.ResPtr^, Value);
+  except
+    on E: Exception do
+      FuncResult.RaiseError(PChar(String(E.Message)));
+  end;
+{$ENDIF}
 end;
 
 function DelFileFunc(Ext: NativeInt; const Params: IIsppFuncParams;
@@ -1003,7 +1241,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1016,9 +1254,57 @@ begin
       MakeBool(ResPtr^, DeleteFile(PChar(PrependPath(Ext, Get(0).AsStr))));
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
+
+{$IFNDEF MSWINDOWS}
+function CopyNativeFile(const SourceName, DestName: String): Boolean;
+var
+  SourceHandle, DestHandle: Integer;
+  SourceInfo, DestInfo: Stat;
+  SourceStream, DestStream: THandleStream;
+begin
+  SourceHandle := fpOpen(UTF8Encode(SourceName), O_RDONLY);
+  if SourceHandle < 0 then
+    Exit(False);
+  try
+    if (fpFStat(SourceHandle, SourceInfo) <> 0) or not fpS_ISREG(SourceInfo.st_mode) then
+      Exit(False);
+    DestHandle := fpOpen(UTF8Encode(DestName), O_WRONLY or O_CREAT, SourceInfo.st_mode and &777);
+    if DestHandle < 0 then
+      Exit(False);
+    try
+      if (fpFStat(DestHandle, DestInfo) <> 0) or not fpS_ISREG(DestInfo.st_mode) or
+         ((SourceInfo.st_dev = DestInfo.st_dev) and (SourceInfo.st_ino = DestInfo.st_ino)) or
+         (fpFTruncate(DestHandle, 0) <> 0) then
+        Exit(False);
+      SourceStream := THandleStream.Create(SourceHandle);
+      try
+        DestStream := THandleStream.Create(DestHandle);
+        try
+          try
+            DestStream.CopyFrom(SourceStream, 0);
+            Result := True;
+          except
+            on E: EStreamError do
+              Result := False;
+          end;
+        finally
+          DestStream.Free;
+        end;
+      finally
+        SourceStream.Free;
+      end;
+    finally
+      if fpClose(DestHandle) <> 0 then
+        Result := False;
+    end;
+  finally
+    fpClose(SourceHandle);
+  end;
+end;
+{$ENDIF}
 
 function CopyFileFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
@@ -1026,10 +1312,14 @@ begin
   if CheckParams(Params, [evStr, evStr], 2, Result) then
   try
     with IInternalFuncParams(Params) do
-      MakeBool(ResPtr^, CopyFile(PChar(PrependPath(Ext, Get(0).AsStr)), PChar(PrependPath(Ext, Get(1).AsStr)), False));
+      {$IFDEF MSWINDOWS}
+      MakeBool(ResPtr^, CopyFileW(PChar(PrependPath(Ext, Get(0).AsStr)), PChar(PrependPath(Ext, Get(1).AsStr)), False));
+      {$ELSE}
+      MakeBool(ResPtr^, CopyNativeFile(PrependPath(Ext, Get(0).AsStr), PrependPath(Ext, Get(1).AsStr)));
+      {$ENDIF}
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1055,7 +1345,7 @@ begin
       Filename := PrependPath(Ext, Get(0).AsStr);
       New(SR);
       ResPtr^.Typ := evInt;
-      if FindFirst(Filename, Get(1).AsInteger, SR^) = 0 then
+      if FindFirst(ToNativeText(Filename), Get(1).AsInteger, SR^) = 0 then
       begin
         ResPtr^.AsInt64 := NativeInt(SR);
         TPreprocessor(Ext).CollectGarbage(SR, Addr(GarbageCloseFind));
@@ -1068,7 +1358,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1094,7 +1384,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1105,22 +1395,24 @@ begin
   try
     with IInternalFuncParams(Params) do
     begin
-      MakeStr(ResPtr^, FindGetHandle(IInternalFuncParams(Params), 0)^.Name);
+      MakeStr(ResPtr^, FromNativeText(FindGetHandle(IInternalFuncParams(Params), 0)^.Name));
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function FindCloseFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  SearchRec: PSearchRec;
 begin
   if CheckParams(Params, [evInt], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      const SearchRec = FindGetHandle(IInternalFuncParams(Params), 0);
+      SearchRec := FindGetHandle(IInternalFuncParams(Params), 0);
       FindClose(SearchRec^);
       Dispose(SearchRec);
       TPreprocessor(Ext).UncollectGarbage(SearchRec);
@@ -1128,7 +1420,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1177,7 +1469,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1192,11 +1484,13 @@ function FileReadFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
 var
   S: string;
+  P: IInternalFuncParams;
+  F: PTextFile;
 begin
   if CheckParams(Params, [evInt], 1, Result) then
   try
-    const P = IInternalFuncParams(Params);
-    const F = FileGetHandle(P, 0);
+    P := IInternalFuncParams(Params);
+    F := FileGetHandle(P, 0);
     {$I-}
     Readln(F^, S);
     {$I+}
@@ -1206,17 +1500,20 @@ begin
       MakeStr(P.ResPtr^, S);
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function FileResetFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  P: IInternalFuncParams;
+  F: PTextFile;
 begin
   if CheckParams(Params, [evInt], 1, Result) then
   try
-    const P = IInternalFuncParams(Params);
-    const F = FileGetHandle(P, 0);
+    P := IInternalFuncParams(Params);
+    F := FileGetHandle(P, 0);
     {$I-}
     Reset(F^);
     {$I+}
@@ -1226,7 +1523,7 @@ begin
       P.ResPtr^ := NULL
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1234,11 +1531,13 @@ function FileEofFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
 var
   IsEof: Boolean;
+  P: IInternalFuncParams;
+  F: PTextFile;
 begin
   if CheckParams(Params, [evInt], 1, Result) then
   try
-    const P = IInternalFuncParams(Params);
-    const F = FileGetHandle(P, 0);
+    P := IInternalFuncParams(Params);
+    F := FileGetHandle(P, 0);
     {$I-}
     IsEof := Eof(F^);
     {$I+}
@@ -1248,17 +1547,20 @@ begin
       MakeBool(P.ResPtr^, IsEof);
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function FileCloseFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  P: IInternalFuncParams;
+  F: PTextFile;
 begin
   if CheckParams(Params, [evInt], 1, Result) then
   try
-    const P = IInternalFuncParams(Params);
-    const F = FileGetHandle(P, 0);
+    P := IInternalFuncParams(Params);
+    F := FileGetHandle(P, 0);
     {$I-}
     Close(F^);
     {$I+}
@@ -1267,7 +1569,7 @@ begin
     TPreprocessor(Ext).UncollectGarbage(F);
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1286,7 +1588,7 @@ begin
       Filename := PrependPath(Ext, Get(0).AsStr);
       if (GetCount < 3) or Get(2).AsBoolean then DoAppend := True else DoAppend := False;
       if (GetCount < 4) or Get(3).AsBoolean then CodePage := CP_UTF8 else CodePage := 0;
-      DoAppend := DoAppend and NewFileExists(Filename);
+      DoAppend := DoAppend and {$IFDEF MSWINDOWS}NewFileExists(Filename){$ELSE}SysUtils.FileExists(UTF8Encode(Filename)){$ENDIF};
       AssignFile(F, FileName, CodePage);
       {$I-}
       if DoAppend then
@@ -1309,7 +1611,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1318,7 +1620,7 @@ type
 
 procedure GarbageReleaseDateTime(Item: Pointer);
 begin
-  Dispose(Item);
+  Dispose(PDateTime(Item));
 end;
 
 function FileGetDate(Ext: NativeInt; const Params: IIsppFuncParams;
@@ -1343,7 +1645,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1363,7 +1665,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1380,7 +1682,7 @@ begin
     on E: EAccessViolation do
       FuncResult.RaiseError('Invalid datetime value');
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1397,7 +1699,7 @@ begin
     on E: EAccessViolation do
       FuncResult.RaiseError('Invalid datetime value');
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1422,7 +1724,7 @@ begin
           FormatSettings.DateSeparator := NewDateSeparatorString[1];
         if NewTimeSeparatorString <> '' then
           FormatSettings.TimeSeparator := NewTimeSeparatorString[1];
-        MakeStr(ResPtr^, FormatDateTime(Get(0).AsStr, Now()));
+        MakeStr(ResPtr^, InnoFormatDateTime(Get(0).AsStr, Now()));
       finally
         FormatSettings.TimeSeparator := OldTimeSeparator;
         FormatSettings.DateSeparator := OldDateSeparator;
@@ -1430,7 +1732,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1459,7 +1761,7 @@ begin
         if not FileAge(PrependPath(Ext, Get(0).AsStr), Age) then
           FuncResult.RaiseError('Invalid file name')
         else
-          MakeStr(ResPtr^, FormatDateTime(Get(1).AsStr, Age));
+          MakeStr(ResPtr^, InnoFormatDateTime(Get(1).AsStr, Age));
       finally
         FormatSettings.TimeSeparator := OldTimeSeparator;
         FormatSettings.DateSeparator := OldDateSeparator;
@@ -1467,7 +1769,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1475,17 +1777,19 @@ function GetMD5OfFile(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
 var
   Buf: array[0..65535] of Byte;
+  Context: TMD5Context;
+  F: TFile;
+  NumRead: Cardinal;
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var Context: TMD5Context;
       MD5Init(Context);
-      var F := TFile.Create(PrependPath(Ext, Get(0).AsStr), fdOpenExisting, faRead, fsReadWrite);
+      F := TFile.Create(PrependPath(Ext, Get(0).AsStr), fdOpenExisting, faRead, fsReadWrite);
       try
         while True do begin
-          var NumRead := F.Read(Buf, SizeOf(Buf));
+          NumRead := F.Read(Buf, SizeOf(Buf));
           if NumRead = 0 then
             Break;
           MD5Update(Context, Buf, NumRead);
@@ -1497,39 +1801,43 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function GetMD5OfString(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  S: AnsiString;
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var S := AnsiString(Get(0).AsStr);
+      S := AnsiString(Get(0).AsStr);
       MakeStr(ResPtr^, MD5DigestToString(MD5Buf(Pointer(S)^, ULength(S)*SizeOf(S[1]))));
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function GetMD5OfUnicodeString(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  S: String;
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var S := Get(0).AsStr;
+      S := Get(0).AsStr;
       MakeStr(ResPtr^, MD5DigestToString(MD5Buf(Pointer(S)^, ULength(S)*SizeOf(S[1]))));
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1537,17 +1845,19 @@ function GetSHA1OfFile(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
 var
   Buf: array[0..65535] of Byte;
+  Context: TSHA1Context;
+  F: TFile;
+  NumRead: Cardinal;
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var Context: TSHA1Context;
       SHA1Init(Context);
-      var F := TFile.Create(PrependPath(Ext, Get(0).AsStr), fdOpenExisting, faRead, fsReadWrite);
+      F := TFile.Create(PrependPath(Ext, Get(0).AsStr), fdOpenExisting, faRead, fsReadWrite);
       try
         while True do begin
-          var NumRead := F.Read(Buf, SizeOf(Buf));
+          NumRead := F.Read(Buf, SizeOf(Buf));
           if NumRead = 0 then
             Break;
           SHA1Update(Context, Buf, NumRead);
@@ -1559,39 +1869,43 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function GetSHA1OfString(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  S: AnsiString;
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var S := AnsiString(Get(0).AsStr);
+      S := AnsiString(Get(0).AsStr);
       MakeStr(ResPtr^, SHA1DigestToString(SHA1Buf(Pointer(S)^, ULength(S)*SizeOf(S[1]))));
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function GetSHA1OfUnicodeString(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  S: String;
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var S := Get(0).AsStr;
+      S := Get(0).AsStr;
       MakeStr(ResPtr^, SHA1DigestToString(SHA1Buf(Pointer(S)^, ULength(S)*SizeOf(S[1]))));
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1599,17 +1913,19 @@ function GetSHA256OfFile(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
 var
   Buf: array[0..65535] of Byte;
+  Context: TSHA256Context;
+  F: TFile;
+  NumRead: Cardinal;
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var Context: TSHA256Context;
       SHA256Init(Context);
-      var F := TFile.Create(PrependPath(Ext, Get(0).AsStr), fdOpenExisting, faRead, fsReadWrite);
+      F := TFile.Create(PrependPath(Ext, Get(0).AsStr), fdOpenExisting, faRead, fsReadWrite);
       try
         while True do begin
-          var NumRead := F.Read(Buf, SizeOf(Buf));
+          NumRead := F.Read(Buf, SizeOf(Buf));
           if NumRead = 0 then
             Break;
           SHA256Update(Context, Buf, NumRead);
@@ -1621,39 +1937,43 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function GetSHA256OfString(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  S: AnsiString;
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var S := AnsiString(Get(0).AsStr);
+      S := AnsiString(Get(0).AsStr);
       MakeStr(ResPtr^, SHA256DigestToString(SHA256Buf(Pointer(S)^, ULength(S)*SizeOf(S[1]))));
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
 function GetSHA256OfUnicodeString(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+var
+  S: String;
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
-      var S := Get(0).AsStr;
+      S := Get(0).AsStr;
       MakeStr(ResPtr^, SHA256DigestToString(SHA256Buf(Pointer(S)^, ULength(S)*SizeOf(S[1]))));
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1663,18 +1983,20 @@ var
   Args: array of TVarRec;
   IntArgs: array of Int64;
   StrArgs: array of string;
+  ArgCount, I: Integer;
+  Arg: PIsppVariant;
 begin
   if CheckParams(Params, [evStr], 1, Result, True) then
   try
     with IInternalFuncParams(Params) do
     begin
-      const ArgCount = GetCount - 1;
+      ArgCount := GetCount - 1;
       SetLength(Args, ArgCount);
       SetLength(IntArgs, ArgCount);
       SetLength(StrArgs, ArgCount);
-      for var I := 0 to ArgCount - 1 do
+      for I := 0 to ArgCount - 1 do
       begin
-        const Arg = Get(I + 1);
+        Arg := Get(I + 1);
         case Arg.Typ of
           evInt:
             begin
@@ -1693,11 +2015,11 @@ begin
             'Format: argument %d must be an integer or string', [I + 1]);
         end;
       end;
-      MakeStr(ResPtr^, Format(Get(0).AsStr, Args));
+      MakeStr(ResPtr^, InnoFormat(Get(0).AsStr, Args));
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1710,7 +2032,7 @@ begin
       MakeStr(ResPtr^, Trim(Get(0).AsStr));
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1724,12 +2046,16 @@ begin
     with IInternalFuncParams(Params) do
     begin
       S := Get(0).AsStr;
+      {$IFDEF MSWINDOWS}
       StringChangeEx(S, Get(1).AsStr, Get(2).AsStr, True);
+      {$ELSE}
+      S := InnoStringReplace(S, Get(1).AsStr, Get(2).AsStr, [rfReplaceAll]);
+      {$ENDIF}
       MakeStr(ResPtr^, S);
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1744,7 +2070,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1760,7 +2086,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1776,7 +2102,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1800,7 +2126,7 @@ begin
     on E: Exception do
     begin
       if CatchException then
-        FuncResult.RaiseError(PChar(E.Message))
+        FuncResult.RaiseError(PChar(String(E.Message)))
       else
         raise;
     end;
@@ -1809,16 +2135,27 @@ end;
 
 function AddQuotesFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
+{$IFNDEF MSWINDOWS}
+var
+  S: String;
+{$ENDIF}
 begin
   if CheckParams(Params, [evStr], 1, Result) then
   try
     with IInternalFuncParams(Params) do
     begin
+      {$IFDEF MSWINDOWS}
       MakeStr(ResPtr^, AddQuotes(Get(0).AsStr));
+      {$ELSE}
+      S := Trim(Get(0).AsStr);
+      if (Pos(' ', S) <> 0) and ((S[1] <> '"') or (S[Length(S)] <> '"')) then
+        S := '"' + S + '"';
+      MakeStr(ResPtr^, S);
+      {$ENDIF}
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1829,13 +2166,42 @@ begin
   try
     with IInternalFuncParams(Params) do
     begin
-      MakeBool(ResPtr^, SameStr(Get(0).AsStr, Get(1).AsStr));
+      MakeBool(ResPtr^, InnoSameStr(Get(0).AsStr, Get(1).AsStr));
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
+
+{$IFNDEF MSWINDOWS}
+function Is64BitPEImage(const Filename: String): Boolean;
+var
+  DosHeader: packed record
+    Signature: Word;
+    Reserved: array[0..57] of Byte;
+    PEOffset: Cardinal;
+  end;
+  PEHeader: packed record
+    Signature: Cardinal;
+    COFFHeader: array[0..19] of Byte;
+    OptionalMagic: Word;
+  end;
+  F: TFile;
+begin
+  F := TFile.Create(Filename, fdOpenExisting, faRead, fsRead);
+  try
+    if (F.Read(DosHeader, SizeOf(DosHeader)) <> SizeOf(DosHeader)) or
+       (DosHeader.Signature <> $5A4D) or (DosHeader.PEOffset = 0) then
+      Exit(False);
+    F.Seek(DosHeader.PEOffset);
+    Result := (F.Read(PEHeader, SizeOf(PEHeader)) = SizeOf(PEHeader)) and
+      (PEHeader.Signature = $4550) and (PEHeader.OptionalMagic = $20B);
+  finally
+    F.Free;
+  end;
+end;
+{$ENDIF}
 
 function Is64BitPEImageFunc(Ext: NativeInt; const Params: IIsppFuncParams;
   const FuncResult: IIsppFuncResult): TIsppFuncResult; stdcall;
@@ -1848,7 +2214,7 @@ begin
     end;
   except
     on E: Exception do
-      FuncResult.RaiseError(PChar(E.Message));
+      FuncResult.RaiseError(PChar(String(E.Message)));
   end;
 end;
 
@@ -1929,7 +2295,7 @@ begin
   end;
 end;
 
-{$IFNDEF WIN64}
+{$IF Defined(MSWINDOWS) and not Defined(WIN64)}
 
 procedure InitIsWin64;
 var
@@ -1945,6 +2311,11 @@ end;
 initialization
   InitIsWin64;
 
+{$ENDIF}
+
+{$IFNDEF MSWINDOWS}
+finalization
+  AsyncProcesses.Free;
 {$ENDIF}
 
 end.

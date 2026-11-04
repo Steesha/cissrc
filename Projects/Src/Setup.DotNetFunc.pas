@@ -29,15 +29,16 @@
 interface
 
 uses
-  Ole2, SysUtils, Windows, Shared.CommonFunc, Shared.DotNetVersion;
+  ActiveX, SysUtils, Windows, Shared.CommonFunc, Shared.DotNetVersion;
 
 type
-  IAssemblyCache = class(IUnknown)
-    function UninstallAssembly(dwFlags: DWORD; pszAssemblyName: PChar; pRefData: Pointer; var pulDisposition: ULONG): HRESULT; virtual; stdcall; abstract;
-    function QueryAssemblyInfo(dwFlags: DWORD; pszAssemblyName: PChar; pAsmInfo: Pointer): HRESULT; virtual; stdcall; abstract;
-    function CreateAssemblyCacheItem(dwFlags: DWORD; pvReserved: Pointer; var ppAsmItem: Pointer; pszAssemblyName: PChar): HRESULT; virtual; stdcall; abstract;
-    function CreateAssemblyScavenger(var ppUnkReserved: Pointer): HRESULT; virtual; stdcall; abstract;
-    function InstallAssembly(dwFlags: DWORD; pszManifestFilePath: PChar; pRefData: Pointer): HRESULT; virtual; stdcall; abstract;
+  IAssemblyCache = interface(IUnknown)
+    ['{E707DCDE-D1CD-11D2-BAB9-00C04F8ECEAE}']
+    function UninstallAssembly(dwFlags: DWORD; pszAssemblyName: PWideChar; pRefData: Pointer; pulDisposition: PULONG): HRESULT; stdcall;
+    function QueryAssemblyInfo(dwFlags: DWORD; pszAssemblyName: PWideChar; pAsmInfo: Pointer): HRESULT; stdcall;
+    function CreateAssemblyCacheItem(dwFlags: DWORD; pvReserved: Pointer; var ppAsmItem: Pointer; pszAssemblyName: PWideChar): HRESULT; stdcall;
+    function CreateAssemblyScavenger(var ppUnkReserved: Pointer): HRESULT; stdcall;
+    function InstallAssembly(dwFlags: DWORD; pszManifestFilePath: PWideChar; pRefData: Pointer): HRESULT; stdcall;
   end;
 
   TAssemblyCacheInfo = class
@@ -61,7 +62,7 @@ function IsDotNetInstalled(const RegView: TRegView; const MinVersion: TDotNetVer
 implementation
 
 uses
-  Setup.InstFunc, PathFunc;
+  ComObj, Setup.InstFunc, PathFunc;
 
 var
   DotNetRoot: array [TRegView] of String;
@@ -117,58 +118,51 @@ end;
 
 constructor TAssemblyCacheInfo.Create(const RegView: TRegView);
 type
-  TCreateAssemblyCache = function (var ppAsmCache: IAssemblyCache; dwReserved: Integer): Integer; stdcall;
+  TCreateAssemblyCache = function (out ppAsmCache: IAssemblyCache; dwReserved: DWORD): HRESULT; stdcall;
 var
   FileName: string;
   Proc: TCreateAssemblyCache;
 begin
   inherited Create;
   FileName := AddBackslash(GetDotNetVersionInstallRoot(RegView, netbaseHighestKnown)) + 'Fusion.dll';
-  fDll := SafeLoadLibrary(PChar(FileName), SEM_NOOPENFILEERRORBOX);
+  fDll := {$IFDEF FPC}LoadLibraryW(PWideChar(FileName)){$ELSE}SafeLoadLibrary(PWideChar(FileName), SEM_NOOPENFILEERRORBOX){$ENDIF};
   if fDll = 0 then
     InternalError(Format('Failed to load .NET Framework DLL "%s"', [FileName]));
   Proc := GetProcAddress(fDll, 'CreateAssemblyCache');
   if not Assigned(Proc) then
     InternalError('Failed to get address of .NET Framework CreateAssemblyCache function');
-  Proc(fCache, 0);
-  if fCache = nil then
+  if Failed(Proc(fCache, 0)) or (fCache = nil) then
     InternalError('.NET Framework CreateAssemblyCache function failed');
 end;
 
 destructor TAssemblyCacheInfo.Destroy;
 begin
-  if fCache <> nil then
-    fCache.Release;
   fCache := nil;
-  FreeLibrary(fDll);
+  if fDll <> 0 then
+    FreeLibrary(fDll);
   inherited;
 end;
 
 procedure TAssemblyCacheInfo.InstallAssembly(const FileName: string);
 const
   IASSEMBLYCACHE_INSTALL_FLAG_FORCE_REFRESH = 2;
+var
+  OleResult: HRESULT;
 begin
-  const lOleString = StringToOleStr(FileName);
-  try
-    const OleResult = fCache.InstallAssembly(IASSEMBLYCACHE_INSTALL_FLAG_FORCE_REFRESH, lOleString, nil);
-    if Failed(OleResult) then
-      RaiseOleError('InstallAssembly', OleResult);
-  finally
-    SysFreeString(lOleString);
-  end;
+  OleResult := fCache.InstallAssembly(IASSEMBLYCACHE_INSTALL_FLAG_FORCE_REFRESH,
+    PWideChar(FileName), nil);
+  if Failed(OleResult) then
+    RaiseOleError('InstallAssembly', OleResult);
 end;
 
 procedure TAssemblyCacheInfo.UninstallAssembly(
   const StrongAssemblyName: string);
+var
+  OleResult: HRESULT;
 begin
-  const lOleString = StringToOleStr(StrongAssemblyName);
-  try
-    const OleResult = fCache.UninstallAssembly(0, lOleString, nil, ULONG(nil^));
-    if Failed(OleResult) then
-      RaiseOleError('UninstallAssembly', OleResult);
-  finally
-    SysFreeString(lOleString);
-  end;
+  OleResult := fCache.UninstallAssembly(0, PWideChar(StrongAssemblyName), nil, nil);
+  if Failed(OleResult) then
+    RaiseOleError('UninstallAssembly', OleResult);
 end;
 
 { IsDotNetInstalled }
@@ -207,7 +201,7 @@ function IsDotNetInstalled(const RegView: TRegView; const MinVersion: TDotNetVer
   begin
     if RegOpenKeyExView(RegView, HKEY_LOCAL_MACHINE, PChar(SubKey), 0, KEY_QUERY_VALUE, K) = ERROR_SUCCESS then begin
       Size := SizeOf(Value);
-      Result := (RegQueryValueEx(K, PChar(ValueName), nil, @Typ, PByte(@Value), @Size) = ERROR_SUCCESS) and (Typ = REG_DWORD);
+      Result := (RegQueryValueExW(K, PWideChar(ValueName), nil, @Typ, PByte(@Value), @Size) = ERROR_SUCCESS) and (Typ = REG_DWORD);
       RegCloseKey(K);
     end else
       Result := False;

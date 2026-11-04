@@ -136,6 +136,7 @@ function SaveStringsToFile(const FileName: String; const Stack: TPSStack;
 function GetShortName(const LongName: String): String;
 function CreateCallback(const Caller: TPSExec; const P: PPSVariantProcPtr): NativeInt;
 
+{$IFNDEF FPC}
 { Internal, used only by Script.Test.iss }
 function TestInnerfuse_EchoSingle(Value: Single): Single;
 function TestInnerfuse_EchoDouble(Value: Double): Double;
@@ -218,6 +219,8 @@ function TestCreateCallback_InvokeRecRet3RAX(Callback: NativeInt): String;
 {$ENDIF}
 function TestStringRefCount(const S: String): Integer;
 
+{$ENDIF}
+
 implementation
 
 uses
@@ -285,9 +288,11 @@ begin
 end;
 
 function IsProtectedSrcExe(const Filename: String): Boolean;
+var
+  ExpandedFilename: String;
 begin
   if (MainForm = nil) or (MainForm.CurStep < ssInstall) then begin
-    var ExpandedFilename := PathExpand(PathConvertSuperToNormal(Filename));
+    ExpandedFilename := PathExpand(PathConvertSuperToNormal(Filename));
     Result := PathSame(ExpandedFilename, SetupLdrOriginalFilename);
   end else
     Result := False;
@@ -303,25 +308,25 @@ begin
   Result := FmtMessage(PChar(S), Args);
 end;
 
-procedure FindDataToFindRec(const FindData: TWin32FindData;
+procedure FindDataToFindRec(const FindData: TWin32FindDataW;
   var FindRec: TFindRec);
 begin
-  FindRec.Name := FindData.cFileName;
+  FindRec.Name := PWideChar(@FindData.cFileName[0]);
   FindRec.Attributes := FindData.dwFileAttributes;
   FindRec.SizeHigh := FindData.nFileSizeHigh;
   FindRec.SizeLow := FindData.nFileSizeLow;
   FindRec.CreationTime := FindData.ftCreationTime;
   FindRec.LastAccessTime := FindData.ftLastAccessTime;
   FindRec.LastWriteTime := FindData.ftLastWriteTime;
-  FindRec.AlternateName := FindData.cAlternateFileName;
+  FindRec.AlternateName := PWideChar(@FindData.cAlternateFileName[0]);
 end;
 
 function FindFirstHelper(const FileName: String; var FindRec: TFindRec): Boolean;
 var
   FindHandle: THandle;
-  FindData: TWin32FindData;
+  FindData: TWin32FindDataW;
 begin
-  FindHandle := FindFirstFile(PChar(FileName), FindData);
+  FindHandle := FindFirstFileW(PWideChar(FileName), FindData);
   if FindHandle <> INVALID_HANDLE_VALUE then begin
     FindRec.FindHandle := FindHandle;
     FindDataToFindRec(FindData, FindRec);
@@ -335,9 +340,9 @@ end;
 
 function FindNextHelper(var FindRec: TFindRec): Boolean;
 var
-  FindData: TWin32FindData;
+  FindData: TWin32FindDataW;
 begin
-  Result := (FindRec.FindHandle <> 0) and FindNextFile(FindRec.FindHandle, FindData);
+  Result := (FindRec.FindHandle <> 0) and FindNextFileW(FindRec.FindHandle, FindData);
   if Result then
     FindDataToFindRec(FindData, FindRec);
 end;
@@ -393,23 +398,26 @@ function GetSubkeyOrValueNames(const RegView: TRegView; const RootKey: HKEY;
   const SubKeyName: String; const Stack: TPSStack; const ItemNo: Longint; const Subkey: Boolean): Boolean;
 const
   samDesired: array [Boolean] of REGSAM = (KEY_QUERY_VALUE, KEY_ENUMERATE_SUB_KEYS);
+var
+  Buf, S: String;
+  K: HKEY;
+  ArrayBuilder: TPSStackHelper.TArrayBuilder;
+  BufSize: DWORD;
+  R: Integer;
 begin
   Result := False;
-  var Buf: String;
   SetString(Buf, nil, 512);
-  var K: HKEY;
   if RegOpenKeyExView(RegView, RootKey, PChar(SubKeyName), 0, samDesired[Subkey], K) <> ERROR_SUCCESS then
     Exit;
   try
-    const ArrayBuilder = Stack.InitArrayBuilder(ItemNo);
+    ArrayBuilder := Stack.InitArrayBuilder(ItemNo);
     try
       while True do begin
-        var BufSize := ULength(Buf);
-        var R: Integer;
+        BufSize := ULength(Buf);
         if Subkey then
-          R := RegEnumKeyEx(K, DWORD(ArrayBuilder.I), @Buf[1], BufSize, nil, nil, nil, nil)
+          R := RegEnumKeyExW(K, DWORD(ArrayBuilder.I), @Buf[1], BufSize, nil, nil, nil, nil)
         else
-          R := RegEnumValue(K, DWORD(ArrayBuilder.I), @Buf[1], BufSize, nil, nil, nil, nil);
+          R := RegEnumValueW(K, DWORD(ArrayBuilder.I), @Buf[1], BufSize, nil, nil, nil, nil);
         case R of
           ERROR_SUCCESS: ;
           ERROR_NO_MORE_ITEMS: Break;
@@ -427,7 +435,6 @@ begin
         else
           Exit;  { unknown failure... }
         end;
-        var S: String;
         SetString(S, PChar(@Buf[1]), BufSize);
         ArrayBuilder.Add(S);
       end;
@@ -445,13 +452,15 @@ function GetMD5OfFile(const Filename: String): TMD5Digest;
   failure. }
 var
   Buf: array[0..65535] of Byte;
+  Context: TMD5Context;
+  F: TFile;
+  NumRead: Cardinal;
 begin
-  var Context: TMD5Context;
   MD5Init(Context);
-  var F := TFile.Create(Filename, fdOpenExisting, faRead, fsReadWrite);
+  F := TFile.Create(Filename, fdOpenExisting, faRead, fsReadWrite);
   try
     while True do begin
-      var NumRead := F.Read(Buf, SizeOf(Buf));
+      NumRead := F.Read(Buf, SizeOf(Buf));
       if NumRead = 0 then
         Break;
       MD5Update(Context, Buf, NumRead);
@@ -467,13 +476,15 @@ function GetSHA1OfFile(const Filename: String): TSHA1Digest;
   failure. }
 var
   Buf: array[0..65535] of Byte;
+  Context: TSHA1Context;
+  F: TFile;
+  NumRead: Cardinal;
 begin
-  var Context: TSHA1Context;
   SHA1Init(Context);
-  var F := TFile.Create(Filename, fdOpenExisting, faRead, fsReadWrite);
+  F := TFile.Create(Filename, fdOpenExisting, faRead, fsReadWrite);
   try
     while True do begin
-      var NumRead := F.Read(Buf, SizeOf(Buf));
+      NumRead := F.Read(Buf, SizeOf(Buf));
       if NumRead = 0 then
         Break;
       SHA1Update(Context, Buf, NumRead);
@@ -515,8 +526,10 @@ begin
 end;
 
 procedure ExecAndLogOutputLogCustom(const S: String; const Error, FirstLine: Boolean; const Data: NativeInt);
+var
+  OnLog: TOnLog;
 begin
-  var OnLog := TOnLog(PMethod(Data)^);
+  OnLog := TOnLog(PMethod(Data)^);
   OnLog(S, Error, FirstLine);
 end;
 
@@ -651,7 +664,7 @@ function SetCodePreviousData(const PreviousDataKey: HKEY; const ValueName, Value
 begin
   if ValueData <> '' then begin
     { do not localize or change the following string }
-    Result := RegSetValueEx(PreviousDataKey, PChar('Inno Setup CodeFile: ' + ValueName), 0, REG_SZ, PChar(ValueData), (ULength(ValueData)+1)*SizeOf(ValueData[1])) = ERROR_SUCCESS
+    Result := RegSetValueExW(PreviousDataKey, PWideChar('Inno Setup CodeFile: ' + ValueName), 0, REG_SZ, PByte(PWideChar(ValueData)), (ULength(ValueData)+1)*SizeOf(ValueData[1])) = ERROR_SUCCESS
   end else
     Result := True;
 end;
@@ -680,12 +693,15 @@ end;
 
 function LoadStringsFromFile(const FileName: String; const Stack: TPSStack;
   const ItemNo: Longint; const Sharing: TFileSharing): Boolean;
+var
+  F: TTextFileReader;
+  ArrayBuilder: TPSStackHelper.TArrayBuilder;
 begin
   try
-    const F = TTextFileReader.Create(FileName, fdOpenExisting, faRead, Sharing);
+    F := TTextFileReader.Create(FileName, fdOpenExisting, faRead, Sharing);
     try
       F.AllowInvalidChars := True;
-      const ArrayBuilder = Stack.InitArrayBuilder(ItemNo);
+      ArrayBuilder := Stack.InitArrayBuilder(ItemNo);
       try
         while not F.Eof do
           ArrayBuilder.Add(F.ReadLine);
@@ -728,6 +744,8 @@ function SaveStringsToFile(const FileName: String; const Stack: TPSStack;
   const ItemNo: Longint; Append, UTF8, UTF8WithoutBOM: Boolean): Boolean;
 var
   F: TTextFileWriter;
+  ArrayEnumerator: TPSStackHelper.TArrayEnumerator;
+  S: String;
 begin
   try
     if Append then
@@ -737,9 +755,9 @@ begin
     try
       if UTF8 and UTF8WithoutBOM then
         F.UTF8WithoutBOM := UTF8WithoutBOM;
-      var ArrayEnumerator := Stack.InitArrayEnumerator(ItemNo);
+      ArrayEnumerator := Stack.InitArrayEnumerator(ItemNo);
       while ArrayEnumerator.HasNext do begin
-        var S := ArrayEnumerator.Next;
+        S := ArrayEnumerator.Next;
         if not UTF8 then
           F.WriteAnsiLine(AnsiString(S))
         else
@@ -763,7 +781,7 @@ var
 begin
   SetLength(Result, MAX_PATH);
   repeat
-    Res := GetShortPathName(PChar(LongName), PChar(Result), ULength(Result));
+    Res := GetShortPathNameW(PWideChar(LongName), PWideChar(Result), ULength(Result));
     if Res = 0 then begin
       Result := LongName;
       Break;
@@ -772,9 +790,27 @@ begin
 end;
 
 function CreateCallback(const Caller: TPSExec; const P: PPSVariantProcPtr): NativeInt;
-{$IFDEF CPUX64}
+{$IFNDEF CPUX86}
 const
   BridgedParamRegisters: array [1..3] of TRegister64 = (RDX, R8, R9);
+{$ENDIF}
+var
+  ProcRec: TPSInternalProcRec;
+  S: TbtString;
+  ParamCount: Integer;
+  Method: TMethod;
+  Inliner: TASMInline;
+{$IFDEF CPUX86}
+  SwapFirst, SwapLast: Integer;
+{$ELSE}
+  ResultTypeField, E: TbtString;
+  ResultType, Cpt: TPSTypeRec;
+  FMod: TbtChar;
+  Param4IsFloatByValue: Boolean;
+  BridgedParamPositions: TArray<Integer>;
+  ExtraParams, BridgedParamTempBase, FrameSize, I, SrcOffset, DestOffset: Integer;
+  Position, TempOffset, SlotOffset: Integer;
+  Reg: TRegister64;
 {$ENDIF}
 begin
   { ProcNo 0 means nil was passed by the script }
@@ -782,30 +818,30 @@ begin
     InternalError('Invalid Method value');
 
   { Calculate parameter count of our proc, will need this later. }
-  const ProcRec = Caller.GetProcNo(P.ProcNo) as TPSInternalProcRec;
-  var S := ProcRec.ExportDecl;
-  {$IFDEF CPUX64} const ResultTypeField = {$ENDIF} GRFW(S);
-  var ParamCount := 0;
-{$IFDEF CPUX64}
+  ProcRec := Caller.GetProcNo(P.ProcNo) as TPSInternalProcRec;
+  S := ProcRec.ExportDecl;
+  {$IFNDEF CPUX86} ResultTypeField := {$ENDIF} GRFW(S);
+  ParamCount := 0;
+{$IFNDEF CPUX86}
   { Check for hidden result pointer, shifting every parameter one slot,
     matching what MyAllMethodsHandler expects after the shift below, so
     count it as an extra leading param. }
   if ResultTypeField <> '-1' then begin
-    const ResultType = Caller.GetTypeNo(Cardinal(StrToInt(ResultTypeField)));
+    ResultType := Caller.GetTypeNo(Cardinal(StrToInt(ResultTypeField)));
     if not ResultAsRegister(ResultType) then
       Inc(ParamCount);
   end;
-  var Param4IsFloatByValue := False;
-  var BridgedParamPositions: TArray<Integer>; { Positions (1-based, counting a hidden result pointer slot if present) of by-value 8-byte record and static array params }
+  Param4IsFloatByValue := False;
+  BridgedParamPositions := nil;
 {$ENDIF}
   while S <> '' do begin
     Inc(ParamCount);
-{$IFDEF CPUX64}
+{$IFNDEF CPUX86}
     { Same code as in MyAllMethodsHandler64 }
-    var e := GRFW(S);
-    const fmod = e[1];
+    e := GRFW(S);
+    fmod := e[1];
     Delete(e, 1, 1);
-    const cpt = Caller.GetTypeNo(Cardinal(StrToInt(e)));
+    cpt := Caller.GetTypeNo(Cardinal(StrToInt(e)));
     if (ParamCount = 4) and not ParamAsVariable(fmod, cpt) then
       Param4IsFloatByValue := cpt.BaseType in [btSingle, btDouble, btExtended];
     { Under stdcall an 8-byte record or static array param is passed by value,
@@ -823,7 +859,7 @@ begin
   { Turn our proc into a callable TMethod - its Code will point to
     ROPS' MyAllMethodsHandler and its Data to a record identifying our proc.
     When called, MyAllMethodsHandler will use the record to call our proc. }
-  const Method = MkMethod(Caller, P.ProcNo);
+  Method := MkMethod(Caller, P.ProcNo);
 
   { Wrap our TMethod with a dynamically generated stdcall callback which will
     do two things:
@@ -833,13 +869,13 @@ begin
     Based on InnoCallback by Sherlock Software, see
     http://www.sherlocksoftware.org/page.php?id=54 and
     https://github.com/thenickdude/InnoCallback. }
-  const Inliner = TASMInline.create;
+  Inliner := TASMInline.create;
   try
 {$IFDEF CPUX86}
     Inliner.Pop(EAX); //get the retptr off the stack
 
-    var SwapFirst := 2;
-    var SwapLast := ParamCount-1;
+    SwapFirst := 2;
+    SwapLast := ParamCount-1;
 
     { Reverse the order of parameters from param3 onwards in the stack
       Limitation 1: this reversal code treats every parameter as a single
@@ -905,11 +941,11 @@ begin
       Inliner.MovXmmXmm(1, 0); { param1: XMM0->XMM1 }
 
     { Make our own shadow space + spill area to re-stack params for ROPS. }
-    var ExtraParams := ParamCount - 3;
+    ExtraParams := ParamCount - 3;
     if ExtraParams < 0 then
       ExtraParams := 0;
-    const BridgedParamTempBase = 32 + ExtraParams * SizeOf(Pointer);
-    var FrameSize := BridgedParamTempBase + Integer(Length(BridgedParamPositions)) * SizeOf(Pointer);
+    BridgedParamTempBase := 32 + ExtraParams * SizeOf(Pointer);
+    FrameSize := BridgedParamTempBase + Integer(Length(BridgedParamPositions)) * SizeOf(Pointer);
     if (FrameSize and $F) = 0 then
       Inc(FrameSize, 8); { keep RSP 16-byte aligned at call site }
     Inliner.SubRsp(FrameSize);
@@ -920,9 +956,9 @@ begin
     { Copy remaining params (5+) from the caller's stack to ours,
       placed after shadow space + param4, matching the order ROPS expects. }
     if ParamCount > 4 then begin
-      for var I := 0 to ParamCount - 5 do begin
-        const SrcOffset = FrameSize + 40 + I * SizeOf(Pointer); { 40 = return address (8) + caller shadow space (32) }
-        const DestOffset = 32 + (I + 1) * SizeOf(Pointer); { 32 = callee shadow space, + 1 to skip param4 }
+      for I := 0 to ParamCount - 5 do begin
+        SrcOffset := FrameSize + 40 + I * SizeOf(Pointer); { 40 = return address (8) + caller shadow space (32) }
+        DestOffset := 32 + (I + 1) * SizeOf(Pointer); { 32 = callee shadow space, + 1 to skip param4 }
         Inliner.MovRegMemRSP(RDX, SrcOffset);
         Inliner.MovMemRSPReg(DestOffset, RDX);
       end;
@@ -942,15 +978,15 @@ begin
     { Bridge by-value 8-byte records and static arrays: the slot holds the
       value (stdcall) but the handler (register) reads it as a pointer, so copy
       each to its temp and put the temp's address in the slot. }
-    for var I := 0 to High(BridgedParamPositions) do begin
-      const Position = BridgedParamPositions[I];
-      const TempOffset = BridgedParamTempBase + Integer(I) * SizeOf(Pointer);
+    for I := 0 to High(BridgedParamPositions) do begin
+      Position := BridgedParamPositions[I];
+      TempOffset := BridgedParamTempBase + Integer(I) * SizeOf(Pointer);
       if Position in [1, 2, 3] then begin
-        const Reg = BridgedParamRegisters[Position];
+        Reg := BridgedParamRegisters[Position];
         Inliner.MovMemRSPReg(TempOffset, Reg);
         Inliner.LeaRegMemRSP(Reg, TempOffset);
       end else begin
-        const SlotOffset = 32 + (Position - 4) * SizeOf(Pointer);
+        SlotOffset := 32 + (Position - 4) * SizeOf(Pointer);
         Inliner.MovRegMemRSP(RAX, SlotOffset);
         Inliner.MovMemRSPReg(TempOffset, RAX);
         Inliner.LeaRegMemRSP(RAX, TempOffset);
@@ -971,6 +1007,7 @@ begin
   end;
 end;
 
+{$IFNDEF FPC}
 function TestInnerfuse_EchoSingle(Value: Single): Single;
 begin
   Result := Value;
@@ -1446,5 +1483,6 @@ begin
   else
     Result := PInteger(PByte(Pointer(S)) - 8)^;
 end;
+{$ENDIF}
 
 end.

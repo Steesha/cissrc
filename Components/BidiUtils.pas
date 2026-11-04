@@ -28,10 +28,10 @@ var
 
 implementation
 
-{$IFNDEF ISTESTTOOLPROJ}
+{$IF not Defined(ISTESTTOOLPROJ) and not Defined(FPC)}
 uses
   WinXPanels;
-{$ENDIF}
+{$IFEND}
 
 procedure FlipRect(var Rect: TRect; const ParentRect: TRect; const UseRightToLeft: Boolean);
 var
@@ -53,15 +53,21 @@ begin
     Result := False;
 end;
 
+{$IFNDEF FPC}
 type
   TControlAccess = class(TControl);
+{$ENDIF}
 
 procedure FlipControls(const AParentCtl: TWinControl);
+var
+  ParentWidth, I: Integer;
+  Ctl: TControl;
 begin
   if AParentCtl.ControlCount = 0 then
     Exit;
   AParentCtl.DisableAlign;
   try
+    {$IFNDEF FPC}
     if AParentCtl is TStackPanel then begin
       const StackPanel = AParentCtl as TStackPanel;
       if StackPanel.Orientation = spoHorizontal then begin
@@ -77,18 +83,22 @@ begin
           end;
         end;
       end;
-    end else begin
-      const ParentWidth = AParentCtl.ClientWidth;
-      for var I := 0 to AParentCtl.ControlCount-1 do begin
-        const Ctl = AParentCtl.Controls[I];
+    end else
+    {$ENDIF}
+    begin
+      ParentWidth := AParentCtl.ClientWidth;
+      for I := 0 to AParentCtl.ControlCount-1 do begin
+        Ctl := AParentCtl.Controls[I];
         if (akLeft in Ctl.Anchors) and not (akRight in Ctl.Anchors) then
           Ctl.Anchors := Ctl.Anchors - [akLeft] + [akRight]
         else if not (akLeft in Ctl.Anchors) and (akRight in Ctl.Anchors) then begin
+          {$IFNDEF FPC}
           { Before we can set Anchors to [akLeft, akTop] (which has a special
             'no anchors' meaning to VCL), we first need to update the Explicit*
             properties so the control doesn't get moved back to an old position. }
           if Ctl.Anchors = [akTop, akRight] then
             TControlAccess(Ctl).UpdateExplicitBounds;
+          {$ENDIF}
           Ctl.Anchors := Ctl.Anchors - [akRight] + [akLeft];
         end;
         Ctl.Left := ParentWidth - Ctl.Width - Ctl.Left;
@@ -97,7 +107,7 @@ begin
   finally
     AParentCtl.EnableAlign;
   end;
-  for var I := 0 to AParentCtl.ControlCount-1 do
+  for I := 0 to AParentCtl.ControlCount-1 do
     if AParentCtl.Controls[I] is TWinControl then
       FlipControls(TWinControl(AParentCtl.Controls[I]));
 end;

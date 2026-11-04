@@ -13,7 +13,7 @@ unit ISPP.Parser;
 interface
 
 uses
-  ISPP.Intf, ISPP.Base, ISPP.CTokenizer;
+  ISPP.Intf, ISPP.Base, ISPP.CTokenizer, Shared.FPCStringUtils;
 
 type
 
@@ -272,7 +272,7 @@ begin
     tkNumber:
       if DoEval then
       begin
-        if not TryStrToInt64(TokenString, I) then
+        if not InnoTryStrToInt64(TokenString, I) then
           ErrorFmt(SCannotConvertToInteger, [TokenString]);
         MakeInt(Result, I);
       end;
@@ -330,6 +330,7 @@ begin
   if (Op1.Typ <> Op2.Typ) or not (Op1.Typ in [evInt, evStr]) then
     Error(SOperatorNotApplicableToThisOpera);
   AsBool := False;
+  Result := NULL;
   with Result do
   try
     if Op1.Typ = evStr then
@@ -341,7 +342,7 @@ begin
       else
       begin
         Typ := evInt;
-        A := CompareText(Op1.AsStr, Op2.AsStr);
+        A := InnoCompareText(Op1.AsStr, Op2.AsStr);
         case Op of
           opGreater: AsBool := A > 0;
           opLess: AsBool := A < 0;
@@ -383,7 +384,7 @@ begin
           AsInt64 := Int64(AsBool)
       end
   except
-    on E: Exception do Error(E.Message);
+    on E: Exception do Error(FromNativeText(E.Message));
   end;
 end;
 
@@ -391,6 +392,7 @@ function TParser.UnaryOperation(Op: TTokenKind; Op1: TIsppVariant): TIsppVariant
 var
   A: Int64;
 begin
+  Result := NULL;
   MakeRValue(Op1);
   A := 0; // satisfy compiler
   case Op1.Typ of
@@ -472,9 +474,11 @@ begin
 end;
 
 function TParser.IntExpr(const StopOnComma: Boolean): Int64;
+var
+  V: TIsppVariant;
 begin
   Result := 0; { silence compiler }
-  var V := Expr(StopOnComma, True);
+  V := Expr(StopOnComma, True);
   if V.Typ = evInt then
     Result := V.AsInt64
   else
@@ -482,22 +486,26 @@ begin
 end;
 
 function TParser.IntegerExpr(const StopOnComma: Boolean): Integer;
+var
+  V: TIsppVariant;
 begin
   Result := 0; { silence compiler }
-  var V := Expr(StopOnComma, True);
+  V := Expr(StopOnComma, True);
   if V.Typ = evInt then begin
     try
       Result := V.AsInteger;
     except on E: Exception do
-      Error(E.Message);
+      Error(FromNativeText(E.Message));
     end;
   end else
     Error(SIntegerExpressionExpected);
 end;
 
 function TParser.StrExpr(const StopOnComma: Boolean): string;
+var
+  V: TIsppVariant;
 begin
-  var V := Expr(StopOnComma, True);
+  V := Expr(StopOnComma, True);
   case V.Typ of
     evNull: Result := '';
     evStr: Result := V.AsStr;
@@ -509,14 +517,17 @@ end;
 function TParser.Assignment(DoEval: Boolean): TIsppVariant;
 var
   Op: TTokenKind;
+  Left, Right: TIsppVariant;
 begin
   Result := Conditional(DoEval);
   while PeekAtNextToken in [opAssign..opAgnMod] do
   begin
     Op := NextToken;
-    if DoEval then
-      Result := AssignOperation(CheckLValue(Result), Assignment(DoEval), Op)
-    else
+    if DoEval then begin
+      Left := CheckLValue(Result);
+      Right := Assignment(True);
+      Result := AssignOperation(Left, Right, Op);
+    end else
       Assignment(DoEval)
   end;
 end;
@@ -551,7 +562,8 @@ begin
   SimplifyLValue(LValue);
   if Op = opAssign then
   begin
-    LValue.AsPtr^ := GetRValue(RValue);
+    MakeRValue(RValue);
+    LValue.AsPtr^ := RValue;
     Result := LValue;
   end
   else

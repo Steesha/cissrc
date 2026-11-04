@@ -20,7 +20,7 @@ uses
   Windows, SysUtils,
   PathFunc,
   Shared.CommonFunc, Shared.FileClass, Shared.Struct,
-  Setup.InstFunc, Setup.FileExtractor, Setup.LoggingFunc, Setup.MainFunc;
+  Setup.InstFunc, Setup.LoggingFunc, Setup.MainFunc;
 
 procedure InternalExtractTemporaryFile(const DestName: String;
   const CurFile: PSetupFileEntry; const CurFileLocation: PSetupFileLocationEntry;
@@ -81,11 +81,12 @@ procedure ExtractTemporaryFile(const BaseName: String);
 var
   EscapedBaseName: String;
   CurFile: PSetupFileEntry;
+  CurFileNumber: Integer;
 begin
   { We compare BaseName to the filename portion of TSetupFileEntry.DestName
     which has braces escaped, but BaseName does not; escape it to match }
   EscapedBaseName := EscapeBraces(BaseName);
-  for var CurFileNumber := 0 to Entries[seFile].Count-1 do begin
+  for CurFileNumber := 0 to Entries[seFile].Count-1 do begin
     CurFile := PSetupFileEntry(Entries[seFile][CurFileNumber]);
     if (CurFile^.LocationEntry <> -1) and SameText(PathExtractName(CurFile^.DestName), EscapedBaseName) then begin
       InternalExtractTemporaryFile(BaseName, CurFile, Entries[seFileLocation][CurFile^.LocationEntry], False);
@@ -99,6 +100,7 @@ function ExtractTemporaryFiles(const Pattern: String): Integer;
 var
   LowerPattern, DestName: String;
   CurFile: PSetupFileEntry;
+  CurFileNumber: Integer;
 begin
   if Length(Pattern) >= MAX_PATH then
     InternalError('ExtractTemporaryFiles: Pattern too long');
@@ -106,7 +108,7 @@ begin
   LowerPattern := PathLowercase(Pattern);
   Result := 0;
 
-  for var CurFileNumber := 0 to Entries[seFile].Count-1 do begin
+  for CurFileNumber := 0 to Entries[seFile].Count-1 do begin
     CurFile := PSetupFileEntry(Entries[seFile][CurFileNumber]);
     if CurFile^.LocationEntry <> -1 then begin
       (* Use ExpandConstEx2 to unescape any braces not in an embedded constant,

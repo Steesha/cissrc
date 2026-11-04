@@ -13,7 +13,7 @@ unit Compression.LZMADecompressor;
 interface
 
 uses
-  Windows, SysUtils, Compression.Base;
+  {$IFDEF MSWINDOWS} Windows, {$ENDIF} SysUtils, Compression.Base;
 
 type
   TLZMACustomDecompressor = class(TCustomDecompressor)
@@ -95,7 +95,7 @@ const
     stream's header is corrupted, we limit the dictionary size to the maximum
     size the compiler currently allows, so same as ssLZMADictionarySize allows
     in Compiler.SetupCompiler.pas. }
-  {$IFDEF WIN64}
+  {$IF Defined(WIN64) or Defined(CPU64)}
   MaxDictionarySize = Cardinal(15) shl 28;
   { Lzma2Dec_GetOldProps in Lzma2Dec.c decodes LZMA2 property 40 as 4 GB - 1, and
     LzmaDec_Allocate in LzmaDec.c then allocates 4 GB }
@@ -105,6 +105,9 @@ const
   MaxAllocSize = MaxDictionarySize;
   {$ENDIF}
 
+{$IFDEF FPC}
+{$LINKLIB inno_decoders}
+{$ELSE}
 { Compiled by Visual Studio 2022 using compile.bat }
 {$IFNDEF WIN64}
 { To enable source debugging recompile using compile-bcc32c.bat
@@ -113,33 +116,37 @@ const
 {$ELSE}
 {$L Src\Compression.LZMADecompressor\Lzma2Decode\ISLzmaDec-x64.obj}
 {$ENDIF}
+{$ENDIF}
 
 function IS_LzmaDec_Init(var state: TLZMAInternalDecoderState;
   stateSize: NativeUInt; const props; propsSize: Cardinal;
-  const alloc: TLZMAISzAlloc): TLZMASRes; cdecl; external name {$IFNDEF WIN64} '_IS_LzmaDec_Init' {$ELSE} 'IS_LzmaDec_Init'{$ENDIF};
-function IS_LzmaDec_StateSize: NativeUInt; cdecl; external name {$IFNDEF WIN64} '_IS_LzmaDec_StateSize' {$ELSE} 'IS_LzmaDec_StateSize'{$ENDIF};
+  {$IFDEF FPC}constref{$ELSE}const{$ENDIF} alloc: TLZMAISzAlloc): TLZMASRes; cdecl; external name {$IF not Defined(WIN64) and not Defined(FPC)} '_IS_LzmaDec_Init' {$ELSE} 'IS_LzmaDec_Init'{$ENDIF};
+function IS_LzmaDec_StateSize: NativeUInt; cdecl; external name {$IF not Defined(WIN64) and not Defined(FPC)} '_IS_LzmaDec_StateSize' {$ELSE} 'IS_LzmaDec_StateSize'{$ENDIF};
 function LzmaDec_DecodeToBuf(var state: TLZMAInternalDecoderState; var dest;
   var destLen: NativeUInt; const src; var srcLen: NativeUInt; finishMode: Integer;
-  var status: Integer): TLZMASRes; cdecl; external name {$IFNDEF WIN64} '_LzmaDec_DecodeToBuf' {$ELSE} 'LzmaDec_DecodeToBuf'{$ENDIF};
+  var status: Integer): TLZMASRes; cdecl; external name {$IF not Defined(WIN64) and not Defined(FPC)} '_LzmaDec_DecodeToBuf' {$ELSE} 'LzmaDec_DecodeToBuf'{$ENDIF};
 procedure LzmaDec_Free(var state: TLZMAInternalDecoderState;
-  const alloc: TLZMAISzAlloc); cdecl; external name {$IFNDEF WIN64} '_LzmaDec_Free' {$ELSE} 'LzmaDec_Free'{$ENDIF};
+  {$IFDEF FPC}constref{$ELSE}const{$ENDIF} alloc: TLZMAISzAlloc); cdecl; external name {$IF not Defined(WIN64) and not Defined(FPC)} '_LzmaDec_Free' {$ELSE} 'LzmaDec_Free'{$ENDIF};
 
 function IS_Lzma2Dec_Init(var state: TLZMAInternalDecoderState;
-  stateSize: NativeUInt; prop: Byte; const alloc: TLZMAISzAlloc): TLZMASRes; cdecl;
-  external name {$IFNDEF WIN64} '_IS_Lzma2Dec_Init' {$ELSE} 'IS_Lzma2Dec_Init'{$ENDIF};
-function IS_Lzma2Dec_StateSize: NativeUInt; cdecl; external name {$IFNDEF WIN64} '_IS_Lzma2Dec_StateSize' {$ELSE} 'IS_Lzma2Dec_StateSize'{$ENDIF};
+  stateSize: NativeUInt; prop: Byte; {$IFDEF FPC}constref{$ELSE}const{$ENDIF} alloc: TLZMAISzAlloc): TLZMASRes; cdecl;
+  external name {$IF not Defined(WIN64) and not Defined(FPC)} '_IS_Lzma2Dec_Init' {$ELSE} 'IS_Lzma2Dec_Init'{$ENDIF};
+function IS_Lzma2Dec_StateSize: NativeUInt; cdecl; external name {$IF not Defined(WIN64) and not Defined(FPC)} '_IS_Lzma2Dec_StateSize' {$ELSE} 'IS_Lzma2Dec_StateSize'{$ENDIF};
 function Lzma2Dec_DecodeToBuf(var state: TLZMAInternalDecoderState; var dest;
   var destLen: NativeUInt; const src; var srcLen: NativeUInt; finishMode: Integer;
-  var status: Integer): TLZMASRes; cdecl; external name {$IFNDEF WIN64} '_Lzma2Dec_DecodeToBuf' {$ELSE} 'Lzma2Dec_DecodeToBuf'{$ENDIF};
+  var status: Integer): TLZMASRes; cdecl; external name {$IF not Defined(WIN64) and not Defined(FPC)} '_Lzma2Dec_DecodeToBuf' {$ELSE} 'Lzma2Dec_DecodeToBuf'{$ENDIF};
 procedure IS_Lzma2Dec_Free(var state: TLZMAInternalDecoderState;
-  const alloc: TLZMAISzAlloc); cdecl; external name {$IFNDEF WIN64} '_IS_Lzma2Dec_Free' {$ELSE} 'IS_Lzma2Dec_Free'{$ENDIF};
+  {$IFDEF FPC}constref{$ELSE}const{$ENDIF} alloc: TLZMAISzAlloc); cdecl; external name {$IF not Defined(WIN64) and not Defined(FPC)} '_IS_Lzma2Dec_Free' {$ELSE} 'IS_Lzma2Dec_Free'{$ENDIF};
 
 
+{$IF not Defined(FPC) or Defined(MSWINDOWS)}
 function {$IFNDEF WIN64} _memcpy {$ELSE} memcpy {$ENDIF}(dest, src: Pointer; n: NativeUInt): Pointer; cdecl;
+  {$IFDEF FPC} public name {$IF Defined(MSWINDOWS) and not Defined(WIN64)}'_memcpy'{$ELSE}'memcpy'{$IFEND}; {$ENDIF}
 begin
   UMove(src^, dest^, n);
   Result := dest;
 end;
+{$ENDIF}
 
 procedure LZMADecompInternalError(const Msg: String);
 begin
@@ -154,7 +161,15 @@ end;
 function LZMAAllocFunc(p: PLZMAISzAlloc; size: NativeUInt): Pointer; cdecl;
 begin
   if (size <> 0) and (size <= MaxAllocSize) then
+    {$IFDEF MSWINDOWS}
     Result := VirtualAlloc(nil, size, MEM_COMMIT, PAGE_READWRITE)
+    {$ELSE}
+    try
+      GetMem(Result, size);
+    except
+      on EOutOfMemory do Result := nil;
+    end
+    {$ENDIF}
   else
     Result := nil;
 end;
@@ -162,7 +177,11 @@ end;
 procedure LZMAFreeFunc(p: PLZMAISzAlloc; address: Pointer); cdecl;
 begin
   if Assigned(address) then
+    {$IFDEF MSWINDOWS}
     VirtualFree(address, 0, MEM_RELEASE);
+    {$ELSE}
+    FreeMem(address);
+    {$ENDIF}
 end;
 
 const
@@ -179,7 +198,7 @@ end;
 procedure TLZMACustomDecompressor.DecompressInto(var Buffer; Count: Cardinal);
 var
   NextOut: PByte;
-  OutBytes, InBytes: Cardinal;
+  OutBytes, InBytes, AvailOut: Cardinal;
   Code: TLZMASRes;
   DecodeStatus: Integer;
 begin
@@ -191,7 +210,7 @@ begin
     FHeaderProcessed := True;
   end;
   NextOut := @Buffer;
-  var AvailOut := Count;
+  AvailOut := Count;
   while AvailOut > 0 do begin
     if (FAvailIn = 0) and not FReachedEnd then begin
       FNextIn := PByte(@FBuffer);
@@ -237,6 +256,7 @@ end;
 
 procedure TLZMA1Decompressor.ProcessHeader;
 var
+  StateSize, DecoderStateSize: NativeUInt;
   Props: packed record  { size = LZMA_PROPS_SIZE (5) }
     Misc: Byte;
     DictionarySize: Cardinal;  { little endian, unaligned }
@@ -249,8 +269,8 @@ begin
   if Props.DictionarySize > MaxDictionarySize then
     LZMADecompDataError(5);
 
-  var StateSize := IS_LzmaDec_StateSize;
-  var DecoderStateSize := SizeOf(FDecoderState);
+  StateSize := IS_LzmaDec_StateSize;
+  DecoderStateSize := SizeOf(FDecoderState);
   if StateSize > DecoderStateSize then
     LZMADecompDataError(-Integer(StateSize));
 
@@ -268,9 +288,11 @@ end;
 
 function TLZMA1Decompressor.DecodeToBuf(var Dest; var DestLen: Cardinal;
   const Src; var SrcLen: Cardinal; var Status: Integer): Integer;
+var
+  NativeDestLen, NativeSrcLen: NativeUInt;
 begin
-  var NativeDestLen: NativeUInt := DestLen;
-  var NativeSrcLen: NativeUInt := SrcLen;
+  NativeDestLen := DestLen;
+  NativeSrcLen := SrcLen;
   Result := LzmaDec_DecodeToBuf(FDecoderState, Dest, NativeDestLen, Src, NativeSrcLen,
     LZMA_FINISH_ANY, Status);
   DestLen := Cardinal(NativeDestLen);
@@ -294,6 +316,7 @@ procedure TLZMA2Decompressor.ProcessHeader;
 
 var
   Prop: Byte;
+  StateSize, DecoderStateSize: NativeUInt;
 begin
   { Read header fields }
   if ReadProc(Prop, SizeOf(Prop)) <> SizeOf(Prop) then
@@ -309,8 +332,8 @@ begin
   end else if LZMA2_DIC_SIZE_FROM_PROP(Prop) > MaxDictionarySize then
     LZMADecompDataError(5);
 
-  var StateSize := IS_Lzma2Dec_StateSize;
-  var DecoderStateSize := SizeOf(FDecoderState);
+  StateSize := IS_Lzma2Dec_StateSize;
+  DecoderStateSize := SizeOf(FDecoderState);
   if StateSize > DecoderStateSize then
     LZMADecompDataError(-Integer(StateSize));
 
@@ -328,9 +351,11 @@ end;
 
 function TLZMA2Decompressor.DecodeToBuf(var Dest; var DestLen: Cardinal;
   const Src; var SrcLen: Cardinal; var Status: Integer): Integer;
+var
+  NativeDestLen, NativeSrcLen: NativeUInt;
 begin
-  var NativeDestLen: NativeUInt := DestLen;
-  var NativeSrcLen: NativeUInt := SrcLen;
+  NativeDestLen := DestLen;
+  NativeSrcLen := SrcLen;
   Result := Lzma2Dec_DecodeToBuf(FDecoderState, Dest, NativeDestLen, Src, NativeSrcLen,
     LZMA_FINISH_ANY, Status);
   DestLen := Cardinal(NativeDestLen);

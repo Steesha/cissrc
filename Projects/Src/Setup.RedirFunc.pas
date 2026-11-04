@@ -35,7 +35,7 @@ function CreateProcessRedir(const DisableFsRedir: Boolean;
   const lpProcessAttributes, lpThreadAttributes: PSecurityAttributes;
   const bInheritHandles: BOOL; const dwCreationFlags: DWORD;
   const lpEnvironment: Pointer; const lpCurrentDirectory: PChar;
-  const lpStartupInfo: TStartupInfo;
+  const lpStartupInfo: TStartupInfoW;
   var lpProcessInformation: TProcessInformation): BOOL;
 
 implementation
@@ -96,7 +96,7 @@ function CreateProcessRedir(const DisableFsRedir: Boolean;
   const lpProcessAttributes, lpThreadAttributes: PSecurityAttributes;
   const bInheritHandles: BOOL; const dwCreationFlags: DWORD;
   const lpEnvironment: Pointer; const lpCurrentDirectory: PChar;
-  const lpStartupInfo: TStartupInfo;
+  const lpStartupInfo: TStartupInfoW;
   var lpProcessInformation: TProcessInformation): BOOL;
 var
   PrevState: TPreviousFsRedirectionState;
@@ -107,7 +107,7 @@ begin
     Exit;
   end;
   try
-    Result := CreateProcess(lpApplicationName, lpCommandLine,
+    Result := CreateProcessW(lpApplicationName, lpCommandLine,
       lpProcessAttributes, lpThreadAttributes,
       bInheritHandles, dwCreationFlags, lpEnvironment,
       lpCurrentDirectory, lpStartupInfo, lpProcessInformation);

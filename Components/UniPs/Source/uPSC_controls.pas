@@ -20,7 +20,7 @@ procedure SIRegisterTWinControl(Cl: TPSPascalCompiler);
 procedure SIRegisterTGraphicControl(cl: TPSPascalCompiler); 
 procedure SIRegisterTCustomControl(cl: TPSPascalCompiler); 
 procedure SIRegisterTDragObject(cl: TPSPascalCompiler);
-{$IFDEF DELPHI4UP}
+{$IF Defined(DELPHI4UP) or Defined(PS_INNO_WINDOWS_TARGET)}
 procedure SIRegisterTSizeConstraints(cl: TPSPascalCompiler);
 {$ENDIF}
 
@@ -177,11 +177,11 @@ begin
   cl.addTypeS('TStyleElements', 'set of TStyleElement');
   {$ENDIF}
 
-  {$IFDEF DELPHI4UP}
+  {$IF Defined(DELPHI4UP) or Defined(PS_INNO_WINDOWS_TARGET)}
   cl.addTypeS('TAnchorKind', '(akLeft, akTop, akRight, akBottom)');
   cl.addTypeS('TAnchors','set of TAnchorKind');
   {$ENDIF}
-  {$IFDEF FPC}
+  {$IF Defined(FPC) and not Defined(PS_INNO_WINDOWS_TARGET)}
   cl.addTypeS('TAnchorKind', '(akTop, akLeft, akRight, akBottom)');
   cl.addTypeS('TAnchors','set of TAnchorKind');
   {$ENDIF}
@@ -223,10 +223,10 @@ begin
 {$IFDEF DELPHI3UP}
   cl.AddConstantN('crHandPoint', 'Integer').Value.ts32 := -21;
 {$ENDIF}
-{$IFDEF DELPHI4UP}
+{$IF Defined(DELPHI4UP) or Defined(PS_INNO_WINDOWS_TARGET)}
   cl.AddConstantN('crSizeAll', 'Integer').Value.ts32 := -22;
 {$ENDIF}
-{$IFDEF DELPHI2009UP}
+{$IF Defined(DELPHI2009UP) or Defined(PS_INNO_WINDOWS_TARGET) or (Defined(FPC) and Defined(SETUPPROJ))}
   cl.AddTypeS('TBevelKind', '(bkNone, bkTile, bkSoft, bkFlat)');
 {$ENDIF}
 end;
@@ -236,7 +236,7 @@ begin
   with CL.AddClassN(CL.FindClass('TObject'),'TDragObject') do
   begin
 {$IFNDEF PS_MINIVCL}
-{$IFDEF DELPHI4UP}
+{$IF Defined(DELPHI4UP) or Defined(PS_INNO_WINDOWS_TARGET)}
     RegisterMethod('procedure Assign(Source: TDragObject)');
 {$ENDIF}
 {$IFNDEF FPC}
@@ -245,7 +245,7 @@ begin
 {$ENDIF}
     RegisterMethod('procedure HideDragImage');
     RegisterMethod('procedure ShowDragImage');
-{$IFDEF DELPHI4UP}
+{$IF Defined(DELPHI4UP) or Defined(PS_INNO_WINDOWS_TARGET)}
     RegisterProperty('Cancelling', 'Boolean', iptrw);
     RegisterProperty('DragHandle', 'HWND', iptrw);
     RegisterProperty('DragPos', 'TPoint', iptrw);
@@ -258,7 +258,7 @@ begin
   Cl.AddTypeS('TStartDragEvent', 'procedure (Sender: TObject; var DragObject: TDragObject)');
 end;
 
-{$IFDEF DELPHI4UP}
+{$IF Defined(DELPHI4UP) or Defined(PS_INNO_WINDOWS_TARGET)}
 procedure SIRegisterTSizeConstraints(cl: TPSPascalCompiler);
 begin
   cl.AddTypeS('TConstraintSize', 'Integer');
@@ -276,7 +276,7 @@ procedure SIRegister_Controls(Cl: TPSPascalCompiler);
 begin
   SIRegister_Controls_TypesAndConsts(cl);
   SIRegisterTDragObject(cl);
-{$IFDEF DELPHI4UP}
+{$IF Defined(DELPHI4UP) or Defined(PS_INNO_WINDOWS_TARGET)}
   SIRegisterTSizeConstraints(cl);
 {$ENDIF}
   SIRegisterTControl(Cl);

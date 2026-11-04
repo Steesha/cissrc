@@ -30,18 +30,30 @@ implementation
 
 uses
   CommDlg, ShlObj, ActiveX,
-  SysUtils, Themes,
+  SysUtils, {$IFDEF FPC}Controls,{$ELSE}Themes,{$ENDIF}
   PathFunc;
+
+{$IFDEF FPC}
+function SHCreateItemFromParsingName(const Path: PWideChar; const BindContext: IBindCtx;
+  constref IID: TGUID; out Item): HRESULT; stdcall; external 'shell32.dll';
+
+function BrowseOpenFileNameW(var OpenFile: TOpenFilenameW): BOOL; stdcall;
+  external 'comdlg32.dll' name 'GetOpenFileNameW';
+function BrowseSaveFileNameW(var OpenFile: TOpenFilenameW): BOOL; stdcall;
+  external 'comdlg32.dll' name 'GetSaveFileNameW';
+{$ENDIF}
 
 function BrowseForFolder(const Prompt: String; var Directory: String;
   const ParentWnd: HWND): Boolean;
 
   function RemoveSinglePeriod(const S: String): String;
+  var
+    FirstPeriodPos, LastPeriodPos: Integer;
   begin
     Result := S;
-    const FirstPeriodPos = Pos('.', S);
+    FirstPeriodPos := Pos('.', S);
     if FirstPeriodPos <> 0 then begin
-      const LastPeriodPos = LastDelimiter('.', S);
+      LastPeriodPos := LastDelimiter('.', S);
       if (FirstPeriodPos = LastPeriodPos) and (LastPeriodPos = Length(S)) then
         Delete(Result, LastPeriodPos, 1);
     end;
@@ -51,8 +63,10 @@ var
   InitialDir: String;
   Options: DWORD;
   ActiveWindow: HWND;
-  WindowList: Pointer;
-  ResultPath: PChar;
+  WindowList: {$IFDEF FPC}TList{$ELSE}Pointer{$ENDIF};
+  ResultPath: PWideChar;
+  FileDialog: IFileDialog;
+  ShellItem: IShellItem;
 begin
   Result := False;
   InitialDir := RemoveBackslashUnlessRoot(Directory);  { Win95 doesn't allow trailing backslash }
@@ -60,13 +74,14 @@ begin
   if Failed(CoInitialize(nil)) then
     Exit;
   ActiveWindow := GetActiveWindow;
-  WindowList := DisableTaskWindows(ParentWnd);
+  WindowList := {$IFDEF FPC}Screen.DisableForms(GetParentForm(FindControl(ParentWnd))){$ELSE}DisableTaskWindows(ParentWnd){$ENDIF};
+  {$IFNDEF FPC}
   const SaveHooks = TStyleManager.SystemHooks;
   TStyleManager.SystemHooks := []; { See below }
+  {$ENDIF}
   try
-    var FileDialog: IFileDialog;
-    if Failed(CoCreateInstance(CLSID_FileOpenDialog, nil, CLSCTX_INPROC_SERVER, IID_IFileDialog, FileDialog)) or
-       Failed(FileDialog.GetOptions(Options)) then { On Windows 11 this returned FOS_NOCHANGEDIR or FOS_PATHMUSTEXIST or FOS_FILEMUSTEXIST }
+    if Failed(CoCreateInstance(CLSID_FileOpenDialog, nil, CLSCTX_INPROC_SERVER, {$IFDEF FPC}IFileDialog{$ELSE}IID_IFileDialog{$ENDIF}, FileDialog)) or
+       Failed(FileDialog.GetOptions({$IFDEF FPC}@{$ENDIF}Options)) then { On Windows 11 this returned FOS_NOCHANGEDIR or FOS_PATHMUSTEXIST or FOS_FILEMUSTEXIST }
       Exit;
 
     Options := Options or FOS_PICKFOLDERS or FOS_FORCEFILESYSTEM;
@@ -76,13 +91,12 @@ begin
     if Prompt <> '' then
       FileDialog.SetTitle(PChar(RemoveSinglePeriod(Prompt)));
 
-    var ShellItem: IShellItem;
-    if (InitialDir <> '') and Succeeded(SHCreateItemFromParsingName(PChar(InitialDir), nil, IID_IShellItem, ShellItem)) then
+    if (InitialDir <> '') and Succeeded(SHCreateItemFromParsingName(PChar(InitialDir), nil, {$IFDEF FPC}IShellItem{$ELSE}IID_IShellItem{$ENDIF}, ShellItem)) then
       FileDialog.SetFolder(ShellItem);
 
     if Failed(FileDialog.Show(ParentWnd)) or
-       Failed(FileDialog.GetResult(ShellItem)) or
-       Failed(ShellItem.GetDisplayName(SIGDN_FILESYSPATH, ResultPath)) then
+       Failed(FileDialog.GetResult({$IFDEF FPC}@{$ENDIF}ShellItem)) or
+       Failed(ShellItem.GetDisplayName(SIGDN_FILESYSPATH, {$IFDEF FPC}PWideChar(@ResultPath){$ELSE}ResultPath{$ENDIF})) then
       Exit;
 
     try
@@ -91,16 +105,22 @@ begin
       CoTaskMemFree(ResultPath);
     end;
   finally
+    {$IFDEF FPC}
+    Screen.EnableForms(WindowList);
+    {$ELSE}
     TStyleManager.SystemHooks := SaveHooks;
     EnableTaskWindows(WindowList);
+    {$ENDIF}
     SetActiveWindow(ActiveWindow);
-    CoUninitialize();
+    ShellItem := nil;
+    FileDialog := nil;
+    CoUninitialize;
   end;
   Result := True;
 end;
 
 type
-  TGetOpenOrSaveFileNameFunc = function(var OpenFile: TOpenFilename): Bool; stdcall;
+  TGetOpenOrSaveFileNameFunc = function(var OpenFile: TOpenFilenameW): Bool; stdcall;
 
 function NewGetOpenOrSaveFileName(const Prompt: String; var FileName: String;
   const InitialDirectory, Filter, DefaultExtension: String;
@@ -135,7 +155,7 @@ function NewGetOpenOrSaveFileName(const Prompt: String; var FileName: String;
     SetString(Result, P, E - P);
   end;
 
-  function ShowDialog(var ofn: TOpenFileName; out ExtendedError: DWORD): Boolean;
+  function ShowDialog(var ofn: TOpenFileNameW; out ExtendedError: DWORD): Boolean;
   begin
     Result := GetOpenOrSaveFileNameFunc(ofn);
     if Result then
@@ -145,15 +165,17 @@ function NewGetOpenOrSaveFileName(const Prompt: String; var FileName: String;
   end;
 
 var
-  ofn: TOpenFileName;
-  FileBuffer: array of Char;
+  ofn: TOpenFileNameW;
+  FileBuffer: array of WideChar;
+  MultiSelect: Boolean;
+  MaxFile, ExtendedError: DWORD;
+  {$IFDEF CPUX86}FPUControlWord: Word;{$ENDIF}
   TempFilter: String;
   SaveCurDir: String;
   ActiveWindow: HWND;
-  WindowList: Pointer;
+  WindowList: {$IFDEF FPC}TList{$ELSE}Pointer{$ENDIF};
 begin
-  const MultiSelect = Flags and OFN_ALLOWMULTISELECT <> 0;
-  var MaxFile: Cardinal;
+  MultiSelect := Flags and OFN_ALLOWMULTISELECT <> 0;
   if MultiSelect then
     MaxFile := High(Word) - 16 { Same as TOpenDialog }
   else
@@ -174,14 +196,15 @@ begin
   ofn.lpstrDefExt := Pointer(DefaultExtension);
 
   ActiveWindow := GetActiveWindow;
-  WindowList := DisableTaskWindows(ParentWnd);
+  WindowList := {$IFDEF FPC}Screen.DisableForms(GetParentForm(FindControl(ParentWnd))){$ELSE}DisableTaskWindows(ParentWnd){$ENDIF};
   { Temporarily clear SystemHooks to make it support dark mode if Windows is in dark mode.
     Taken from Vcl.Dialogs' TCustomFileDialog.Execute. }
+  {$IFNDEF FPC}
   const SaveHooks = TStyleManager.SystemHooks;
   TStyleManager.SystemHooks := [];
+  {$ENDIF}
   try
     {$IFDEF CPUX86}
-    var FPUControlWord: Word;
     asm
       // Avoid FPU control word change in NETRAP.dll, NETAPI32.dll, etc
       FNSTCW  FPUControlWord
@@ -189,7 +212,6 @@ begin
     {$ENDIF}
     try
       SaveCurDir := GetCurrentDir;
-      var ExtendedError: DWORD;
       Result := ShowDialog(ofn, ExtendedError);
       if (ExtendedError = FNERR_INVALIDFILENAME) and (ofn.lpstrFile^ <> #0) then begin
         { Windows rejects an invalid initial file name without showing the dialog }
@@ -219,8 +241,12 @@ begin
       {$ENDIF}
     end;
   finally
+    {$IFDEF FPC}
+    Screen.EnableForms(WindowList);
+    {$ELSE}
     TStyleManager.SystemHooks := SaveHooks;
     EnableTaskWindows(WindowList);
+    {$ENDIF}
     SetActiveWindow(ActiveWindow);
   end;
 end;
@@ -230,7 +256,7 @@ function NewGetOpenFileName(const Prompt: String; var FileName: String;
   const ParentWnd: HWND): Boolean;
 begin
   Result := NewGetOpenOrSaveFileName(Prompt, FileName, InitialDirectory, Filter, DefaultExtension,
-    ParentWnd, GetOpenFileName, 'GetOpenFileName', OFN_HIDEREADONLY or OFN_PATHMUSTEXIST or OFN_FILEMUSTEXIST);
+    ParentWnd, {$IFDEF FPC}BrowseOpenFileNameW{$ELSE}GetOpenFileNameW{$ENDIF}, 'GetOpenFileName', OFN_HIDEREADONLY or OFN_PATHMUSTEXIST or OFN_FILEMUSTEXIST);
 end;
 
 function NewGetOpenFileNameMulti(const Prompt: String; const FileNameList: TStrings;
@@ -238,8 +264,10 @@ function NewGetOpenFileNameMulti(const Prompt: String; const FileNameList: TStri
   const ParentWnd: HWND): Boolean;
 
   function ExtractStr(var P: PChar): String;
+  var
+    L: Integer;
   begin
-    const L = Integer(StrLen(P));
+    L := Integer(StrLen(P));
     SetString(Result, P, L);
     if L > 0 then
       Inc(P, L + 1);
@@ -250,7 +278,7 @@ var
   P: PChar;
 begin
   Result := NewGetOpenOrSaveFileName(Prompt, Files, InitialDirectory, Filter, DefaultExtension,
-    ParentWnd, GetOpenFileName, 'GetOpenFileName', OFN_HIDEREADONLY or OFN_PATHMUSTEXIST or OFN_FILEMUSTEXIST or
+    ParentWnd, {$IFDEF FPC}BrowseOpenFileNameW{$ELSE}GetOpenFileNameW{$ENDIF}, 'GetOpenFileName', OFN_HIDEREADONLY or OFN_PATHMUSTEXIST or OFN_FILEMUSTEXIST or
     OFN_ALLOWMULTISELECT or OFN_EXPLORER);
   if Result then begin
     FileNameList.Clear;
@@ -259,12 +287,12 @@ begin
     FileName := ExtractStr(P);
     if FileName = '' then begin
       { When only one file is selected, the list contains just a file name }
-      FileNameList.Add(Dir);
+      FileNameList.Add({$IFDEF FPC}UTF8Encode(Dir){$ELSE}Dir{$ENDIF});
     end
     else begin
       repeat
         { The filenames can include paths if the user typed them in manually }
-        FileNameList.Add(PathCombine(Dir, FileName));
+        FileNameList.Add({$IFDEF FPC}UTF8Encode(PathCombine(Dir, FileName)){$ELSE}PathCombine(Dir, FileName){$ENDIF});
         FileName := ExtractStr(P);
       until FileName = '';
     end;
@@ -276,7 +304,7 @@ function NewGetSaveFileName(const Prompt: String; var FileName: String;
   const ParentWnd: HWND): Boolean;
 begin
   Result := NewGetOpenOrSaveFileName(Prompt, FileName, InitialDirectory, Filter, DefaultExtension,
-    ParentWnd, GetSaveFileName, 'GetSaveFileName', OFN_OVERWRITEPROMPT or OFN_HIDEREADONLY or OFN_PATHMUSTEXIST);
+    ParentWnd, {$IFDEF FPC}BrowseSaveFileNameW{$ELSE}GetSaveFileNameW{$ENDIF}, 'GetSaveFileName', OFN_OVERWRITEPROMPT or OFN_HIDEREADONLY or OFN_PATHMUSTEXIST);
 end;
 
 end.

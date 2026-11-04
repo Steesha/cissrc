@@ -20,34 +20,57 @@ interface
 
 uses
   Windows, Messages, Classes, Controls, ComCtrls,
-  {$IFDEF VCLSTYLES} Vcl.Themes, {$ELSE} Themes, {$ENDIF}
-  ExtCtrls, Types, Graphics;
+  {$IFDEF FPC}LCLType, LMessages, ExtCtrls{$ELSE}
+  {$IFDEF VCLSTYLES}Vcl.Themes,{$ELSE}Themes,{$ENDIF}
+  ExtCtrls, Types, Graphics{$ENDIF};
 
 type
   TNewProgressBarState = (npbsNormal, npbsError, npbsPaused);
 
   TNewProgressBarStyle = (npbstNormal, npbstMarquee);
 
-  TNewProgressBar = class(TWinControl)
+  TNewProgressBar = class({$IFDEF FPC}TCustomProgressBar{$ELSE}TWinControl{$ENDIF})
   private
     FMin: LongInt;
     FMax: LongInt;
     FPosition: LongInt;
     FState: TNewProgressBarState;
     FStyle: TNewProgressBarStyle;
+    {$IFDEF FPC}
+    FMarqueeTimer: TTimer;
+    FMarqueeStart: UInt64;
+    {$ELSE}
     class constructor Create;
     class destructor Destroy;
+    {$ENDIF}
     procedure SetMin(Value: LongInt);
     procedure SetMax(Value: LongInt);
     procedure SetPosition(Value: LongInt);
     procedure SetState(Value: TNewProgressBarState);
     procedure SetStyle(Value: TNewProgressBarStyle);
+    {$IFDEF FPC}
+    function UsesStylePainter: Boolean;
+    procedure UpdateMarqueeTimer;
+    procedure MarqueeTick(Sender: TObject);
+    procedure WMPaint(var Message: TLMPaint); message LM_PAINT;
+    {$ELSE}
     procedure WMEraseBkgnd(var Message: TWMEraseBkgnd); message WM_ERASEBKGND;
+    {$ENDIF}
   protected
+    {$IFNDEF FPC}
     procedure CreateParams(var Params: TCreateParams); override;
+    {$ENDIF}
     procedure CreateWnd; override;
+    {$IFDEF FPC}
+    procedure DestroyWnd; override;
+    procedure DoSendShowHideToInterface; override;
+    {$ENDIF}
   public
     constructor Create(AOwner: TComponent); override;
+    {$IFDEF FPC}
+    destructor Destroy; override;
+    function MarqueeElapsed: UInt64;
+    {$ENDIF}
   published
     property Anchors;
     property Min: LongInt read FMin write SetMin;
@@ -58,6 +81,7 @@ type
     property Visible default True;
   end;
 
+  {$IFNDEF FPC}
   TNewProgressBarStyleHook = class(TStyleHook)
 {$IFDEF VCLSTYLES}
   strict private
@@ -87,13 +111,20 @@ type
     destructor Destroy; override;
 {$ENDIF}
   end;
+  {$ENDIF}
+
+{$IFDEF FPC}
+var
+  NewProgressBarStyleOrientations: set of TProgressBarOrientation;
+  DrawNewProgressBarStyle: procedure(const ProgressBar: TNewProgressBar; const DC: HDC);
+{$ENDIF}
 
 procedure Register;
 
 implementation
 
 uses
-  CommCtrl, SysUtils, GraphUtil;
+  CommCtrl, SysUtils{$IFNDEF FPC}, GraphUtil{$ENDIF};
 
 procedure Register;
 begin
@@ -102,10 +133,13 @@ end;
 
 { TNewProgressBar }
 
+{$IFNDEF FPC}
 class constructor TNewProgressBar.Create;
 begin
   TCustomStyleEngine.RegisterStyleHook(TNewProgressBar, TNewProgressBarStyleHook);
 end;
+
+{$ENDIF}
 
 constructor TNewProgressBar.Create(AOwner: TComponent);
 begin
@@ -114,8 +148,13 @@ begin
   Height := GetSystemMetrics(SM_CYVSCROLL);
   FMin := 0;
   FMax := 100;
+  {$IFDEF FPC}
+  TCustomProgressBar(Self).Max := 65535;
+  Smooth := True;
+  {$ENDIF}
 end;
 
+{$IFNDEF FPC}
 procedure TNewProgressBar.CreateParams(var Params: TCreateParams);
 const
   PBS_SMOOTH = 1;
@@ -129,21 +168,132 @@ begin
     Params.Style := Params.Style or PBS_MARQUEE;
 end;
 
+{$ENDIF}
+
 procedure TNewProgressBar.CreateWnd;
+{$IFNDEF FPC}
 const
   PBM_SETMARQUEE = WM_USER+10;
+{$ENDIF}
 begin
   inherited CreateWnd;
+  {$IFNDEF FPC}
   SendMessage(Handle, PBM_SETRANGE, 0, MAKELPARAM(0, 65535));
   SetPosition(FPosition);
   SetState(FState);
   SendMessage(Handle, PBM_SETMARQUEE, WPARAM(FStyle = npbstMarquee), 0);
+  {$ELSE}
+  SetState(FState);
+  UpdateMarqueeTimer;
+  {$ENDIF}
 end;
 
+{$IFNDEF FPC}
 class destructor TNewProgressBar.Destroy;
 begin
   TCustomStyleEngine.UnRegisterStyleHook(TNewProgressBar, TNewProgressBarStyleHook);
 end;
+
+{$ENDIF}
+
+{$IFDEF FPC}
+function TNewProgressBar.UsesStylePainter: Boolean;
+begin
+  Result := Assigned(DrawNewProgressBarStyle) and
+    (Orientation in NewProgressBarStyleOrientations) and
+    not (csDesigning in ComponentState);
+end;
+
+procedure TNewProgressBar.UpdateMarqueeTimer;
+var
+  UseTimer: Boolean;
+begin
+  UseTimer := (FStyle = npbstMarquee) and UsesStylePainter;
+  if (FStyle = npbstMarquee) and not UseTimer then
+    TCustomProgressBar(Self).Style := pbstMarquee
+  else
+    TCustomProgressBar(Self).Style := pbstNormal;
+  if UseTimer and Showing and HandleAllocated and not (csDestroying in ComponentState) then begin
+    if FMarqueeTimer = nil then begin
+      FMarqueeTimer := TTimer.Create(Self);
+      FMarqueeTimer.Enabled := False;
+      FMarqueeTimer.Interval := 30;
+      FMarqueeTimer.OnTimer := MarqueeTick;
+    end;
+    if not FMarqueeTimer.Enabled then begin
+      FMarqueeStart := GetTickCount64;
+      FMarqueeTimer.Enabled := True;
+    end;
+  end else if FMarqueeTimer <> nil then
+    FMarqueeTimer.Enabled := False;
+end;
+
+procedure TNewProgressBar.MarqueeTick(Sender: TObject);
+begin
+  UpdateMarqueeTimer;
+  if FMarqueeTimer.Enabled then
+    Invalidate;
+end;
+
+function TNewProgressBar.MarqueeElapsed: UInt64;
+begin
+  if (FMarqueeTimer <> nil) and FMarqueeTimer.Enabled then
+    Result := GetTickCount64 - FMarqueeStart
+  else
+    Result := 0;
+end;
+
+procedure TNewProgressBar.DoSendShowHideToInterface;
+begin
+  inherited;
+  UpdateMarqueeTimer;
+end;
+
+procedure TNewProgressBar.DestroyWnd;
+begin
+  if FMarqueeTimer <> nil then
+    FMarqueeTimer.Enabled := False;
+  inherited;
+end;
+
+destructor TNewProgressBar.Destroy;
+begin
+  FreeAndNil(FMarqueeTimer);
+  inherited;
+end;
+
+procedure TNewProgressBar.WMPaint(var Message: TLMPaint);
+var
+  DC: HDC;
+  Paint: Windows.TPaintStruct;
+begin
+  if not HandleAllocated or (csDestroying in ComponentState) then begin
+    inherited;
+    Exit;
+  end;
+  if FStyle = npbstMarquee then
+    UpdateMarqueeTimer;
+  if not UsesStylePainter then begin
+    inherited;
+    Exit;
+  end;
+  if Message.DC <> 0 then
+    DrawNewProgressBarStyle(Self, Message.DC)
+  else begin
+    DC := Windows.BeginPaint(Handle, Paint);
+    if DC = 0 then begin
+      inherited;
+      Exit;
+    end;
+    try
+      DrawNewProgressBarStyle(Self, DC);
+    finally
+      Windows.EndPaint(Handle, Paint);
+    end;
+  end;
+  Message.Result := 0;
+end;
+{$ENDIF}
 
 procedure TNewProgressBar.SetMin(Value: LongInt);
 begin
@@ -158,14 +308,29 @@ begin
 end;
 
 procedure TNewProgressBar.SetPosition(Value: LongInt);
+{$IFDEF FPC}
+var
+  Range: Int64;
+{$ENDIF}
 begin
   if Value < FMin then
     Value := FMin
   else if Value > FMax then
     Value := FMax;
   FPosition := Value;
+  {$IFDEF FPC}
+  Range := Int64(FMax) - FMin;
+  if Range > 0 then
+    TCustomProgressBar(Self).Position :=
+      Integer(((Int64(Value) - FMin) * 65535 + Range div 2) div Range)
+  else
+    TCustomProgressBar(Self).Position := 0;
+  if HandleAllocated and UsesStylePainter then
+    Invalidate;
+  {$ELSE}
   if HandleAllocated and (FStyle <> npbstMarquee) then
     SendMessage(Handle, PBM_SETPOS, MulDiv(Value - FMin, 65535, FMax - FMin), 0);
+  {$ENDIF}
 end;
 
 procedure TNewProgressBar.SetState(Value: TNewProgressBarState);
@@ -177,18 +342,30 @@ const
   States: array[TNewProgressBarState] of UINT = (PBST_NORMAL, PBST_ERROR, PBST_PAUSED);
 begin
   FState := Value;
-  if HandleAllocated then
+  if HandleAllocated then begin
     SendMessage(Handle, PBM_SETSTATE, States[Value], 0);
+    {$IFDEF FPC}
+    if Assigned(DrawNewProgressBarStyle) then
+      Invalidate;
+    {$ENDIF}
+  end;
 end;
 
 procedure TNewProgressBar.SetStyle(Value: TNewProgressBarStyle);
 begin
   if FStyle <> Value then begin
     FStyle := Value;
+    {$IFDEF FPC}
+    UpdateMarqueeTimer;
+    if HandleAllocated then
+      Invalidate;
+    {$ELSE}
     RecreateWnd;
+    {$ENDIF}
   end;
 end;
 
+{$IFNDEF FPC}
 procedure TNewProgressBar.WMEraseBkgnd(var Message: TWMEraseBkgnd);
 begin
   { Bypass TWinControl's default WM_ERASEBKGND handling.
@@ -199,6 +376,7 @@ begin
     progress bar moved backwards, so flickering was rarely apparent. }
   DefaultHandler(Message);
 end;
+{$ENDIF}
 
 {$IFDEF VCLSTYLES}
 

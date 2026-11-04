@@ -12,17 +12,60 @@ unit Compiler.ScriptFunc;
 interface
 
 uses
-  Generics.Collections, uPSCompiler, uPSUtils;
+  Compiler.StringDictionary, uPSCompiler, uPSUtils;
 
 procedure ScriptFuncLibraryRegister_C(const ScriptCompiler: TPSPascalCompiler;
-  const ObsoleteFunctionWarnings: TDictionary<String, String>);
+  const ObsoleteFunctionWarnings: TCompilerStringDictionary);
 
 implementation
 
 uses
-  Windows, SysUtils, TypInfo,
-  Shared.CommonFunc, Shared.SetupMessageIDs, Shared.Struct,
-  Shared.SetupTypes, Shared.SetupSteps, Shared.ScriptFunc, Compiler.Messages, Shared.DotNetVersion;
+  {$IFDEF MSWINDOWS} Windows, {$ENDIF} SysUtils, TypInfo,
+  Shared.SetupMessageIDs, Shared.Struct,
+  Shared.SetupTypes, Shared.SetupSteps, Shared.ScriptFunc, Compiler.Messages, Shared.DotNetVersion, Shared.FPCStringUtils;
+
+{$IFNDEF MSWINDOWS}
+const
+  { Constants exposed to Windows installer scripts }
+  MB_OK = $00000000;
+  MB_OKCANCEL = $00000001;
+  MB_ABORTRETRYIGNORE = $00000002;
+  MB_YESNOCANCEL = $00000003;
+  MB_YESNO = $00000004;
+  MB_RETRYCANCEL = $00000005;
+  MB_DEFBUTTON1 = $00000000;
+  MB_DEFBUTTON2 = $00000100;
+  MB_DEFBUTTON3 = $00000200;
+  MB_SETFOREGROUND = $00010000;
+  IDOK = 1;
+  IDCANCEL = 2;
+  IDABORT = 3;
+  IDRETRY = 4;
+  IDIGNORE = 5;
+  IDYES = 6;
+  IDNO = 7;
+  HWND_BROADCAST = $ffff;
+  HKEY_CLASSES_ROOT = $80000000;
+  HKEY_CURRENT_USER = $80000001;
+  HKEY_LOCAL_MACHINE = $80000002;
+  HKEY_USERS = $80000003;
+  HKEY_PERFORMANCE_DATA = $80000004;
+  HKEY_CURRENT_CONFIG = $80000005;
+  HKEY_DYN_DATA = $80000006;
+  SW_HIDE = 0;
+  SW_SHOWNORMAL = 1;
+  SW_SHOWMINIMIZED = 2;
+  SW_SHOWMAXIMIZED = 3;
+  SW_SHOWMINNOACTIVE = 7;
+  SW_SHOW = 5;
+  FILE_ATTRIBUTE_READONLY = $00000001;
+  FILE_ATTRIBUTE_HIDDEN = $00000002;
+  FILE_ATTRIBUTE_SYSTEM = $00000004;
+  FILE_ATTRIBUTE_DIRECTORY = $00000010;
+  FILE_ATTRIBUTE_ARCHIVE = $00000020;
+  FILE_ATTRIBUTE_NORMAL = $00000080;
+  FILE_ATTRIBUTE_TEMPORARY = $00000100;
+{$ENDIF}
 
 { This type copied from Shared.CommonFunc.Vcl. We don't actually 'use'
   Shared.CommonFunc.Vcl since it would cause VCL units to be linked in. }
@@ -30,7 +73,9 @@ type
   TMsgBoxType = (mbInformation, mbConfirmation, mbError, mbCriticalError);
 
 procedure ScriptFuncLibraryRegister_C(const ScriptCompiler: TPSPascalCompiler;
-  const ObsoleteFunctionWarnings: TDictionary<String, String>);
+  const ObsoleteFunctionWarnings: TCompilerStringDictionary);
+var
+  ScriptFuncTable: TScriptTable;
 
   procedure RegisterType(const Name, Value: tbtstring);
   begin
@@ -38,14 +83,18 @@ procedure ScriptFuncLibraryRegister_C(const ScriptCompiler: TPSPascalCompiler;
   end;
 
   procedure RegisterFunctionTable(const FunctionTable: array of tbtstring);
+  var
+    Func: tbtstring;
   begin
-    for var Func in FunctionTable do
+    for Func in FunctionTable do
       ScriptCompiler.AddFunction(Func);
   end;
 
   procedure RegisterDelphiFunctionTable(const FunctionTable: array of tbtstring);
+  var
+    I: Integer;
   begin
-    for var I := Low(FunctionTable) to High(FunctionTable) do
+    for I := Low(FunctionTable) to High(FunctionTable) do
       ScriptCompiler.AddDelphiFunction(FunctionTable[I]);
   end;
 
@@ -78,17 +127,20 @@ procedure ScriptFuncLibraryRegister_C(const ScriptCompiler: TPSPascalCompiler;
 
   { Internal, used only by Script.Test.iss }
   procedure RegisterTestSetType(const SetName: tbtstring; const ByteSize: Integer);
+  var
+    Enum: tbtstring;
+    I: Integer;
   begin
     { Uses an enum set. ROPS sizes these as number of enums rounded up to whole bytes. }
-    var Enum: tbtstring := '(';
-    for var I := 0 to ByteSize * 8 - 1 do begin
+    Enum := '(';
+    for I := 0 to ByteSize * 8 - 1 do begin
       if I > 0 then
         Enum := Enum + ',';
-      Enum := Enum + SetName + 'M' + tbtstring(IntToStr(I));
+      Enum := Enum + SetName + 'M' + tbtstring(InnoIntToStr(I));
     end;
     Enum := Enum + ')';
-    RegisterType(SetName + 'Base', Enum);
-    RegisterType(SetName, 'set of ' + SetName + 'Base');
+    RegisterType(ToNativeText(FromNativeText(SetName) + 'Base'), Enum);
+    RegisterType(SetName, ToNativeText('set of ' + FromNativeText(SetName) + 'Base'));
   end;
 
 begin
@@ -174,7 +226,7 @@ begin
   RegisterType('TOnExtractionProgress', 'function(const ArchiveName, FileName: String; const Progress, ProgressMax: Int64): Boolean;');
   RegisterType('TOnLog', 'procedure(const S: String; const Error, FirstLine: Boolean);');
 
-  for var ScriptFuncTable in ScriptFuncTables do
+  for ScriptFuncTable in ScriptFuncTables do
     RegisterFunctionTable(ScriptFuncTable);
   RegisterDelphiFunctionTable(DelphiScriptFuncTable);
 
@@ -243,12 +295,12 @@ begin
   ScriptCompiler.AddFunction('function TestRefCount_StringRefCount(const S: String): Integer;');
   ScriptCompiler.AddFunction('function TestTypes_NativeSizeOf(const TypeName: String): Integer;');
 
-  ObsoleteFunctionWarnings.Add('IsAdminLoggedOn', Format(SCompilerCodeFunctionRenamedWithAlternative, ['IsAdminLoggedOn', 'IsAdmin', 'IsAdminInstallMode']));
-  ObsoleteFunctionWarnings.Add('IsComponentSelected', Format(SCompilerCodeFunctionRenamed, ['IsComponentSelected', 'WizardIsComponentSelected']));
-  ObsoleteFunctionWarnings.Add('IsTaskSelected', Format(SCompilerCodeFunctionRenamed, ['IsTaskSelected', 'WizardIsTaskSelected']));
-  ObsoleteFunctionWarnings.Add('IsX64', Format(SCompilerCodeFunctionDeprecatedWithAlternativeAndDocs, ['IsX64', 'IsX64OS', 'IsX64Compatible', 'Architecture Identifiers']));
-  ObsoleteFunctionWarnings.Add('FileCopy', Format(SCompilerCodeFunctionRenamed, ['FileCopy', 'CopyFile']));
-  ObsoleteFunctionWarnings.Add('Extract7ZipArchive', Format(SCompilerCodeFunctionDeprecatedWithHint, ['Extract7ZipArchive', 'ExtractArchive', SCompilerCodeFunctionExtractArchiveHint]));
+  ObsoleteFunctionWarnings.Add('ISADMINLOGGEDON', InnoFormat(SCompilerCodeFunctionRenamedWithAlternative, ['IsAdminLoggedOn', 'IsAdmin', 'IsAdminInstallMode']));
+  ObsoleteFunctionWarnings.Add('ISCOMPONENTSELECTED', InnoFormat(SCompilerCodeFunctionRenamed, ['IsComponentSelected', 'WizardIsComponentSelected']));
+  ObsoleteFunctionWarnings.Add('ISTASKSELECTED', InnoFormat(SCompilerCodeFunctionRenamed, ['IsTaskSelected', 'WizardIsTaskSelected']));
+  ObsoleteFunctionWarnings.Add('ISX64', InnoFormat(SCompilerCodeFunctionDeprecatedWithAlternativeAndDocs, ['IsX64', 'IsX64OS', 'IsX64Compatible', 'Architecture Identifiers']));
+  ObsoleteFunctionWarnings.Add('FILECOPY', InnoFormat(SCompilerCodeFunctionRenamed, ['FileCopy', 'CopyFile']));
+  ObsoleteFunctionWarnings.Add('EXTRACT7ZIPARCHIVE', InnoFormat(SCompilerCodeFunctionDeprecatedWithHint, ['Extract7ZipArchive', 'ExtractArchive', SCompilerCodeFunctionExtractArchiveHint]));
 
   RegisterConst('MaxInt', MaxInt);
 

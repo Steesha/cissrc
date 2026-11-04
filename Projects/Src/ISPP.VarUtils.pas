@@ -13,7 +13,7 @@ unit ISPP.VarUtils;
 interface
 
 uses
-  ISPP.Intf, ISPP.Base;
+  ISPP.Intf, ISPP.Base, Shared.FPCStringUtils;
 
 function SimplifyLValue(var Src: TIsppVariant): Boolean;
 procedure MakeRValue(var Src: TIsppVariant);
@@ -26,7 +26,7 @@ function ToInt(Op: TIsppVariant): TIsppVariant;
 function ToStr(Op: TIsppVariant): TIsppVariant;
 
 const
-  NULL: TIsppVariant = (Typ: evNull;  AsStr: ''; AsInt64: 0);
+  NULL: TIsppVariant = (Typ: evNull;  AsStr: ''; AsCallContext: nil; AsInt64: 0);
 
 implementation
 
@@ -77,11 +77,14 @@ begin
 end;
 
 function ToInt(Op: TIsppVariant): TIsppVariant;
+var
+  I: Int64;
 begin
+  Result := NULL;
   MakeRValue(Op);
-  var I: Int64 := 0;
+  I := 0;
   if Op.Typ = evStr then
-    if (Op.AsStr = '') or TryStrToInt64(Op.AsStr, I) then
+    if (Op.AsStr = '') or InnoTryStrToInt64(Op.AsStr, I) then
       MakeInt(Result, I)
     else
       raise EConvertError.CreateFmt(SCannotConvertToInteger, [Op.AsStr])
@@ -94,9 +97,10 @@ end;
 
 function ToStr(Op: TIsppVariant): TIsppVariant;
 begin
+  Result := NULL;
   MakeRValue(Op);
   if Op.Typ = evInt then
-    MakeStr(Result, IntToStr(Op.AsInt64))
+    MakeStr(Result, InnoIntToStr(Op.AsInt64))
   else
     if Op.Typ = evNull then
       MakeStr(Result, '')

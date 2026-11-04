@@ -36,22 +36,22 @@ uses
   Shared.Struct, SetupLdrAndSetup.Messages, Shared.SetupMessageIDs,
   Setup.MainFunc, Shared.CommonFunc.Vcl;
 
-{$R *.DFM}
+{$R *.dfm}
 
 function AskForLanguage: Boolean;
 { Creates and shows the "Select Language" dialog. Returns True and activates
   the selected language if the user clicks OK, or False otherwise. }
 var
   LangForm: TSelectLanguageForm;
-  J: Integer;
+  I, J: Integer;
   LangEntry: PSetupLanguageEntry;
 begin
   LangForm := AppCreateForm(TSelectLanguageForm) as TSelectLanguageForm;
   try
-    for var I := 0 to Entries[seLanguage].Count-1 do begin
+    for I := 0 to Entries[seLanguage].Count-1 do begin
       LangEntry := Entries[seLanguage][I];
-      J := LangForm.LangCombo.Items.Add(LangEntry.LanguageName);
-      LangForm.LangCombo.Items.Objects[J] := TObject(I);
+      J := LangForm.LangCombo.Items.Add({$IFDEF FPC}UTF8Encode(LangEntry.LanguageName){$ELSE}LangEntry.LanguageName{$ENDIF});
+      LangForm.LangCombo.Items.Objects[J] := TObject(NativeInt(I));
     end;
 
    { If there's multiple languages, select the previous language, if available }
@@ -60,21 +60,21 @@ begin
       { Note: if UsePreviousLanguage is set to "yes" then the compiler does not
         allow AppId to include constants but we should still call ExpandConst
         to handle any '{{'. }
-      const I = GetPreviousLanguage(ExpandConst(SetupHeader.AppId));
+      I := GetPreviousLanguage(ExpandConst(SetupHeader.AppId));
       if I <> -1 then
-        LangForm.LangCombo.ItemIndex := LangForm.LangCombo.Items.IndexOfObject(TObject(I));
+        LangForm.LangCombo.ItemIndex := LangForm.LangCombo.Items.IndexOfObject(TObject(NativeInt(I)));
     end;
 
     { Select the active language if no previous language was selected }
     if LangForm.LangCombo.ItemIndex = -1 then
-      LangForm.LangCombo.ItemIndex := LangForm.LangCombo.Items.IndexOfObject(TObject(ActiveLanguage));
+      LangForm.LangCombo.ItemIndex := LangForm.LangCombo.Items.IndexOfObject(TObject(NativeInt(ActiveLanguage)));
 
     if LangForm.LangCombo.Items.Count > 1 then begin
       Result := (LangForm.ShowModal = mrOK);
       if Result then begin
-        const I = LangForm.LangCombo.ItemIndex;
+        I := LangForm.LangCombo.ItemIndex;
         if I >= 0 then
-          SetActiveLanguage(Integer(LangForm.LangCombo.Items.Objects[I]));
+          SetActiveLanguage(NativeInt(LangForm.LangCombo.Items.Objects[I]));
       end;
     end
     else begin
@@ -102,10 +102,10 @@ begin
 
   InitializeFont(False, True);
 
-  Caption := SetupMessages[msgSelectLanguageTitle];
-  SelectLabel.Caption := SetupMessages[msgSelectLanguageLabel];
-  OKButton.Caption := SetupMessages[msgButtonOK];
-  CancelButton.Caption := SetupMessages[msgButtonCancel];
+  Caption := {$IFDEF FPC}UTF8Encode(SetupMessages[msgSelectLanguageTitle]){$ELSE}SetupMessages[msgSelectLanguageTitle]{$ENDIF};
+  SelectLabel.Caption := {$IFDEF FPC}UTF8Encode(SetupMessages[msgSelectLanguageLabel]){$ELSE}SetupMessages[msgSelectLanguageLabel]{$ENDIF};
+  OKButton.Caption := {$IFDEF FPC}UTF8Encode(SetupMessages[msgButtonOK]){$ELSE}SetupMessages[msgButtonOK]{$ENDIF};
+  CancelButton.Caption := {$IFDEF FPC}UTF8Encode(SetupMessages[msgButtonCancel]){$ELSE}SetupMessages[msgButtonCancel]{$ENDIF};
 
   IconBitmapImage.InitializeFromIcon(HInstance, PChar('MAINICON' + MainIconPostfix), clNone, [32, 48, 64]);
 end;

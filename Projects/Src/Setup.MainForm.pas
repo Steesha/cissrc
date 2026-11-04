@@ -15,8 +15,10 @@ uses
 
 type
   TMainForm = class(TComponent)
+  {$IFNDEF FPC}
   private
     class procedure AppOnGetActiveFormHandle(var AHandle: HWND);
+  {$ENDIF}
   public
     CurStep: TSetupStep;
     destructor Destroy; override;
@@ -33,7 +35,7 @@ implementation
 
 uses
   Messages, ShlObj,
-  Forms,
+  Forms, {$IFDEF FPC}CustApp,{$ENDIF}
   SHA256, RestartManager,
   Shared.Struct, Shared.CommonFunc, Shared.CommonFunc.Vcl, Shared.SetupMessageIDs,
   SetupLdrAndSetup.Messages, Setup.Install,
@@ -66,6 +68,11 @@ end;
 
 procedure TerminateApp;
 begin
+  {$IFDEF FPC}
+  { LCL exits its message loop when Terminated is set. Use the overload that
+    leaves OLE available to setup's deinitialization callbacks. }
+  TCustomApplication(Application).Terminate(System.ExitCode);
+  {$ELSE}
   { Work around shell32 bug: Don't use PostQuitMessage/Application.Terminate
     here.
     When ShellExecute is called with the name of a folder, it internally
@@ -83,13 +90,15 @@ begin
     not be returned by a GetMessage/PeekMessage call with a message range that
     does not include WM_QUIT. }
   PostMessage(0, WM_QUIT, 0, 0);
+  {$ENDIF}
 end;
 
 function TMainForm.Install: Boolean;
 
   procedure ProcessRunEntries;
   var
-    CheckIfRestartNeeded: Boolean;
+    CheckIfRestartNeeded, WizardWasHidden: Boolean;
+    I: Integer;
     ChecksumBefore, ChecksumAfter: TSHA256Digest;
     WindowDisabler: TWindowDisabler;
     RunEntry: PSetupRunEntry;
@@ -99,10 +108,10 @@ function TMainForm.Install: Boolean;
         not NeedsRestart;
       if CheckIfRestartNeeded then
         ChecksumBefore := MakePendingFileRenameOperationsChecksum;
-      var WizardWasHidden := False;
+      WizardWasHidden := False;
       WindowDisabler := nil;
       try
-        for var I := 0 to Entries[seRun].Count-1 do begin
+        for I := 0 to Entries[seRun].Count-1 do begin
           RunEntry := PSetupRunEntry(Entries[seRun][I]);
           if not(roPostInstall in RunEntry.Options) and
              ShouldProcessRunEntry(WizardComponents, WizardTasks, RunEntry) then begin
@@ -112,17 +121,17 @@ function TMainForm.Install: Boolean;
               WindowDisabler := TWindowDisabler.Create;
             if RunEntry.StatusMsg <> '' then begin
               try
-                WizardForm.StatusLabel.Caption := ExpandConst(RunEntry.StatusMsg);
+                WizardForm.StatusLabel.Caption := {$IFDEF FPC}UTF8Encode(ExpandConst(RunEntry.StatusMsg)){$ELSE}ExpandConst(RunEntry.StatusMsg){$ENDIF};
               except
                 { Don't die if the expansion fails with an exception. Just
                   display the exception message, and proceed with the default
                   status message. }
                 Application.HandleException(Self);
-                WizardForm.StatusLabel.Caption := SetupMessages[msgStatusRunProgram];
+                WizardForm.StatusLabel.Caption := {$IFDEF FPC}UTF8Encode(SetupMessages[msgStatusRunProgram]){$ELSE}SetupMessages[msgStatusRunProgram]{$ENDIF};
               end;
             end
             else
-              WizardForm.StatusLabel.Caption := SetupMessages[msgStatusRunProgram];
+              WizardForm.StatusLabel.Caption := {$IFDEF FPC}UTF8Encode(SetupMessages[msgStatusRunProgram]){$ELSE}SetupMessages[msgStatusRunProgram]{$ENDIF};
             WizardForm.StatusLabel.Update;
             if roHideWizard in RunEntry.Options then begin
               if WizardForm.Visible and not WizardWasHidden then begin
@@ -165,7 +174,7 @@ function TMainForm.Install: Boolean;
     WindowDisabler: TWindowDisabler;
   begin
     if not NeedsRestart then begin
-      WizardForm.StatusLabel.Caption := SetupMessages[msgStatusRestartingApplications];
+      WizardForm.StatusLabel.Caption := {$IFDEF FPC}UTF8Encode(SetupMessages[msgStatusRestartingApplications]){$ELSE}SetupMessages[msgStatusRestartingApplications]{$ENDIF};
       WizardForm.StatusLabel.Update;
 
       Log('Attempting to restart applications.');
@@ -200,10 +209,10 @@ begin
   try
     if not WizardForm.ValidateDirEdit then
       Abort;
-    WizardDirValue := WizardForm.DirEdit.Text;
+    WizardDirValue := {$IFDEF FPC}UTF8Decode(WizardForm.DirEdit.Text){$ELSE}WizardForm.DirEdit.Text{$ENDIF};
     if not WizardForm.ValidateGroupEdit then
       Abort;
-    WizardGroupValue := WizardForm.GroupEdit.Text;
+    WizardGroupValue := {$IFDEF FPC}UTF8Decode(WizardForm.GroupEdit.Text){$ELSE}WizardForm.GroupEdit.Text{$ENDIF};
     WizardNoIcons := WizardForm.NoIconsCheck.Checked;
     WizardSetupType := WizardForm.GetSetupType();
     WizardForm.GetComponents(WizardComponents, WizardDeselectedComponents);
@@ -441,6 +450,7 @@ begin
   end;
 end;
 
+{$IFNDEF FPC}
 class procedure TMainForm.AppOnGetActiveFormHandle(var AHandle: HWND);
 begin
   { IDE's TMainForm has this too; see comments there }
@@ -455,4 +465,5 @@ end;
 
 initialization
   Application.OnGetActiveFormHandle := TMainForm.AppOnGetActiveFormHandle;
+{$ENDIF}
 end.

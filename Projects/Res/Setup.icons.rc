@@ -1,0 +1,4 @@
+LANGUAGE 9, 1
+MAINICON ICON "Setup.icon.ico"
+Z_GROUPICON ICON "Setup.group.ico"
+Z_UNINSTALLICON ICON "Setup.uninstall.ico"

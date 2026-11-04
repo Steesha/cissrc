@@ -35,15 +35,17 @@ procedure InitializePathRedir(const AWindows64Bit: Boolean;
   const ASystem32Path, ASysWow64Path, ASysNativePath: String);
 
 { Does not depend on InitializePathRedir being called }
+{$IFNDEF FPC}
 function TestApplyPathRedirRules(const AWindows64Bit, A64Bit: Boolean;
   const ASystem32Path, ASysWow64Path, ASysNativePath, APath: String;
   const ATargetProcess: TPathRedirTargetProcess;
   const AFlags: TPathRedirFlags = []): String;
+{$ENDIF}
 
 implementation
 
 uses
-  PathFunc {$IFDEF SETUPPROJ}, Setup.InstFunc {$ENDIF};
+  PathFunc {$IFDEF SETUPPROJ}, SetupLdrAndSetup.Messages, Shared.SetupMessageIDs {$ENDIF};
 
 type
   TPathRedir = class
@@ -59,13 +61,13 @@ type
   end;
 
 var
-  [volatile] PathRedirInstance: TPathRedir;
-  [volatile] PathRedirActiveUseCount: Integer;
+  {$IFNDEF FPC}[volatile]{$ENDIF} PathRedirInstance: TPathRedir;
+  {$IFNDEF FPC}[volatile]{$ENDIF} PathRedirActiveUseCount: Integer;
 
 procedure DoInternalError(const Msg: String);
 begin
   {$IFDEF SETUPPROJ}
-    InternalError(Msg);
+    raise Exception.Create(FmtSetupMessage1(msgErrorInternal2, Msg));
   {$ELSE}
     raise Exception.Create(Msg);
   {$ENDIF}
@@ -73,11 +75,13 @@ end;
 
 procedure InitializePathRedir(const AWindows64Bit: Boolean;
   const ASystem32Path, ASysWow64Path, ASysNativePath: String);
+var
+  LInstance: TPathRedir;
 begin
-  const LInstance = TPathRedir.Create(AWindows64Bit, ASystem32Path,
+  LInstance := TPathRedir.Create(AWindows64Bit, ASystem32Path,
     ASysWow64Path, ASysNativePath);
-  MemoryBarrier;
-  if AtomicCmpExchange(Pointer(PathRedirInstance), Pointer(LInstance), nil) <> nil then begin
+  {$IFDEF FPC}ReadWriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
+  if {$IFDEF FPC}InterlockedCompareExchangePointer{$ELSE}AtomicCmpExchange{$ENDIF}(Pointer(PathRedirInstance), Pointer(LInstance), nil) <> nil then begin
     LInstance.Free;
     DoInternalError('PathRedir: Already initialized');
   end;
@@ -86,25 +90,32 @@ end;
 function ApplyPathRedirRules(const A64Bit: Boolean; const APath: String;
   const ATargetProcess: TPathRedirTargetProcess;
   const AFlags: TPathRedirFlags = []): String;
+var
+  CurCount: Integer;
 begin
   while True do begin
-    const CurCount = PathRedirActiveUseCount;
+    {$IFDEF FPC}
+    CurCount := InterlockedCompareExchange(PathRedirActiveUseCount, 0, 0);
+    {$ELSE}
+    CurCount := PathRedirActiveUseCount;
+    {$ENDIF}
     if CurCount < 0 then
       DoInternalError('PathRedir: Unit was finalized');
-    if AtomicCmpExchange(PathRedirActiveUseCount, CurCount + 1, CurCount) = CurCount then
+    if {$IFDEF FPC}InterlockedCompareExchange{$ELSE}AtomicCmpExchange{$ENDIF}(PathRedirActiveUseCount, CurCount + 1, CurCount) = CurCount then
       Break;
   end;
-  MemoryBarrier;
+  {$IFDEF FPC}ReadWriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
   try
     if PathRedirInstance = nil then
       DoInternalError('PathRedir: Not initialized');
     Result := PathRedirInstance.ApplyRules(A64Bit, APath, AFlags, ATargetProcess);
   finally
-    MemoryBarrier;
-    AtomicDecrement(PathRedirActiveUseCount);
+    {$IFDEF FPC}ReadWriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
+    {$IFDEF FPC}InterlockedDecrement{$ELSE}AtomicDecrement{$ENDIF}(PathRedirActiveUseCount);
   end;
 end;
 
+{$IFNDEF FPC}
 function TestApplyPathRedirRules(const AWindows64Bit, A64Bit: Boolean;
   const ASystem32Path, ASysWow64Path, ASysNativePath, APath: String;
   const ATargetProcess: TPathRedirTargetProcess;
@@ -119,14 +130,17 @@ begin
   end;
 end;
 
+{$ENDIF}
+
 { TPathRedir }
 
 constructor TPathRedir.Create(const AWindows64Bit: Boolean;
   const ASystem32Path, ASysWow64Path, ASysNativePath: String);
 
   procedure CheckAndAssignPath(var OutPath: String; const Dir, Title: String);
+  var
+    TestExpandedPath: String;
   begin
-    var TestExpandedPath: String;
     if (Length(Dir) >= 4) and PathCharIsDriveLetter(Dir[1]) and
        (Dir[2] = ':') and (Dir[3] = '\') and
        PathExpand(Dir, TestExpandedPath) and
@@ -135,7 +149,7 @@ constructor TPathRedir.Create(const AWindows64Bit: Boolean;
       OutPath := '\\?\' + Dir;
       Exit;
     end;
-    DoInternalError(Format('Path for %s directory is invalid: "%s"', [Title, Dir]));
+    DoInternalError({$IFDEF FPC}UnicodeFormat{$ELSE}Format{$ENDIF}('Path for %s directory is invalid: "%s"', [Title, Dir]));
   end;
 
 begin
@@ -153,19 +167,24 @@ function TPathRedir.ApplyRules(const A64Bit: Boolean; const APath: String;
   const ATargetProcess: TPathRedirTargetProcess): String;
 
   procedure SubstitutePath(var Path: String; const FromDir, ToDir: String);
+  var
+    PathLen, FromDirLen: Integer;
   begin
     { Just an extra layer of safety }
     if (FromDir = '') or (ToDir = '') then
       DoInternalError('PathRedir: SubstitutePath received invalid parameter');
 
-    const PathLen = Length(Path);
-    const FromDirLen = Length(FromDir);
+    PathLen := Length(Path);
+    FromDirLen := Length(FromDir);
     if (PathLen = FromDirLen) or
        ((PathLen > FromDirLen) and (Path[Low(Path) + FromDirLen] = '\')) then
       if PathStartsWith(Path, FromDir) then
         Path := ToDir + Copy(Path, FromDirLen+1, Maxint);
   end;
 
+var
+  NewPath: String;
+  TargetProcess64Bit: Boolean;
 begin
   if APath = '' then
     DoInternalError('PathRedir: Called with empty path string');
@@ -175,13 +194,12 @@ begin
   if PathStartsWith(APath, '\??\') then
     DoInternalError('PathRedir: "\??\" prefix not allowed');
 
-  var NewPath: String;
   if not PathConvertNormalToSuper(APath, NewPath) then
     DoInternalError('PathRedir: PathConvertNormalToSuper failed');
 
   if FWindows64Bit then begin
     { Running on 64-bit Windows }
-    const TargetProcess64Bit =
+    TargetProcess64Bit :=
       {$IFDEF WIN64} (ATargetProcess = tpCurrent) or {$ENDIF}
       (ATargetProcess = tpNativeBit);
 
@@ -233,8 +251,8 @@ end;
 
 initialization
 finalization
-  if AtomicExchange(PathRedirActiveUseCount, -1) = 0 then begin
-    MemoryBarrier;
+  if {$IFDEF FPC}InterlockedExchange{$ELSE}AtomicExchange{$ENDIF}(PathRedirActiveUseCount, -1) = 0 then begin
+    {$IFDEF FPC}ReadWriteBarrier{$ELSE}MemoryBarrier{$ENDIF};
     FreeAndNil(PathRedirInstance);
   end;
 end.

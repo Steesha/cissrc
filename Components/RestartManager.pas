@@ -132,20 +132,20 @@ end;
 
 function InitRestartManagerLibrary: Boolean;
 
-  function GetSystemDir: String;
-  var
-    Buf: array[0..MAX_PATH-1] of Char;
-  begin
-    GetSystemDirectory(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
-    Result := StrPas(Buf);
-  end;
-
+var
+  SystemDir: String;
+  Buffer: array[0..MAX_PATH-1] of WideChar;
+  Count: UINT;
 begin
   Inc(ReferenceCount);
 
   if RestartManagerLibrary = 0 then
   begin
-    RestartManagerLibrary := LoadLibrary(PChar(AddBackslash(GetSystemDir) + restartmanagerlib));
+    Count := GetSystemDirectoryW(@Buffer[0], Length(Buffer));
+    if (Count = 0) or (Count >= Length(Buffer)) then
+      Exit(False);
+    SetString(SystemDir, PWideChar(@Buffer[0]), Count);
+    RestartManagerLibrary := LoadLibraryW(PWideChar(AddBackslash(SystemDir) + restartmanagerlib));
     if RestartManagerLibrary <> 0 then
     begin
       RmStartSession := GetProcAddress(RestartManagerLibrary, 'RmStartSession');

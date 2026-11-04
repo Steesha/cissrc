@@ -344,13 +344,17 @@ uses
   ShellApi, ShlObj, Types, Themes,
   BidiUtils, PathFunc, RestartManager, SHA256,
   SetupLdrAndSetup.Messages, Setup.MainForm, Shared.CommonFunc.Vcl,
-  Shared.CommonFunc, Setup.InstFunc, Setup.SelectFolderForm, Setup.FileExtractor,
+  Shared.CommonFunc, Setup.InstFunc, Setup.SelectFolderForm,
   Setup.LoggingFunc, Setup.ScriptRunner, Shared.SetupTypes, Shared.EncryptionFunc, Shared.SetupSteps,
   Setup.WizardForm.CustomPages, SetupLdrAndSetup.InstFunc, Setup.DownloadFileFunc;
 
-{$R *.DFM}
+{$R *.dfm}
 
 const
+  {$IFDEF FPC}
+  SIID_FOLDER = 3;
+  SIID_ERROR = 80;
+  {$ENDIF}
   BadDirChars = '/:*?"<>|';
 
 var
@@ -498,10 +502,10 @@ end;
 function TWizardForm.CheckSerialOk(): Boolean;
 begin
   if NeedSerial and (CodeRunner <> nil) then begin
-    WizardUserInfoName := UserInfoNameEdit.Text;
-    WizardUserInfoOrg := UserInfoOrgEdit.Text;
-    WizardUserInfoSerial := UserInfoSerialEdit.Text;
-    Result := CodeRunner.RunBooleanFunctions('CheckSerial', [UserInfoSerialEdit.Text], bcTrue, True, False)
+    WizardUserInfoName := {$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoNameEdit.Text{$IFDEF FPC}){$ENDIF};
+    WizardUserInfoOrg := {$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoOrgEdit.Text{$IFDEF FPC}){$ENDIF};
+    WizardUserInfoSerial := {$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoSerialEdit.Text{$IFDEF FPC}){$ENDIF};
+    Result := CodeRunner.RunBooleanFunctions('CheckSerial', [{$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoSerialEdit.Text{$IFDEF FPC}){$ENDIF}], bcTrue, True, False)
   end else
     Result := True;
 end;
@@ -510,6 +514,7 @@ procedure TWizardForm.CalcCurrentComponentsSpace();
 var
   SelectedComponents: TStringList;
   CurFile: PSetupFileEntry;
+  I, HeightChange: Integer;
 begin
   CurrentComponentsSpace := SetupHeader.ExtraDiskSpaceRequired;
 
@@ -517,7 +522,7 @@ begin
   GetSelectedComponents(SelectedComponents, False, False);
 
   //we can't simply sum component sizes because of shared files -> add file sizes
-  for var I := 0 to Entries[seFile].Count-1 do begin
+  for I := 0 to Entries[seFile].Count-1 do begin
     CurFile := PSetupFileEntry(Entries[seFile][I]);
     if (CurFile.Tasks = '') and (CurFile.Check = '') and {don't count tasks or scripted entries}
        ShouldProcessFileEntry(SelectedComponents, nil, CurFile, True) then begin
@@ -531,45 +536,50 @@ begin
   end;
 
   //don't forget to add extradiskspacerequired values
-  for var I := 0 to Entries[seComponent].Count-1 do
+  for I := 0 to Entries[seComponent].Count-1 do
     with PSetupComponentEntry(Entries[seComponent][I])^ do
       if ListContains(SelectedComponents, Name) then
         Inc(CurrentComponentsSpace, ExtraDiskSpaceRequired);
 
   SelectedComponents.Free();
 
-  ComponentsDiskSpaceLabel.Caption := ExpandMBOrGBSetupMessage(
-    msgComponentsDiskSpaceMBLabel, msgComponentsDiskSpaceGBLabel, CurrentComponentsSpace);
-  const HeightChange = AdjustLabelHeight(ComponentsDiskSpaceLabel);
+  ComponentsDiskSpaceLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandMBOrGBSetupMessage(
+    msgComponentsDiskSpaceMBLabel, msgComponentsDiskSpaceGBLabel, CurrentComponentsSpace){$IFDEF FPC}){$ENDIF};
+  HeightChange := AdjustLabelHeight(ComponentsDiskSpaceLabel);
   ComponentsDiskSpaceLabel.Top := ComponentsDiskSpaceLabel.Top - HeightChange;
   ComponentsList.Height := ComponentsList.Height - HeightChange;
 end;
 
 procedure TWizardForm.UpdateComponentSizesEnum(Index: Integer; HasChildren: Boolean; Ext: NativeInt);
+var
+  ComponentEntry: PSetupComponentEntry;
+  ChildrenSize, ComponentSize: Int64;
 begin
-  const ComponentEntry = PSetupComponentEntry(ComponentsList.ItemObject[Index]);
+  ComponentEntry := PSetupComponentEntry(ComponentsList.ItemObject[Index]);
 
-  var ChildrenSize: Int64 := 0;
+  ChildrenSize := 0;
   if HasChildren then
     ComponentsList.EnumChildrenOf(Index, UpdateComponentSizesEnum, NativeInt(@ChildrenSize));
-  var ComponentSize := ComponentEntry.Size;
+  ComponentSize := ComponentEntry.Size;
   Inc(ComponentSize, ChildrenSize);
   if ComponentsList.Checked[Index] then
     Inc(Int64(Pointer(Ext)^), ComponentSize);
 
   if ComponentSize <> 0 then begin
     if not HasLargeComponents then
-      ComponentsList.ItemSubItem[Index] := FmtSetupMessage1(msgComponentSize1, IntToKBStr(ComponentSize))
+      ComponentsList.ItemSubItem[Index] := {$IFDEF FPC}UTF8Encode({$ENDIF}FmtSetupMessage1(msgComponentSize1, IntToKBStr(ComponentSize)){$IFDEF FPC}){$ENDIF}
     else
-      ComponentsList.ItemSubItem[Index] := FmtSetupMessage1(msgComponentSize2, IntToMBStr(ComponentSize));
+      ComponentsList.ItemSubItem[Index] := {$IFDEF FPC}UTF8Encode({$ENDIF}FmtSetupMessage1(msgComponentSize2, IntToMBStr(ComponentSize)){$IFDEF FPC}){$ENDIF};
   end else
     ComponentsList.ItemSubItem[Index] := '';
 end;
 
 procedure TWizardForm.UpdateComponentSizes();
+var
+  Size: Int64;
 begin
   if shShowComponentSizes in SetupHeader.Options then begin
-    var Size: Int64 := 0;
+    Size := 0;
     ComponentsList.EnumChildrenOf(-1, UpdateComponentSizesEnum, NativeInt(@Size));
   end;
 end;
@@ -667,8 +677,8 @@ end;
 procedure TWizardPage.SyncCaptionAndDescription;
 begin
   if FWizardForm.CurPageID = FID then begin
-    FWizardForm.PageNameLabel.Caption := FCaption;
-    FWizardForm.PageDescriptionLabel.Caption := FDescription;
+    FWizardForm.PageNameLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}FCaption{$IFDEF FPC}){$ENDIF};
+    FWizardForm.PageDescriptionLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}FDescription{$IFDEF FPC}){$ENDIF};
   end;
 end;
 
@@ -678,8 +688,15 @@ constructor TWizardForm.Create(AOwner: TComponent);
 { Do all initialization of the wizard form. We're overriding Create instead of
   using the FormCreate event, because if an exception is raised in FormCreate
   it's not propagated out. }
+const
+  { Images use the same sizes to keep the layout consistent between pages }
+  SelectDirOrGroupSizes: array[0..2] of Integer = (32, 48, 64);
 var
-  X, W1, W2: Integer;
+  X, W1, W2, J, NewWidth, NewHeight: Integer;
+  DefaultSetupTypeIndex: NativeInt;
+  {$IFNDEF FPC}
+  LStyle: TCustomStyleServices;
+  {$ENDIF}
   SystemMenu: HMENU;
   P: String;
   I: Integer;
@@ -696,9 +713,11 @@ begin
   PrevSelectedTasks := TStringList.Create();
   PrevDeselectedTasks := TStringList.Create();
 
-  var LStyle := StyleServices(Self);
+  {$IFNDEF FPC}
+  LStyle := StyleServices(Self);
   if not LStyle.Enabled or LStyle.IsSystemStyle then
     LStyle := nil;
+  {$ENDIF}
 
   { Unlike other forms (which use only WizardBackColor and not WizardBackImageFile), we do not check
     for clWindow here. The compiler guarantees that if WizardBackColor (i.e., SetupHeader.BackColor)
@@ -714,9 +733,9 @@ begin
   PageNameLabel.Font.Style := [fsBold];
 
   if shDisableWelcomePage in SetupHeader.Options then
-    Caption := FmtSetupMessage1(msgSetupWindowTitle, ExpandedAppVerName)
+    Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}FmtSetupMessage1(msgSetupWindowTitle, ExpandedAppVerName){$IFDEF FPC}){$ENDIF}
   else
-    Caption := FmtSetupMessage1(msgSetupWindowTitle, ExpandedAppName);
+    Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}FmtSetupMessage1(msgSetupWindowTitle, ExpandedAppName){$IFDEF FPC}){$ENDIF};
   
   { Position the buttons, and scale their size }
   W1 := CalculateButtonWidth([SetupMessages[msgButtonBack], SetupMessages[msgButtonCancel],
@@ -738,14 +757,17 @@ begin
     custom styles they do. Recreate this 2-pixel space between the buttons when styled. Causes
     additional space on styles like Zircon which are like Windows 11, but that does not seem worth
     adding a new directive.  }
+  {$IFNDEF FPC}
   if BackButton.IsCustomStyleActive then
     Dec(X, 1);
   if NextButton.IsCustomStyleActive then
     Dec(X, 1);
+  {$ENDIF}
   BackButton.Left := X;
 
   { Initialize wizard style - also see TUninstallProgressForm.Initialize and TTaskDialogForm.Create }
   if not CustomWizardBackground then begin
+    {$IFNDEF FPC}
     if LStyle <> nil then begin
       { TNewNotebook(Page) ignores VCL Styles so it needs a bit of help }
       WelcomePage.ParentColor := True;
@@ -753,20 +775,26 @@ begin
       FinishedPage.ParentColor := True;
       Color := LStyle.GetStyleColor(scWindow);
     end;
+    {$ENDIF}
   end else begin
     OuterNotebook.ParentBackground := True;
-    for var J := 0 to OuterNotebook.PageCount-1 do
+    for J := 0 to OuterNotebook.PageCount-1 do
       OuterNotebook.Pages[J].ParentBackground := True;
     InnerNotebook.ParentBackground := True;
-    for var J := 0 to InnerNotebook.PageCount-1 do
+    for J := 0 to InnerNotebook.PageCount-1 do
       InnerNotebook.Pages[J].ParentBackground := True;
   end;
   if shWizardModern in SetupHeader.Options then begin
+    {$IFDEF FPC}
+    if not CustomWizardBackground then
+      OuterNotebook.Color := clWindow;
+    {$ELSE}
     if LStyle = nil then begin
       if CustomWizardBackground then
         InternalError('Unexpected CustomWizardBackground value');
       OuterNotebook.Color := clWindow;
     end;
+    {$ENDIF}
     Bevel1.Visible := False;
   end;
   if shWizardBevelsHidden in SetupHeader.Options then begin
@@ -799,8 +827,8 @@ begin
           (such as 55x55 or 32x32) and WizardImageStretch=yes.
         - Otherwise, it's unclear what size/shape the user prefers for the
           control. Keep the default control size. }
-      var NewWidth := WizardSmallImages[0].Width;
-      var NewHeight := WizardSmallImages[0].Height;
+      NewWidth := WizardSmallImages[0].Width;
+      NewHeight := WizardSmallImages[0].Height;
       if (WizardSmallImages.Count > 1) or
          (NewWidth > 58) or
          (NewHeight > 58) then begin
@@ -841,43 +869,44 @@ begin
   WizardBitmapImage2.Opacity := SetupHeader.WizardImageOpacity;
   WizardBitmapImage2.Stretch := (shWizardImageStretch in SetupHeader.Options);
   WizardSmallBitmapImage.Graphic := SelectBestImage(WizardSmallImages, WizardSmallBitmapImage.Width, WizardSmallBitmapImage.Height);
+  {$IFNDEF FPC}
   if IsCustomStyleActive and (SetupHeader.WizardSmallImageBackColor = clWindow) and not MainPanel.ParentBackground then begin
     { Because the small image is on a panel we need a separate color, see TBitmapImageImplementation.Paint }
     WizardSmallBitmapImage.BackColor := clBtnFace
   end else
+  {$ENDIF}
     WizardSmallBitmapImage.BackColor := SetupHeader.WizardSmallImageBackColor;
   WizardSmallBitmapImage.Opacity := SetupHeader.WizardImageOpacity;
   WizardSmallBitmapImage.Stretch := (shWizardImageStretch in SetupHeader.Options);
   if CustomWizardBackground then
     SetBackImage(WizardBackImages, shWizardImageStretch in SetupHeader.Options, True, SetupHeader.WizardBackImageOpacity, False);
-  const SelectDirOrGroupSizes = [32, 48, 64]; { Images should use the same sizes to keep the layout consistent between pages }
   SelectDirBitmapImage.InitializeFromStockIcon(SIID_FOLDER, clNone, SelectDirOrGroupSizes);
   SelectGroupBitmapImage.InitializeFromIcon(HInstance, PChar('Z_GROUPICON' + WizardIconsPostfix), clNone, SelectDirOrGroupSizes); {don't localize}
   PreparingErrorBitmapImage.InitializeFromStockIcon(SIID_ERROR, clNone, [16, 24, 32]);
 
   { Initialize wpWelcome page }
   RegisterExistingPage(wpWelcome, WelcomePage, nil, '', '');
-  WelcomeLabel1.Caption := ExpandSetupMessage(msgWelcomeLabel1) + SNewLine;
+  WelcomeLabel1.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandSetupMessage(msgWelcomeLabel1) + SNewLine{$IFDEF FPC}){$ENDIF};
   AdjustLabelHeight(WelcomeLabel1);
   IncTopDecHeight(WelcomeLabel2, (WelcomeLabel1.Top + WelcomeLabel1.Height) -
     WelcomeLabel2.Top);
-  WelcomeLabel2.Caption := ExpandSetupMessage(msgWelcomeLabel2) + SNewLine2 +
-    SetupMessages[msgClickNext];
+  WelcomeLabel2.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandSetupMessage(msgWelcomeLabel2) + SNewLine2 +
+    SetupMessages[msgClickNext]{$IFDEF FPC}){$ENDIF};
 
   { Initialize wpLicense page }
   RegisterExistingPage(wpLicense, InnerPage, LicensePage,
     SetupMessages[msgWizardLicense], SetupMessages[msgLicenseLabel]);
-  LicenseLabel1.Caption := ExpandSetupMessage(msgLicenseLabel3);
+  LicenseLabel1.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandSetupMessage(msgLicenseLabel3){$IFDEF FPC}){$ENDIF};
   I := AdjustLabelHeight(LicenseLabel1);
   IncTopDecHeight(LicenseMemo, I);
-  LicenseAcceptedRadio.Caption := SetupMessages[msgLicenseAccepted];
-  LicenseNotAcceptedRadio.Caption := SetupMessages[msgLicenseNotAccepted];
+  LicenseAcceptedRadio.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgLicenseAccepted]{$IFDEF FPC}){$ENDIF};
+  LicenseNotAcceptedRadio.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgLicenseNotAccepted]{$IFDEF FPC}){$ENDIF};
 
   { Initialize wpPassword page }
   RegisterExistingPage(wpPassword, InnerPage, PasswordPage,
     SetupMessages[msgWizardPassword], SetupMessages[msgPasswordLabel1]);
-  PasswordLabel.Caption := SetupMessages[msgPasswordLabel3];
-  PasswordEditLabel.Caption := SetupMessages[msgPasswordEditLabel];
+  PasswordLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgPasswordLabel3]{$IFDEF FPC}){$ENDIF};
+  PasswordEditLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgPasswordEditLabel]{$IFDEF FPC}){$ENDIF};
   I := AdjustLabelHeight(PasswordLabel);
   PasswordEditLabel.Top := PasswordEditLabel.Top + I;
   Inc(I, AdjustLabelHeight(PasswordEditLabel));
@@ -886,25 +915,25 @@ begin
   { Initialize wpInfoBefore page }
   RegisterExistingPage(wpInfoBefore, InnerPage, InfoBeforePage,
     SetupMessages[msgWizardInfoBefore], SetupMessages[msgInfoBeforeLabel]);
-  InfoBeforeClickLabel.Caption := SetupMessages[msgInfoBeforeClickLabel];
+  InfoBeforeClickLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgInfoBeforeClickLabel]{$IFDEF FPC}){$ENDIF};
   I := AdjustLabelHeight(InfoBeforeClickLabel);
   IncTopDecHeight(InfoBeforeMemo, I);
 
   { Initialize wpUserInfo page }
   RegisterExistingPage(wpUserInfo, InnerPage, UserInfoPage,
     SetupMessages[msgWizardUserInfo], SetupMessages[msgUserInfoDesc]);
-  UserInfoNameLabel.Caption := SetupMessages[msgUserInfoName];
+  UserInfoNameLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgUserInfoName]{$IFDEF FPC}){$ENDIF};
   I := AdjustLabelHeight(UserInfoNameLabel);
   UserInfoNameEdit.Top := UserInfoNameEdit.Top + I;
 
   UserInfoOrgLabel.Top := UserInfoOrgLabel.Top + I;
-  UserInfoOrgLabel.Caption := SetupMessages[msgUserInfoOrg];
+  UserInfoOrgLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgUserInfoOrg]{$IFDEF FPC}){$ENDIF};
   Inc(I, AdjustLabelHeight(UserInfoOrgLabel));
   UserInfoOrgEdit.Top := UserInfoOrgEdit.Top + I;
 
   if NeedSerial then begin
     UserInfoSerialLabel.Top := UserInfoSerialLabel.Top + I;
-    UserInfoSerialLabel.Caption := SetupMessages[msgUserInfoSerial];
+    UserInfoSerialLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgUserInfoSerial]{$IFDEF FPC}){$ENDIF};
     Inc(I, AdjustLabelHeight(UserInfoSerialLabel));
     UserInfoSerialEdit.Top := UserInfoSerialEdit.Top + I;
   end else begin
@@ -915,7 +944,7 @@ begin
   { Initialize wpSelectDir page }
   RegisterExistingPage(wpSelectDir, InnerPage, SelectDirPage,
     SetupMessages[msgWizardSelectDir], ExpandSetupMessage(msgSelectDirDesc));
-  SelectDirLabel.Caption := ExpandSetupMessage(msgSelectDirLabel3);
+  SelectDirLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandSetupMessage(msgSelectDirLabel3){$IFDEF FPC}){$ENDIF};
   X := SelectDirBitmapImage.Left + SelectDirBitmapImage.Width + ScalePixelsX(12);
   SelectDirLabel.SetBounds(X, SelectDirLabel.Top,
     SelectDirLabel.Width - (X - SelectDirLabel.Left), SelectDirLabel.Height);
@@ -923,7 +952,7 @@ begin
   if SelectDirLabel.Height < SelectDirBitmapImage.Height then
     SelectDirLabel.Top := SelectDirLabel.Top +
       (SelectDirBitmapImage.Height - (SelectDirLabel.Height - 1)) div 2;
-  SelectDirBrowseLabel.Caption := ExpandSetupMessage(msgSelectDirBrowseLabel);
+  SelectDirBrowseLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandSetupMessage(msgSelectDirBrowseLabel){$IFDEF FPC}){$ENDIF};
   I := IntMax(
     SelectDirBitmapImage.Top + SelectDirBitmapImage.Height + ScalePixelsY(12),
     SelectDirLabel.Top + SelectDirLabel.Height - 1 + ScalePixelsY(13)) -
@@ -931,19 +960,19 @@ begin
   SelectDirBrowseLabel.Top := SelectDirBrowseLabel.Top + I;
   Inc(I, AdjustLabelHeight(SelectDirBrowseLabel));
   DirEdit.Top := DirEdit.Top + I;
-  DirBrowseButton.Caption := SetupMessages[msgButtonWizardBrowse];
+  DirBrowseButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonWizardBrowse]{$IFDEF FPC}){$ENDIF};
   X := CalculateButtonWidth([SetupMessages[msgButtonWizardBrowse]]);
   DirBrowseButton.SetBounds(InnerNotebook.Width - X,
     DirBrowseButton.Top + I, X, DirBrowseButton.Height);
   DirEdit.Width := DirBrowseButton.Left - ScalePixelsX(10) - DirEdit.Left;
-  DiskSpaceLabel.Caption := ExpandMBOrGBSetupMessage(
-    msgDiskSpaceMBLabel, msgDiskSpaceGBLabel, MinimumSpace);
+  DiskSpaceLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandMBOrGBSetupMessage(
+    msgDiskSpaceMBLabel, msgDiskSpaceGBLabel, MinimumSpace){$IFDEF FPC}){$ENDIF};
   DiskSpaceLabel.Top := DiskSpaceLabel.Top - AdjustLabelHeight(DiskSpaceLabel);
 
   { Initialize wpSelectComponents page }
   RegisterExistingPage(wpSelectComponents, InnerPage, SelectComponentsPage,
     SetupMessages[msgWizardSelectComponents], ExpandSetupMessage(msgSelectComponentsDesc));
-  SelectComponentsLabel.Caption := ExpandSetupMessage(msgSelectComponentsLabel2);
+  SelectComponentsLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandSetupMessage(msgSelectComponentsLabel2){$IFDEF FPC}){$ENDIF};
   I := AdjustLabelHeight(SelectComponentsLabel);
   TypesCombo.Top := TypesCombo.Top + I;
   IncTopDecHeight(ComponentsList, I);
@@ -956,7 +985,7 @@ begin
   { Initialize wpSelectProgramGroup page }
   RegisterExistingPage(wpSelectProgramGroup, InnerPage, SelectProgramGroupPage,
     SetupMessages[msgWizardSelectProgramGroup], ExpandSetupMessage(msgSelectStartMenuFolderDesc));
-  SelectStartMenuFolderLabel.Caption := ExpandSetupMessage(msgSelectStartMenuFolderLabel3);
+  SelectStartMenuFolderLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandSetupMessage(msgSelectStartMenuFolderLabel3){$IFDEF FPC}){$ENDIF};
   X := SelectGroupBitmapImage.Left + SelectGroupBitmapImage.Width + ScalePixelsX(12);
   SelectStartMenuFolderLabel.SetBounds(X, SelectStartMenuFolderLabel.Top,
     SelectStartMenuFolderLabel.Width - (X - SelectStartMenuFolderLabel.Left),
@@ -965,7 +994,7 @@ begin
   if SelectStartMenuFolderLabel.Height < SelectGroupBitmapImage.Height then
     SelectStartMenuFolderLabel.Top := SelectStartMenuFolderLabel.Top +
       (SelectGroupBitmapImage.Height - (SelectStartMenuFolderLabel.Height - 1)) div 2;
-  SelectStartMenuFolderBrowseLabel.Caption := ExpandSetupMessage(msgSelectStartMenuFolderBrowseLabel);
+  SelectStartMenuFolderBrowseLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandSetupMessage(msgSelectStartMenuFolderBrowseLabel){$IFDEF FPC}){$ENDIF};
   I := IntMax(
     SelectGroupBitmapImage.Top + SelectGroupBitmapImage.Height + ScalePixelsY(12),
     SelectStartMenuFolderLabel.Top + SelectStartMenuFolderLabel.Height - 1 + ScalePixelsY(13)) -
@@ -973,17 +1002,17 @@ begin
   SelectStartMenuFolderBrowseLabel.Top := SelectStartMenuFolderBrowseLabel.Top + I;
   Inc(I, AdjustLabelHeight(SelectStartMenuFolderBrowseLabel));
   GroupEdit.Top := GroupEdit.Top + I;
-  GroupBrowseButton.Caption := SetupMessages[msgButtonWizardBrowse];
+  GroupBrowseButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonWizardBrowse]{$IFDEF FPC}){$ENDIF};
   X := CalculateButtonWidth([SetupMessages[msgButtonWizardBrowse]]);
   GroupBrowseButton.SetBounds(InnerNotebook.Width - X,
     GroupBrowseButton.Top + I, X, GroupBrowseButton.Height);
   GroupEdit.Width := GroupBrowseButton.Left - ScalePixelsX(10) - GroupEdit.Left;
-  NoIconsCheck.Caption := SetupMessages[msgNoProgramGroupCheck2];
+  NoIconsCheck.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgNoProgramGroupCheck2]{$IFDEF FPC}){$ENDIF};
 
   { Initialize wpSelectTasks page }
   RegisterExistingPage(wpSelectTasks, InnerPage, SelectTasksPage,
     SetupMessages[msgWizardSelectTasks], ExpandSetupMessage(msgSelectTasksDesc));
-  SelectTasksLabel.Caption := ExpandSetupMessage(msgSelectTasksLabel2);
+  SelectTasksLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandSetupMessage(msgSelectTasksLabel2){$IFDEF FPC}){$ENDIF};
   I := AdjustLabelHeight(SelectTasksLabel);
   IncTopDecHeight(TasksList, I);
   TasksList.BorderStyle := bsNone;
@@ -1005,7 +1034,7 @@ begin
   { Initialize wpInfoAfter page }
   RegisterExistingPage(wpInfoAfter, InnerPage, InfoAfterPage,
     SetupMessages[msgWizardInfoAfter], SetupMessages[msgInfoAfterLabel]);
-  InfoAfterClickLabel.Caption := SetupMessages[msgInfoAfterClickLabel];
+  InfoAfterClickLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgInfoAfterClickLabel]{$IFDEF FPC}){$ENDIF};
   I := AdjustLabelHeight(InfoAfterClickLabel);
   IncTopDecHeight(InfoAfterMemo, I);
 
@@ -1014,23 +1043,25 @@ begin
   SetFontNameSize(FinishedHeadingLabel.Font, LangOptions.WelcomeFontName,
     LangOptions.WelcomeFontSize, '', 14);
   FinishedHeadingLabel.Font.Style := [fsBold];
-  FinishedHeadingLabel.Caption := ExpandSetupMessage(msgFinishedHeadingLabel) +
-    SNewLine;
+  FinishedHeadingLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandSetupMessage(msgFinishedHeadingLabel) +
+    SNewLine{$IFDEF FPC}){$ENDIF};
   AdjustLabelHeight(FinishedHeadingLabel);
   FinishedLabel.Top := FinishedHeadingLabel.Top + FinishedHeadingLabel.Height;
-  YesRadio.Caption := SetupMessages[msgYesRadio];
-  NoRadio.Caption := SetupMessages[msgNoRadio];
+  YesRadio.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgYesRadio]{$IFDEF FPC}){$ENDIF};
+  NoRadio.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgNoRadio]{$IFDEF FPC}){$ENDIF};
   RunList.MinItemHeight := ScalePixelsY(22);
 
   { Initialize BeveledLabel. Don't forget that UninstallProgressForm has one as well! }
   if SetupMessages[msgBeveledLabel] <> '' then
-    BeveledLabel.Caption := ' ' + SetupMessages[msgBeveledLabel] + ' '
+    BeveledLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}' ' + SetupMessages[msgBeveledLabel] + ' '{$IFDEF FPC}){$ENDIF}
   else
-    BeveledLabel.Caption := '';
+    BeveledLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}''{$IFDEF FPC}){$ENDIF};
   BeveledLabel.Top := Bevel.Top - ((BeveledLabel.Height - 1) div 2);
   if not CustomWizardBackground then begin
+    {$IFNDEF FPC}
     if LStyle <> nil then
       BeveledLabel.Color := LStyle.GetStyleColor(scWindow);
+    {$ENDIF}
   end else
     BeveledLabel.Color := TBitmapImageImplementation.AdjustColorForStyle(Self, SetupHeader.WizardBackColor);
 
@@ -1051,8 +1082,8 @@ begin
 
   { Append an 'About Setup' item to the wizard form also }
   SystemMenu := GetSystemMenu(Handle, False);
-  AppendMenu(SystemMenu, MF_SEPARATOR, 0, nil);
-  AppendMenu(SystemMenu, MF_STRING, 9999, PChar(SetupMessages[msgAboutSetupMenuItem]));
+  AppendMenuW(SystemMenu, MF_SEPARATOR, 0, nil);
+  AppendMenuW(SystemMenu, MF_STRING, 9999, PWideChar(SetupMessages[msgAboutSetupMenuItem]));
 
   { Read settings from a previous install if available }
   FindPreviousData;
@@ -1060,20 +1091,20 @@ begin
     ((SetupHeader.DisableDirPage = dpAuto) and (PrevAppDir <> ''));
   DisableProgramGroupPage := (SetupHeader.DisableProgramGroupPage = dpYes) or
     ((SetupHeader.DisableProgramGroupPage = dpAuto) and (PrevGroup <> ''));
-  var DefaultSetupTypeIndex: NativeInt := -1; //assigned later
+  DefaultSetupTypeIndex := -1; //assigned later
   IgnoreInitComponents := False;
 
   { Assign default user name & organization on User Info page }
   if shUserInfoPage in SetupHeader.Options then begin
     if PrevUserInfoName = '' then begin
-      UserInfoNameEdit.Text := ExpandConst(SetupHeader.DefaultUserInfoName);
-      UserInfoOrgEdit.Text := ExpandConst(SetupHeader.DefaultUserInfoOrg);
-      UserInfoSerialEdit.Text := ExpandConst(SetupHeader.DefaultUserInfoSerial);
+      UserInfoNameEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandConst(SetupHeader.DefaultUserInfoName){$IFDEF FPC}){$ENDIF};
+      UserInfoOrgEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandConst(SetupHeader.DefaultUserInfoOrg){$IFDEF FPC}){$ENDIF};
+      UserInfoSerialEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}ExpandConst(SetupHeader.DefaultUserInfoSerial){$IFDEF FPC}){$ENDIF};
     end
     else begin
-      UserInfoNameEdit.Text := PrevUserInfoName;
-      UserInfoOrgEdit.Text := PrevUserInfoOrg;
-      UserInfoSerialEdit.Text := PrevUserInfoSerial;
+      UserInfoNameEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}PrevUserInfoName{$IFDEF FPC}){$ENDIF};
+      UserInfoOrgEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}PrevUserInfoOrg{$IFDEF FPC}){$ENDIF};
+      UserInfoSerialEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}PrevUserInfoSerial{$IFDEF FPC}){$ENDIF};
     end;
   end;
 
@@ -1088,18 +1119,18 @@ begin
         P := ExpandedDefaultDirName;
     end;
     P := RemoveBackslashUnlessRoot(PathExpand(P));
-    DirEdit.Text := P;
+    DirEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}P{$IFDEF FPC}){$ENDIF};
   end
   else
-    DirEdit.Text := WinDir;
+    DirEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}WinDir{$IFDEF FPC}){$ENDIF};
 
   { Fill types list and assign default type }
   if Entries[seType].Count > 0 then begin
     //first fill list
     TypesCombo.Clear();
-    for var J := 0 to Entries[seType].Count-1 do begin
+    for J := 0 to Entries[seType].Count-1 do begin
       TypeEntry := PSetupTypeEntry(Entries[seType][J]);
-      TypesCombo.Items.AddObject(ExpandConst(TypeEntry.Description), TObject(TypeEntry));
+      TypesCombo.Items.AddObject({$IFDEF FPC}UTF8Encode({$ENDIF}ExpandConst(TypeEntry.Description){$IFDEF FPC}){$ENDIF}, TObject(TypeEntry));
       { If a setup type was specified on the command line, use it as default }
       if (DefaultSetupTypeIndex = -1) and (InitSetupType <> '') and
          (CompareText(TypeEntry.Name, InitSetupType) = 0) then begin
@@ -1113,7 +1144,7 @@ begin
     { Use setup type from previous installation if no type was specified on the
       command line (or if the type specified doesn't exist) }
     if (DefaultSetupTypeIndex = -1) and (PrevSetupType <> '') then begin
-      for var J := 0 to Entries[seType].Count-1 do begin
+      for J := 0 to Entries[seType].Count-1 do begin
         TypeEntry := PSetupTypeEntry(Entries[seType][J]);
         if CompareText(TypeEntry.Name, PrevSetupType) = 0 then begin
           DefaultSetupTypeIndex := J;
@@ -1132,13 +1163,13 @@ begin
   //first fill list
   ComponentsList.Clear();
   ComponentsList.Flat := shFlatComponentsList in SetupHeader.Options;
-  for var J := 0 to Entries[seComponent].Count-1 do begin
+  for J := 0 to Entries[seComponent].Count-1 do begin
     ComponentEntry := PSetupComponentEntry(Entries[seComponent][J]);
     if coExclusive in ComponentEntry.Options then
-      ComponentsList.AddRadioButton(ExpandConst(ComponentEntry.Description), '', ComponentEntry.Level,
+      ComponentsList.AddRadioButton({$IFDEF FPC}UTF8Encode({$ENDIF}ExpandConst(ComponentEntry.Description){$IFDEF FPC}){$ENDIF}, '', ComponentEntry.Level,
         False, not (coFixed in ComponentEntry.Options), TObject(ComponentEntry))
     else
-      ComponentsList.AddCheckBox(ExpandConst(ComponentEntry.Description), '', ComponentEntry.Level,
+      ComponentsList.AddCheckBox({$IFDEF FPC}UTF8Encode({$ENDIF}ExpandConst(ComponentEntry.Description){$IFDEF FPC}){$ENDIF}, '', ComponentEntry.Level,
         False, not (coFixed in ComponentEntry.Options), ComponentEntry.Used,
         not (coDontInheritCheck in ComponentEntry.Options), TObject(ComponentEntry));
     if ComponentEntry.Size >= 1024*1024 then
@@ -1147,7 +1178,7 @@ begin
 
   //now assign default components
   if not IgnoreInitComponents and InitComponentsSpecified and HasCustomType then begin
-    for var J := 0 to Entries[seType].Count-1 do begin
+    for J := 0 to Entries[seType].Count-1 do begin
       TypeEntry := PSetupTypeEntry(Entries[seType][J]);
       if toIsCustom in TypeEntry.Options then begin
         TypesCombo.ItemIndex := Integer(J);
@@ -1210,7 +1241,7 @@ begin
     else
       P := PrevGroup;
   end;
-  GroupEdit.Text := P;
+  GroupEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}P{$IFDEF FPC}){$ENDIF};
 
   if shAllowNoIcons in SetupHeader.Options then begin
     if InitNoIcons or PrevNoIcons then
@@ -1242,6 +1273,10 @@ procedure TWizardForm.AnchorOuterPages;
     if BitmapImage.Visible and (BitmapImage.Align = alNone) and (BitmapImage.Anchors = ExpectedAnchors) then begin
       if BaseUnitX = 0 then
         InternalError('AnchorOuterPage: BaseUnitX = 0');
+      {$IFDEF FPC}
+      { The image anchors can still hold the original hidden page size }
+      BitmapImage.Height := Page.ClientHeight - BitmapImage.Top;
+      {$ENDIF}
       NewWidth := MulDiv(BitmapImage.Height, 164, 314); //164x314 is the original bitmapimage size
       if ControlsFlipped then
         BitmapImage.Left := Page.ClientWidth - NewWidth;
@@ -1278,8 +1313,10 @@ end;
 function TWizardForm.PageIndexFromID(const ID: Integer): NativeInt;
 { Given a page ID, returns the index of the page in FPageList. An exception is
   raised if a page with the specified ID is not found. }
+var
+  I: NativeInt;
 begin
-  for var I := 0 to FPageList.Count-1 do begin
+  for I := 0 to FPageList.Count-1 do begin
     if TWizardPage(FPageList[I]).ID = ID then begin
       Result := I;
       Exit;
@@ -1314,8 +1351,10 @@ procedure TWizardForm.AddPage(const APage: TWizardPage; const AfterID: Integer);
 { Adds a new wizard page entry in FPageList, and an associated page in
   InnerNotebook. AfterID specifies where the page should be inserted, or -1
   which inserts the page at the end. }
+var
+  InsertIndex: NativeInt;
+  NotebookPage: TNewNotebookPage;
 begin
-  var InsertIndex: NativeInt;
   if AfterID <> -1 then
     InsertIndex := PageIndexFromID(AfterID) + 1
   else
@@ -1326,10 +1365,12 @@ begin
   if FNextPageID = 1 then
     FNextPageID := 100;
 
-  const NotebookPage = TNewNotebookPage.Create(APage);
+  NotebookPage := TNewNotebookPage.Create(APage);
   { Set CurrentPPI of the page to the CurrentPPI of the notebook, preventing VCL from scaling
     controls placed on the page. Also see TSetupForm.CreateWnd.  }
+  {$IFNDEF FPC}
   NotebookPage.SetCurrentPPI(InnerNotebook.CurrentPPI);
+  {$ENDIF}
   NotebookPage.Notebook := InnerNotebook;
   NotebookPage.ParentBackground := InnerNotebook.ParentBackground;
   NotebookPage.HandleNeeded; { See TSetupForm.InitializeFont comment }
@@ -1387,7 +1428,7 @@ end;
 
 procedure TWizardForm.ChangeReadyLabel(const S: String);
 begin
-  ReadyLabel.Caption := S;
+  ReadyLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}S{$IFDEF FPC}){$ENDIF};
   IncTopDecHeight(ReadyMemo, AdjustLabelHeight(ReadyLabel));
 end;
 
@@ -1395,7 +1436,7 @@ procedure TWizardForm.ChangeFinishedLabel(const S: String);
 var
   Y: Integer;
 begin
-  FinishedLabel.Caption := S + SNewLine;
+  FinishedLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}S + SNewLine{$IFDEF FPC}){$ENDIF};
   AdjustLabelHeight(FinishedLabel);
   Y := FinishedLabel.Top + FinishedLabel.Height;
   IncTopDecHeight(RunList, Y-YesRadio.Top);
@@ -1405,12 +1446,13 @@ end;
 
 procedure TWizardForm.UpdateRunList(const SelectedComponents, SelectedTasks: TStringList);
 var
+  I: NativeInt;
   RunEntry: PSetupRunEntry;
   Caption: String;
 begin
   RunList.Items.Clear();
 
-  for var I := 0 to Entries[seRun].Count-1 do begin
+  for I := 0 to Entries[seRun].Count-1 do begin
     RunEntry := PSetupRunEntry(Entries[seRun][I]);
     if (roPostInstall in RunEntry.Options) and ShouldProcessRunEntry(SelectedComponents, SelectedTasks, RunEntry) then begin
       try
@@ -1434,6 +1476,7 @@ end;
 
 procedure TWizardForm.CreateTaskButtons(const SelectedComponents: TStringList);
 var
+  I: NativeInt;
   SaveSelectedTasks, SaveDeselectedTasks: TStringList;
   LastShownTaskEntry, TaskEntry: PSetupTaskEntry;
   NextAllowedLevel: Integer;
@@ -1453,7 +1496,7 @@ begin
     { Create the task items with their default checked states }
     NextAllowedLevel := 0;
     LastShownTaskEntry := nil;
-    for var I := 0 to Entries[seTask].Count-1 do begin
+    for I := 0 to Entries[seTask].Count-1 do begin
       TaskEntry := PSetupTaskEntry(Entries[seTask][I]);
       if (TaskEntry.Level <= NextAllowedLevel) and
          (InstallOnThisVersion(TaskEntry.MinVersion, TaskEntry.OnlyBelowVersion) = irInstall) and
@@ -1509,7 +1552,7 @@ begin
 
     { Restore the previous checked state of the items we just created }
     if not InitDeselectAllTasks then begin
-      for var I := 0 to TasksList.Items.Count-1 do begin
+      for I := 0 to TasksList.Items.Count-1 do begin
         TaskEntry := PSetupTaskEntry(TasksList.ItemObject[I]);
         if TaskEntry <> nil then begin
           if ListContains(PrevSelectedTasks, TaskEntry.Name) then
@@ -1522,7 +1565,7 @@ begin
 
     { Override previous state with tasks specified on the command line }
     if InitTasks.Count > 0 then begin
-      for var I := 0 to TasksList.Items.Count-1 do begin
+      for I := 0 to TasksList.Items.Count-1 do begin
         TaskEntry := PSetupTaskEntry(TasksList.ItemObject[I]);
         if TaskEntry <> nil then begin
           if ListContains(InitTasks, '*' + TaskEntry.Name) then
@@ -1556,9 +1599,10 @@ end;
 
 procedure TWizardForm.SelectComponents(const SelectComponents, DeselectComponents: TStringList; const KeepFixedComponents: Boolean);
 var
+  I: NativeInt;
   ComponentEntry: PSetupComponentEntry;
 begin
-  for var I := 0 to Entries[seComponent].Count-1 do begin
+  for I := 0 to Entries[seComponent].Count-1 do begin
     ComponentEntry := PSetupComponentEntry(Entries[seComponent][I]);
 
     if not (KeepFixedComponents and (coFixed in ComponentEntry.Options)) then begin
@@ -1626,11 +1670,12 @@ end;
 
 procedure TWizardForm.SelectComponentsFromType(const TypeName: String; const OnlySelectFixedComponents: Boolean);
 var
+  I: NativeInt;
   ComponentTypes: TStringList;
   ComponentEntry: PSetupComponentEntry;
 begin
   ComponentTypes := TStringList.Create();
-  for var I := 0 to Entries[seComponent].Count-1 do begin
+  for I := 0 to Entries[seComponent].Count-1 do begin
     ComponentEntry := PSetupComponentEntry(Entries[seComponent][I]);
     if not OnlySelectFixedComponents or (coFixed in ComponentEntry.Options) then begin
       SetStringsFromCommaString(ComponentTypes, ComponentEntry.Types);
@@ -1761,6 +1806,28 @@ begin
   end;
 end;
 
+procedure CompleteArchiveDownload(const DownloadedFile: TDownloadFile; const DestFile: String;
+  var Remove: Boolean);
+var
+  FileEntry: PSetupFileEntry;
+begin
+  if not DownloadedFile.DotISSigEntry then begin { Check for the extra entries which download .issig }
+    FileEntry := Entries[seFile][DownloadedFile.Data];
+    { Update SourceFilename, ensuring it doesn't become a super path. Also see
+      NotifyBeforeInstallFileEntry. }
+    FileEntry.SourceFilename := PathConvertSuperToNormal(DestFile);
+    { Remove Download flag since download has been done, and remove CustomDestName flag
+      since ExtractArchive flag doesn't like that }
+    FileEntry.Options := FileEntry.Options - [foDownload, foCustomDestName];
+    { DestName should now not include a filename, see TSetupCompiler.EnumFilesProc.ProcessFileList }
+    FileEntry.DestName := PathExtractPath(FileEntry.DestName);
+    FileEntry.Verification.Typ := fvNone;
+  end;
+  { Tell DownloadPage to not download this file again on retry. Without this it would
+    redownload files that don't use verification. }
+  Remove := True;
+end;
+
 function TWizardForm.PrepareToInstall(const WizardComponents, WizardTasks: TStringList): String;
 
   procedure ShowPreparing;
@@ -1799,9 +1866,11 @@ function TWizardForm.PrepareToInstall(const WizardComponents, WizardTasks: TStri
   end;
 
   function AskRetryDownloadArchivesToExtract(const LastBaseNameOrUrl, Failed: String): Integer;
+  var
+    LastOperation, Text: String;
   begin
-    const LastOperation = SetupMessages[msgErrorDownloading];
-    const Text = LastBaseNameOrUrl + SNewLine2 + LastOperation + SNewLine + Failed;
+    LastOperation := SetupMessages[msgErrorDownloading];
+    Text := LastBaseNameOrUrl + SNewLine2 + LastOperation + SNewLine + Failed;
     Result := LoggedTaskDialogMsgBox('',  SetupMessages[msgRetryCancelSelectAction], Text, '',
       mbError, MB_RETRYCANCEL, [SetupMessages[msgRetryCancelRetry], SetupMessages[msgRetryCancelCancel]],
       0, True, IDCANCEL);
@@ -1812,11 +1881,17 @@ function TWizardForm.PrepareToInstall(const WizardComponents, WizardTasks: TStri
   end;
 
   procedure DownloadArchivesToExtract(const SelectedComponents, SelectedTasks: TStringList);
+  var
+    DownloadPage: TDownloadWizardPage;
+    I: NativeInt;
+    FileEntry: PSetupFileEntry;
+    TempDir, DestDir, DestFile, BaseName, Url, UserName, Password, ISSigUrl: String;
+    RequiredSHA256OfFile, Failed, LastBaseNameOrUrl: String;
   begin
-    var DownloadPage: TDownloadWizardPage := nil;
+    DownloadPage := nil;
 
-    for var I := 0 to Entries[seFile].Count-1 do begin
-      const FileEntry: PSetupFileEntry = Entries[seFile][I];
+    for I := 0 to Entries[seFile].Count-1 do begin
+      FileEntry := Entries[seFile][I];
       if (foDownload in FileEntry.Options) and (foExtractArchive in FileEntry.Options) and
          ShouldProcessFileEntry(SelectedComponents, SelectedTasks, FileEntry, False) then begin
         if DownloadPage = nil then
@@ -1824,20 +1899,19 @@ function TWizardForm.PrepareToInstall(const WizardComponents, WizardTasks: TStri
         if not(foCustomDestName in FileEntry.Options) then
           InternalError('Expected CustomDestName flag');
         { Prepare }
-        const TempDir = AddBackslash(TempInstallDir);
-        const DestDir = GenerateUniqueName(TempDir + '_isetup', '.tmp');
-        const DestFile = AddBackslash(DestDir) + PathExtractName(FileEntry.DestName);
-        const BaseName = Copy(DestFile, Length(TempDir)+1, MaxInt);
+        TempDir := AddBackslash(TempInstallDir);
+        DestDir := GenerateUniqueName(TempDir + '_isetup', '.tmp');
+        DestFile := AddBackslash(DestDir) + PathExtractName(FileEntry.DestName);
+        BaseName := Copy(DestFile, Length(TempDir)+1, MaxInt);
         { Add to DownloadPage }
-        const Url = ExpandExternalSourceFilename(FileEntry);
-        const UserName = ExpandConst(FileEntry.DownloadUserName);
-        const Password = ExpandConst(FileEntry.DownloadPassword);
+        Url := ExpandExternalSourceFilename(FileEntry);
+        UserName := ExpandConst(FileEntry.DownloadUserName);
+        Password := ExpandConst(FileEntry.DownloadPassword);
         if FileEntry.Verification.Typ = fvISSig then begin
-          const ISSigUrl = GetISSigUrl(Url, ExpandConst(FileEntry.DownloadISSigSource));
+          ISSigUrl := GetISSigUrl(Url, ExpandConst(FileEntry.DownloadISSigSource));
           DownloadPage.AddExWithISSigVerify(Url, ISSigUrl, BaseName, UserName, Password,
             FileEntry.Verification.ISSigAllowedKeys, I)
         end else begin
-          var RequiredSHA256OfFile: String;
           if FileEntry.Verification.Typ = fvHash then
             RequiredSHA256OfFile := SHA256DigestToString(FileEntry.Verification.Hash)
           else
@@ -1851,29 +1925,11 @@ function TWizardForm.PrepareToInstall(const WizardComponents, WizardTasks: TStri
       ShowPreparing;
       DownloadPage.Show;
       try
-        var Failed, LastBaseNameOrUrl: String;
         repeat
           Failed := '';
           LastBaseNameOrUrl := '';
           try
-            DownloadPage.Download(procedure(const DownloadedFile: TDownloadFile; const DestFile: String; var Remove: Boolean)
-              begin
-                if not DownloadedFile.DotISSigEntry then begin { Check for the extra entries which download .issig }
-                  const FileEntry: PSetupFileEntry = Entries[seFile][DownloadedFile.Data];
-                  { Update SourceFilename, ensuring it doesn't become a super path. Also see
-                    NotifyBeforeInstallFileEntry. }
-                  FileEntry.SourceFilename := PathConvertSuperToNormal(DestFile);
-                  { Remove Download flag since download has been done, and remove CustomDestName flag
-                    since ExtractArchive flag doesn't like that }
-                  FileEntry.Options := FileEntry.Options - [foDownload, foCustomDestName];
-                  { DestName should now not include a filename, see TSetupCompiler.EnumFilesProc.ProcessFileList }
-                  FileEntry.DestName := PathExtractPath(FileEntry.DestName);
-                  FileEntry.Verification.Typ := fvNone;
-                end;
-                { Tell DownloadPage to not download this file again on retry. Without this it would
-                  redownload files that don't use verification. }
-                Remove := True;
-              end);
+            DownloadPage.Download(CompleteArchiveDownload);
           except
             if DownloadPage.AbortedByUser then
               raise;  { This is a regular exception and not EAbort (which is what we want) }
@@ -1962,6 +2018,8 @@ function TWizardForm.QueryRestartManager(const WizardComponents, WizardTasks: TS
   end;
 
   function RebootReasonsToString(const RebootReasons: Cardinal): String;
+  var
+    UnknownReasons: Cardinal;
   begin
     Result := '';
     if RebootReasons <> RmRebootReasonNone then begin
@@ -1970,7 +2028,7 @@ function TWizardForm.QueryRestartManager(const WizardComponents, WizardTasks: TS
       CheckAndAddRebootReasonToString(Result, RebootReasons, RmRebootReasonCriticalProcess, 'Critical Process');
       CheckAndAddRebootReasonToString(Result, RebootReasons, RmRebootReasonCriticalService, 'Critical Service');
       CheckAndAddRebootReasonToString(Result, RebootReasons, RmRebootReasonDetectedSelf, 'Detected Self');
-      const UnknownReasons = RebootReasons and not (RmRebootReasonNone or RmRebootReasonPermissionDenied or
+      UnknownReasons := RebootReasons and not (RmRebootReasonNone or RmRebootReasonPermissionDenied or
                                                     RmRebootReasonSessionMismatch or RmRebootReasonCriticalProcess or
                                                     RmRebootReasonCriticalService or RmRebootReasonDetectedSelf);
       CheckAndAddRebootReasonToString(Result, RebootReasons, UnknownReasons, Format('Unknown Reason(s) %d', [UnknownReasons]));
@@ -1983,7 +2041,8 @@ type
   TArrayOfProcessInfo = array[0..(MaxInt div SizeOf(RM_PROCESS_INFO))-1] of RM_PROCESS_INFO;
   PArrayOfProcessInfo = ^TArrayOfProcessInfo;
 var
-  ProcessInfosCount, ProcessInfosCountNeeded, RebootReasons: Cardinal;
+  ProcessInfosCount, ProcessInfosCountNeeded, RebootReasons, I: Cardinal;
+  NoRadioTop, YesRadioTop, MemoTop: Integer;
   ProcessInfos: PArrayofProcessInfo;
   AppName: String;
 begin
@@ -2024,7 +2083,7 @@ begin
         if RmSessionStarted then begin
           Log('RmGetList finished successfully.');
           if ProcessInfosCount > 0 then begin
-            for var I := 0 to ProcessInfosCount-1 do begin
+            for I := 0 to ProcessInfosCount-1 do begin
               AppName := WideCharToString(ProcessInfos[I].strAppName);
               LogFmt('RestartManager found an application using one of our files: %s', [AppName]);
               if RebootReasons = RmRebootReasonNone then begin
@@ -2052,9 +2111,9 @@ begin
     else
       PreparingLabel.Caption := SetupMessages[msgApplicationsFound];
     AdjustLabelHeight(PreparingLabel);
-    const NoRadioTop = PreparingPage.ClientHeight - ScalePixelsY(15) - PreparingNoRadio.Height;
-    const YesRadioTop = NoRadioTop - ScalePixelsY(22);
-    const MemoTop = PreparingLabel.Top + PreparingLabel.Height + ScalePixelsY(12);
+    NoRadioTop := PreparingPage.ClientHeight - ScalePixelsY(15) - PreparingNoRadio.Height;
+    YesRadioTop := NoRadioTop - ScalePixelsY(22);
+    MemoTop := PreparingLabel.Top + PreparingLabel.Height + ScalePixelsY(12);
     PreparingMemo.SetBounds(PreparingMemo.Left, MemoTop, PreparingMemo.Width, YesRadioTop - ScalePixelsY(12) - MemoTop);
     PreparingErrorBitmapImage.Visible := True;
     PreparingLabel.Visible := True;
@@ -2079,7 +2138,7 @@ procedure TWizardForm.UpdatePage(const PageID: Integer);
     if Lines <> '' then begin
       if ReadyMemo.Lines.Count > 0 then
         ReadyMemo.Lines.Append('');
-      ReadyMemo.Lines.Append(Lines);
+      ReadyMemo.Lines.Append({$IFDEF FPC}UTF8Encode({$ENDIF}Lines{$IFDEF FPC}){$ENDIF});
     end;
   end;
 
@@ -2089,6 +2148,11 @@ procedure TWizardForm.UpdatePage(const PageID: Integer);
   var
     TypeEntry: PSetupTypeEntry;
     MemoUserInfoInfo, MemoDirInfo, MemoGroupInfo, MemoTypeInfo, MemoComponentsInfo, MemoTasksInfo: String;
+    SelectedComponents, SelectedTasks: TStringList;
+    S: String;
+    {$IFNDEF FPC}
+    WasVisible: Boolean;
+    {$ENDIF}
     I: Integer;
   begin
     if not (shDisableReadyMemo in SetupHeader.Options) then begin
@@ -2096,16 +2160,16 @@ procedure TWizardForm.UpdatePage(const PageID: Integer);
 
       if shUserInfoPage in SetupHeader.Options then begin
         MemoUserInfoInfo := SetupMessages[msgReadyMemoUserInfo];
-        MemoUserInfoInfo := MemoUserInfoInfo+SNewLine+Space+UserInfoNameEdit.Text;
+        MemoUserInfoInfo := MemoUserInfoInfo+SNewLine+Space+{$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoNameEdit.Text{$IFDEF FPC}){$ENDIF};
         if UserInfoOrgEdit.Text <> '' then
-          MemoUserInfoInfo := MemoUserInfoInfo+SNewLine+Space+UserInfoOrgEdit.Text;
+          MemoUserInfoInfo := MemoUserInfoInfo+SNewLine+Space+{$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoOrgEdit.Text{$IFDEF FPC}){$ENDIF};
       end;
 
       if (shAlwaysShowDirOnReadyPage in SetupHeader.Options) or
          (not DisableDirPage and
           (shCreateAppDir in SetupHeader.Options)) then begin
         MemoDirInfo := SetupMessages[msgReadyMemoDir];
-        MemoDirInfo := MemoDirInfo+SNewLine+Space+DirEdit.Text;
+        MemoDirInfo := MemoDirInfo+SNewLine+Space+{$IFDEF FPC}UTF8Decode({$ENDIF}DirEdit.Text{$IFDEF FPC}){$ENDIF};
       end else
         MemoDirInfo := '';
 
@@ -2117,7 +2181,7 @@ procedure TWizardForm.UpdatePage(const PageID: Integer);
         end else
           MemoTypeInfo := '';  { can get here if all types failed their Check }
 
-        const SelectedComponents = TStringList.Create;
+        SelectedComponents := TStringList.Create;
         try
           GetSelectedComponents(SelectedComponents, True, True);
           if SelectedComponents.Count > 0 then begin
@@ -2135,11 +2199,11 @@ procedure TWizardForm.UpdatePage(const PageID: Integer);
          ((shAlwaysShowGroupOnReadyPage in SetupHeader.Options) or
           not DisableProgramGroupPage) then begin
         MemoGroupInfo := SetupMessages[msgReadyMemoGroup];
-        MemoGroupInfo := MemoGroupInfo+SNewLine+Space+GroupEdit.Text;
+        MemoGroupInfo := MemoGroupInfo+SNewLine+Space+{$IFDEF FPC}UTF8Decode({$ENDIF}GroupEdit.Text{$IFDEF FPC}){$ENDIF};
       end else
         MemoGroupInfo := '';
 
-      const SelectedTasks = TStringList.Create;
+      SelectedTasks := TStringList.Create;
       try
         GetSelectedTasks(SelectedTasks, True, True, True);
         if SelectedTasks.Count > 0 then begin
@@ -2154,9 +2218,9 @@ procedure TWizardForm.UpdatePage(const PageID: Integer);
 
       if (CodeRunner <> nil) and CodeRunner.FunctionExists('UpdateReadyMemo', True) then begin
         try
-          ReadyMemo.Lines.Text := CodeRunner.RunStringFunctions('UpdateReadyMemo',
+          ReadyMemo.Lines.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}CodeRunner.RunStringFunctions('UpdateReadyMemo',
             [Space, SNewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo,
-             MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo], bcNonEmpty, True, '');
+             MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo], bcNonEmpty, True, ''){$IFDEF FPC}){$ENDIF};
         except
           Application.HandleException(Self);
         end;
@@ -2178,12 +2242,15 @@ procedure TWizardForm.UpdatePage(const PageID: Integer);
       Temporarily setting Visible to True first also fixes it. Maybe there's an issue in
       TScrollingStyleHook. Note: You can make ReadyMemo initially invisible by navigating to wpReady
       with it invisible, then clicking Back, followed by Next. }
-    const WasVisible = ReadyMemo.Visible;
+    {$IFNDEF FPC}
+    WasVisible := ReadyMemo.Visible;
+    {$ENDIF}
     ReadyMemo.Visible := ReadyMemo.Lines.Count > 0;
+    {$IFNDEF FPC}
     if ReadyMemo.IsCustomStyleActive and not WasVisible and not ReadyMemo.Visible then
       TWinControlAccess(ReadyMemo).RecreateWnd; { RecreateWnd is public now but used to be protected }
+    {$ENDIF}
 
-    var S: String;
     if ReadyMemo.Visible then
       S := SetupMessages[msgReadyLabel2a]
     else
@@ -2218,9 +2285,11 @@ end;
 function TWizardForm.GetPreviousPageID: Integer;
 { Finds ID of previous page (not counting skipped pages), or -1 if there is
   no previous page to return to. }
+var
+  CurPageIndex, I: NativeInt;
 begin
-  var CurPageIndex := PageIndexFromID(CurPageID);
-  for var I := CurPageIndex-1 downto 0 do begin
+  CurPageIndex := PageIndexFromID(CurPageID);
+  for I := CurPageIndex-1 downto 0 do begin
     Result := TWizardPage(FPageList[I]).ID;
     { Never go back to wpInstalling }
     if Result = wpInstalling then
@@ -2232,9 +2301,13 @@ begin
 end;
 
 procedure TWizardForm.UpdateCurPageButtonState;
+var
+  PageIndex: NativeInt;
+  Page: TWizardPage;
+  Flags: UINT;
 begin
-  var PageIndex := PageIndexFromID(CurPageID);
-  var Page: TWizardPage := FPageList[PageIndex];
+  PageIndex := PageIndexFromID(CurPageID);
+  Page := FPageList[PageIndex];
 
   if not(psNoButtons in Page.Style) then begin
     BackButton.Visible := (CurPageID <> wpInstalling) and (GetPreviousPageID <> -1);
@@ -2256,7 +2329,6 @@ begin
     CancelButton.Visible := False;
   end;
   { Set the enabled state of the close button to match the Cancel button }
-  var Flags: UINT;
   if CancelButton.CanFocus then
     Flags := 0
   else
@@ -2266,8 +2338,10 @@ end;
 
 procedure TWizardForm.SetCurPage(const NewPageID: Integer);
 { Changes which page is currently visible }
+var
+  Page: TWizardPage;
 begin
-  const Page = PageFromID(NewPageID);
+  Page := PageFromID(NewPageID);
   FCurPageID := NewPageID;
 
   { Select the page in the notebooks }
@@ -2284,16 +2358,16 @@ begin
   { Set button visibility and captions }
   UpdateCurPageButtonState;
 
-  BackButton.Caption := SetupMessages[msgButtonBack];
+  BackButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonBack]{$IFDEF FPC}){$ENDIF};
   if CurPageID = wpReady then begin
-    NextButton.Caption := SetupMessages[msgButtonInstall];
-    CancelButton.Caption := SetupMessages[msgButtonCancel];
+    NextButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonInstall]{$IFDEF FPC}){$ENDIF};
+    CancelButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonCancel]{$IFDEF FPC}){$ENDIF};
   end else if ((CurPageID = wpPreparing) and PrepareToInstallNeedsRestart) or (CurPageID = wpFinished) then begin
-    NextButton.Caption := SetupMessages[msgButtonFinish];
-    CancelButton.Caption := SetupMessages[msgButtonCancel];
+    NextButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonFinish]{$IFDEF FPC}){$ENDIF};
+    CancelButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonCancel]{$IFDEF FPC}){$ENDIF};
   end else begin
-    NextButton.Caption := SetupMessages[msgButtonNext];
-    CancelButton.Caption := SetupMessages[msgButtonCancel];
+    NextButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonNext]{$IFDEF FPC}){$ENDIF};
+    CancelButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonCancel]{$IFDEF FPC}){$ENDIF};
   end;
 
   { Adjust focus }
@@ -2370,15 +2444,18 @@ procedure TWizardForm.NextButtonClick(Sender: TObject);
 
   function CheckPassword: Boolean;
   { Also see MainFunc.HandleInitPassword }
+  var
+    S: String;
+    Timer: TOneShotTimer;
+    CryptKey: TSetupEncryptionKey;
+    SaveCursor: HCURSOR;
   begin
     Result := False;
-    var S := PasswordEdit.Text;
+    S := {$IFDEF FPC}UTF8Decode({$ENDIF}PasswordEdit.Text{$IFDEF FPC}){$ENDIF};
 
-    var Timer: TOneShotTimer;
     Timer.Start(750); { See comment below }
 
-    var CryptKey: TSetupEncryptionKey;
-    var SaveCursor := GetCursor;
+    SaveCursor := GetCursor;
     SetCursor(LoadCursor(0, IDC_WAIT));
     try
       GenerateEncryptionKey(S, SetupEncryptionHeader.KDFSalt, SetupEncryptionHeader.KDFIterations, CryptKey);
@@ -2418,16 +2495,16 @@ procedure TWizardForm.NextButtonClick(Sender: TObject);
 
   function CheckUserInfoPage: Boolean;
   begin
-    UserInfoNameEdit.Text := Trim(UserInfoNameEdit.Text);
-    UserInfoOrgEdit.Text := Trim(UserInfoOrgEdit.Text);
+    UserInfoNameEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}Trim({$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoNameEdit.Text{$IFDEF FPC}){$ENDIF}){$IFDEF FPC}){$ENDIF};
+    UserInfoOrgEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}Trim({$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoOrgEdit.Text{$IFDEF FPC}){$ENDIF}){$IFDEF FPC}){$ENDIF};
     { Note: We don't require a user name to be entered on silent installs,
       since the default value in the registry could be blank (at least this
       was the case for one user). }
     Result := (UserInfoNameEdit.Text <> '') or (InstallMode <> imNormal);
     if Result then begin
-      WizardUserInfoName := UserInfoNameEdit.Text;
-      WizardUserInfoOrg := UserInfoOrgEdit.Text;
-      WizardUserInfoSerial := UserInfoSerialEdit.Text;
+      WizardUserInfoName := {$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoNameEdit.Text{$IFDEF FPC}){$ENDIF};
+      WizardUserInfoOrg := {$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoOrgEdit.Text{$IFDEF FPC}){$ENDIF};
+      WizardUserInfoSerial := {$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoSerialEdit.Text{$IFDEF FPC}){$ENDIF};
     end
     else begin
       LoggedMsgBox(SetupMessages[msgUserInfoNameRequired], '', mbError, MB_OK, True, IDOK);
@@ -2446,7 +2523,7 @@ procedure TWizardForm.NextButtonClick(Sender: TObject);
     if not ValidateDirEdit then
       Exit;
 
-    T := DirEdit.Text;
+    T := {$IFDEF FPC}UTF8Decode({$ENDIF}DirEdit.Text{$IFDEF FPC}){$ENDIF};
 
     if InstallMode = imNormal then begin
       { Check if there's enough free disk space }
@@ -2490,7 +2567,7 @@ procedure TWizardForm.NextButtonClick(Sender: TObject);
     Result := False;
 
     if InstallMode = imNormal then begin
-      if GetSpaceOnNearestMountPoint(DirEdit.Text, FreeSpace, TotalSpace) then begin
+      if GetSpaceOnNearestMountPoint({$IFDEF FPC}UTF8Decode({$ENDIF}DirEdit.Text{$IFDEF FPC}){$ENDIF}, FreeSpace, TotalSpace) then begin
         if FreeSpace < CurrentComponentsSpace then
           if LoggedMsgBox(FmtSetupMessage(msgDiskSpaceWarning,
                [IntToKBStr(CurrentComponentsSpace), IntToKBStr(FreeSpace)]),
@@ -2528,13 +2605,14 @@ procedure TWizardForm.NextButtonClick(Sender: TObject);
   begin
     Result := ValidateGroupEdit;
     if Result then
-      WizardGroupValue := GroupEdit.Text;
+      WizardGroupValue := {$IFDEF FPC}UTF8Decode({$ENDIF}GroupEdit.Text{$IFDEF FPC}){$ENDIF};
   end;
 
 var
   Continue: Boolean;
   NewPageID: Integer;
   WizardComponents, WizardTasks: TStringList;
+  PageIndex: NativeInt;
 label Again;
 begin
   if CurPageID = wpInstalling then
@@ -2562,18 +2640,18 @@ begin
   { Go to the next page, or close wizard if it was on the last page }
   Again:
   NewPageID := CurPageID;
-  var PageIndex := PageIndexFromID(NewPageID);
+  PageIndex := PageIndexFromID(NewPageID);
   repeat
     case NewPageID of
       wpUserInfo: begin
           { Ensure these variables are still set when a user's ShouldSkipPage
             function returns True for the wpUserInfo page }
-          WizardUserInfoName := UserInfoNameEdit.Text;
-          WizardUserInfoOrg := UserInfoOrgEdit.Text;
-          WizardUserInfoSerial := UserInfoSerialEdit.Text;
+          WizardUserInfoName := {$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoNameEdit.Text{$IFDEF FPC}){$ENDIF};
+          WizardUserInfoOrg := {$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoOrgEdit.Text{$IFDEF FPC}){$ENDIF};
+          WizardUserInfoSerial := {$IFDEF FPC}UTF8Decode({$ENDIF}UserInfoSerialEdit.Text{$IFDEF FPC}){$ENDIF};
         end;
-      wpSelectDir: WizardDirValue := RemoveBackslashUnlessRoot(DirEdit.Text);
-      wpSelectProgramGroup: WizardGroupValue := RemoveBackslashUnlessRoot(GroupEdit.Text);
+      wpSelectDir: WizardDirValue := RemoveBackslashUnlessRoot({$IFDEF FPC}UTF8Decode({$ENDIF}DirEdit.Text{$IFDEF FPC}){$ENDIF});
+      wpSelectProgramGroup: WizardGroupValue := RemoveBackslashUnlessRoot({$IFDEF FPC}UTF8Decode({$ENDIF}GroupEdit.Text{$IFDEF FPC}){$ENDIF});
       wpPreparing, wpFinished: begin
           { Note: wpPreparing only 'gets' here if there was no PrepareToInstall failure or if
             PrepareToInstallNeedsRestart is true, else the Cancel button is used instead of the Next button }
@@ -2717,6 +2795,7 @@ var
   SelectedComponents: TStringList;
   TypeEntry: PSetupTypeEntry;
   Equals: Boolean;
+  I: NativeInt;
 begin
   //first see if this current selection equals the initial selection
   //if so, reselect the initial setup type
@@ -2730,7 +2809,7 @@ begin
     TypesCombo.ItemIndex := InitialSetupTypeIndex;
   end else begin
     //select a custom type
-    for var I := 0 to Entries[seType].Count-1 do begin
+    for I := 0 to Entries[seType].Count-1 do begin
       TypeEntry := Entries[seType][I];
       if (toIsCustom in TypeEntry.Options) then begin
         TypesCombo.ItemIndex := TypesCombo.Items.IndexOfObject(TObject(TypeEntry));
@@ -2749,19 +2828,23 @@ const
   ColorChange: array[Boolean] of TColor = (clBtnFace, clWindow);
 begin
   GroupEdit.Enabled := not NoIconsCheck.Checked;
+  {$IFNDEF FPC}
   if not GroupEdit.IsCustomStyleActive then
+  {$ENDIF}
     GroupEdit.Color := ColorChange[GroupEdit.Enabled];
   GroupBrowseButton.Enabled := not NoIconsCheck.Checked;
 end;
 
 procedure TWizardForm.WMSysCommand(var Message: TWMSysCommand);
+var
+  S: String;
 begin
   if Message.CmdType = 9999 then begin
     { Removing the About box or modifying any existing text inside it is a
       violation of the Inno Setup license agreement; see LICENSE.TXT.
       However, adding additional lines to the end of the About box is
       permitted. }
-    var S := SetupTitle + ' version ' + SetupVersion + SNewLine;
+    S := SetupTitle + ' version ' + SetupVersion + SNewLine;
     if SetupTitle <> 'Inno Setup' then
       S := S + (SNewLine + 'Based on Inno Setup' + SNewLine);
     S := S + ('Copyright (C) 1997-2026 Jordan Russell' + SNewLine +
@@ -2836,7 +2919,7 @@ procedure ReconnectPath(const Path: String);
 { Attempts to re-establish the connection to Path if it's on a network drive
   since mapped network drives are initially disconnected in elevated processes. }
 var
-  WindowList: Pointer;
+  WindowList: {$IFDEF FPC}TList{$ELSE}Pointer{$ENDIF};
 begin
   { If this fails, we shouldn't display any message boxes since the install
     might be running silently with /SUPPRESSMSGBOXES and this is indeed so:
@@ -2845,11 +2928,11 @@ begin
   if Assigned(SHPathPrepareForWriteFunc) then begin
     { "Just in case" it tries to display UI anyway (it never did in tests),
       disable our windows }
-    WindowList := DisableTaskWindows(0);
+    WindowList := {$IFDEF FPC}Screen.DisableForms(nil){$ELSE}DisableTaskWindows(0){$ENDIF};
     try
       SHPathPrepareForWriteFunc(0, nil, PChar(Path), SHPPFW_NONE);
     finally
-      EnableTaskWindows(WindowList);
+      {$IFDEF FPC}Screen.EnableForms(WindowList){$ELSE}EnableTaskWindows(WindowList){$ENDIF};
     end;
   end;
 end;
@@ -2862,14 +2945,15 @@ var
   T: String;
   IsUNCPath: Boolean;
   I: Integer;
+  PathComponentCount: Integer;
   P: PChar;
   RootPath: String;
 begin
   Result := False;
 
-  T := AEdit.Text;
+  T := {$IFDEF FPC}UTF8Decode({$ENDIF}AEdit.Text{$IFDEF FPC}){$ENDIF};
   TidyUpDirName(T);
-  AEdit.Text := T;
+  AEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}T{$IFDEF FPC}){$ENDIF};
 
   { Check if the path is too long.
     Note: There's no sense in allowing paths to be as long as MAX_PATH (260)
@@ -2928,7 +3012,7 @@ begin
 
   { Enforce a limit on the number of components in the path to ensure
     MakeDir's maximum recursion depth isn't exceeded }
-  var PathComponentCount := 0;
+  PathComponentCount := 0;
   for I := Low(T) + PathDrivePartLength(T) to High(T) do
     if T[I] = '\' then
       Inc(PathComponentCount);
@@ -2949,7 +3033,7 @@ begin
 
   { After reconnecting, check if it's a disallowed network drive }
   if not IsUNCPath and not AllowNetworkDrive and
-     (GetDriveType(PChar(RootPath)) = DRIVE_REMOTE) then begin
+     (GetDriveTypeW(PWideChar(AddBackslash(RootPath))) = DRIVE_REMOTE) then begin
     LoggedMsgBox(SetupMessages[msgCannotInstallToNetworkDrive], '', mbError, MB_OK, True, IDOK);
     Exit;
   end;
@@ -2964,9 +3048,9 @@ begin
   Result := False;
 
   if not NoIconsCheck.Checked then begin
-    T := GroupEdit.Text;
+    T := {$IFDEF FPC}UTF8Decode({$ENDIF}GroupEdit.Text{$IFDEF FPC}){$ENDIF};
     TidyUpGroupName(T);
-    GroupEdit.Text := T;
+    GroupEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}T{$IFDEF FPC}){$ENDIF};
 
     { Check if the path is too long }
     if Length(T) > 120 then begin
@@ -3006,10 +3090,10 @@ begin
   if NewFolderName = '' then
     NewFolderName := Trim(SetupMessages[msgNewFolderName]);
 
-  Path := DirEdit.Text;
+  Path := {$IFDEF FPC}UTF8Decode({$ENDIF}DirEdit.Text{$IFDEF FPC}){$ENDIF};
   if ShowSelectFolderDialog(False, shAppendDefaultDirName in SetupHeader.Options,
      Path, NewFolderName) then
-    DirEdit.Text := Path;
+    DirEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}Path{$IFDEF FPC}){$ENDIF};
 end;
 
 procedure TWizardForm.GroupBrowseButtonClick(Sender: TObject);
@@ -3020,10 +3104,10 @@ begin
   if NewFolderName = '' then
     NewFolderName := Trim(SetupMessages[msgNewFolderName]);
 
-  Path := GroupEdit.Text;
+  Path := {$IFDEF FPC}UTF8Decode({$ENDIF}GroupEdit.Text{$IFDEF FPC}){$ENDIF};
   if ShowSelectFolderDialog(True, shAppendDefaultGroupName in SetupHeader.Options,
      Path, NewFolderName) then
-    GroupEdit.Text := Path;
+    GroupEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}Path{$IFDEF FPC}){$ENDIF};
 end;
 
 { also used by ScriptDlg! }

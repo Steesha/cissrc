@@ -2,7 +2,7 @@ unit Compression.SevenZipDLLDecoder.Interfaces;
 
 {
   Inno Setup
-  Copyright (C) 1997-2025 Jordan Russell
+  Copyright (C) 1997-2026 Jordan Russell
   Portions by Martijn Laan
   For conditions of distribution and use, see LICENSE.TXT.
 
@@ -14,7 +14,7 @@ interface
 {$MINENUMSIZE 4}
 
 uses
-  Winapi.ActiveX;
+  {$IFDEF FPC}ActiveX{$ELSE}Winapi.ActiveX{$ENDIF};
 
 const
   { From Guid.txt }

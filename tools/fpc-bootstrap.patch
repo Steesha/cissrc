@@ -1,0 +1,345 @@
+--- a/rtl/inc/ustrings.inc
++++ b/rtl/inc/ustrings.inc
+@@ -1,3 +1,6 @@
++{ Managed results are initialized by the compiler before these RTL callbacks.
++  FPC 3.2.2 cannot track the assignments performed by var-parameter callbacks. }
++{$push}{$warn 5093 off}
+ {
+     This file is part of the Free Pascal run time library.
+     Copyright (c) 1999-2005 by Florian Klaempfl,
+@@ -2436,3 +2439,5 @@
+   Result := UTF8ToString(rs);
+ end;
+ {$endif not CPUJVM}
++
++{$pop}
+--- a/rtl/inc/dynarr.inc
++++ b/rtl/inc/dynarr.inc
+@@ -1,3 +1,6 @@
++{ Managed results are initialized by the compiler before these RTL callbacks.
++  FPC 3.2.2 cannot track the assignments performed by var-parameter callbacks. }
++{$push}{$warn 5093 off}
+ {
+     This file is part of the Free Pascal run time library.
+     Copyright (c) 2000 by Florian Klaempfl
+@@ -870,3 +873,5 @@
+     fpc_dynarray_clear(p,ti);
+   end;
+ 
++
++{$pop}
+--- a/rtl/inc/variant.inc
++++ b/rtl/inc/variant.inc
+@@ -1,3 +1,6 @@
++{ Managed results are initialized by the compiler before these RTL callbacks.
++  FPC 3.2.2 cannot track the assignments performed by var-parameter callbacks. }
++{$push}{$warn 5093 off}
+ {
+     This file is part of the Free Pascal run time library.
+     Copyright (c) 2001 by the Free Pascal development team
+@@ -1157,3 +1160,5 @@
+   end;
+ 
+ 
++
++{$pop}
+--- a/rtl/objpas/classes/reader.inc
++++ b/rtl/objpas/classes/reader.inc
+@@ -1176,7 +1176,7 @@
+   if not Assigned(VarClearProc) then
+     raise EReadError.Create(SErrNoVariantSupport);
+ 
+-  FillChar(Result,sizeof(Result),0);
++  Result:=Unassigned;
+ 
+   nv:=NextValue;
+   case nv of
+--- a/rtl/inc/system.inc
++++ b/rtl/inc/system.inc
+@@ -718,7 +718,7 @@
+ function StackTop: pointer;
+ begin
+   { Avoid wrap to zero on 32-bit }
+-  if ptruint(StackBottom)+ StackLength > high(ptruint) then
++  if StackLength > high(ptruint) - ptruint(StackBottom) then
+     result:=pointer(ptruint(high(ptruint)))
+   else
+     result:=StackBottom + StackLength;
+@@ -1841,7 +1841,7 @@
+ {$ifdef FPCRTL_FILESYSTEM_SINGLE_BYTE_API}
+   Do_mkdir(ToSingleByteFileSystemEncodedFileName(S));
+ {$else FPCRTL_FILESYSTEM_SINGLE_BYTE_API}
+-  Do_mkdir(S);
++  Do_mkdir(UnicodeString(S));
+ {$endif}
+ end;
+ 
+@@ -1853,7 +1853,7 @@
+ {$ifdef FPCRTL_FILESYSTEM_SINGLE_BYTE_API}
+   Do_rmdir(ToSingleByteFileSystemEncodedFileName(S));
+ {$else FPCRTL_FILESYSTEM_SINGLE_BYTE_API}
+-  Do_rmdir(S);
++  Do_rmdir(UnicodeString(S));
+ {$endif}
+ End;
+ 
+@@ -1865,7 +1865,7 @@
+ {$ifdef FPCRTL_FILESYSTEM_SINGLE_BYTE_API}
+   Do_chdir(ToSingleByteFileSystemEncodedFileName(S));
+ {$else FPCRTL_FILESYSTEM_SINGLE_BYTE_API}
+-  Do_chdir(S);
++  Do_chdir(UnicodeString(S));
+ {$endif}
+ End;
+ 
+@@ -1891,7 +1891,7 @@
+ {$else FPCRTL_FILESYSTEM_SINGLE_BYTE_API}
+ function GetDirStrFromShortstring(const s: shortstring): UnicodeString;
+ begin
+-  GetDirStrFromShortstring:=s;
++  GetDirStrFromShortstring:=UnicodeString(s);
+ end;
+ {$endif FPCRTL_FILESYSTEM_SINGLE_BYTE_API}
+ 
+@@ -1968,7 +1968,7 @@
+ Begin
+   if (s='') or (InOutRes <> 0) then
+    exit;
+-  Do_mkdir(S);
++  Do_mkdir(UnicodeString(S));
+ End;
+ 
+ 
+@@ -1976,7 +1976,7 @@
+ Begin
+   if (s='') or (InOutRes <> 0) then
+    exit;
+-  Do_rmdir(S);
++  Do_rmdir(UnicodeString(S));
+ End;
+ 
+ 
+@@ -1984,7 +1984,7 @@
+ Begin
+   if (s='') or (InOutRes <> 0) then
+    exit;
+-  Do_chdir(S);
++  Do_chdir(UnicodeString(S));
+ End;
+ 
+ 
+--- a/rtl/inc/isotmp.inc
++++ b/rtl/inc/isotmp.inc
+@@ -78,9 +78,9 @@
+     var
+       astringLength : Integer;
+     begin
+-      getTempDir := GetEnvironmentVariable('TMP');
++      getTempDir := ShortString(ToSingleByteFileSystemEncodedFileName(GetEnvironmentVariable('TMP')));
+       if getTempDir = '' then
+-        getTempDir := GetEnvironmentVariable('TEMP');
++        getTempDir := ShortString(ToSingleByteFileSystemEncodedFileName(GetEnvironmentVariable('TEMP')));
+       astringlength := Length(getTempDir);
+       if (astringlength > 0) and (getTempDir[astringlength] <> DirectorySeparator) then
+         getTempDir := getTempDir + DirectorySeparator;
+--- a/rtl/objpas/classes/classes.inc
++++ b/rtl/objpas/classes/classes.inc
+@@ -266,7 +266,9 @@
+     on most platforms in FPC), so a different method was required
+     to start a thread if it's create with fSuspended=true -> that's
+     what this method is for. }
++{$push}{$warn SYMBOL_DEPRECATED off}
+   Resume;
++{$pop}
+ end;
+ 
+ function TThread.GetSuspended: Boolean;
+@@ -290,7 +292,9 @@
+ // requires this field at least)
+ {$if defined(unix) or defined(windows) or defined(os2) or defined(hasamiga)}
+   if not FExternalThread and not FInitialSuspended then
++{$push}{$warn SYMBOL_DEPRECATED off}
+     Resume;
++{$pop}
+ {$endif}
+ end;
+ 
+@@ -736,7 +740,7 @@
+ 
+ class function TThread.GetTickCount: LongWord;
+ begin
+-  Result := SysUtils.GetTickCount;
++  Result := LongWord(SysUtils.GetTickCount64);
+ end;
+ 
+ 
+--- a/rtl/win64/system.pp
++++ b/rtl/win64/system.pp
+@@ -579,12 +579,16 @@
+   StackLength := CheckInitialStkLen($1000000);
+   StackBottom := StackTop - StackLength;
+   { get some helpful informations }
++{$push}{$warn SYMBOL_DEPRECATED off}
+   GetStartupInfo(@startupinfo);
++{$pop}
+   { some misc Win32 stuff }
+   if not IsLibrary then
+     FPCSysInstance^:=getmodulehandle(nil);
+   MainInstance:=FPCSysInstance^;
++{$push}{$warn SYMBOL_DEPRECATED off}
+   cmdshow:=startupinfo.wshowwindow;
++{$pop}
+   { Setup heap and threading, these may be already initialized from TLS callback }
+   if not Assigned(CurrentTM.BeginThread) then
+   begin
+--- a/rtl/win/syswin.inc
++++ b/rtl/win/syswin.inc
+@@ -477,7 +477,9 @@
+       end;
+       if ErrorLen=ErrorBufferLength then
+         begin
++{$push}{$warn SYMBOL_PLATFORM off}
+           if not NoErrMsg then
++{$pop}
+             MessageBox(0,@ErrorBuf,pchar('Error'),0);
+           ErrorLen:=0;
+         end;
+--- a/rtl/unix/dos.pp
++++ b/rtl/unix/dos.pp
+@@ -233,7 +233,9 @@
+ begin
+   fpgettimeofday(@tz,nil);
+   EpochToLocal(tz.tv_sec,year,month,mday,hour,min,sec);
++{$push}{$warn SYMBOL_PLATFORM off}
+   Wday:=weekday(Year,Month,MDay);
++{$pop}
+ end;
+ 
+ 
+@@ -592,7 +594,9 @@
+      f.Attr:=Info.FMode;
+      f.Size:=Info.FSize;
+      f.mode:=st.st_mode;
++{$push}{$warn SYMBOL_PLATFORM off}
+      UnixDateToDT(Info.FMTime, DT);
++{$pop}
+      PackTime(DT,f.Time);
+      FindGetFileInfo:=true;
+    End;
+@@ -831,7 +835,9 @@
+      exit
+    end
+   else
++{$push}{$warn SYMBOL_PLATFORM off}
+    UnixDateToDT(Info.st_mTime,DT);
++{$pop}
+   PackTime(DT,Time);
+ End;
+ 
+@@ -850,7 +856,9 @@
+     begin
+       actime:=fptime;
+       UnPackTime(Time,DT);
++{$push}{$warn SYMBOL_PLATFORM off}
+       modtime:=DTToUnixDate(DT);
++{$pop}
+     end;
+ {$ifdef FPC_ANSI_TEXTFILEREC}
+   { encoding is already correct }
+@@ -918,7 +926,7 @@
+ var
+   p     : pchar;
+ Begin
+-  p:=BaseUnix.fpGetEnv(EnvVar);
++  p:=BaseUnix.fpGetEnv(PChar(AnsiString(EnvVar)));
+   if p=nil then
+    GetEnv:=''
+   else
+--- a/rtl/unix/tthread.inc
++++ b/rtl/unix/tthread.inc
+@@ -193,7 +193,9 @@
+         begin
+           Terminate;
+           if (FSuspendedInternal or FInitialSuspended) then
++{$push}{$warn SYMBOL_DEPRECATED off}
+             Resume;
++{$pop}
+           WaitFor;
+         end;
+     end;
+@@ -205,6 +207,7 @@
+   { has exited by ThreadFunc->EndThread->cthreads.CEndThread->DoneThread)   }
+ end;
+ 
++{$push}{$warn SYMBOL_DEPRECATED off}
+ procedure TThread.SetSuspended(Value: Boolean);
+ begin
+   if Value <> FSuspended then
+@@ -213,6 +216,7 @@
+     else
+       Resume;
+ end;
++{$pop}
+ 
+ procedure TThread.Suspend;
+ begin
+--- a/rtl/win/tthread.inc
++++ b/rtl/win/tthread.inc
+@@ -72,6 +72,7 @@
+ end;
+ 
+ 
++{$push}{$warn SYMBOL_DEPRECATED off}
+ procedure TThread.SetSuspended(Value: Boolean);
+ begin
+   if Value <> FSuspended then
+@@ -80,6 +81,7 @@
+     else
+       Resume;
+ end;
++{$pop}
+ 
+ procedure TThread.Suspend;
+ begin
+--- a/packages/fpmkunit/src/fpmkunit.pp
++++ b/packages/fpmkunit/src/fpmkunit.pp
+@@ -6830,7 +6830,7 @@
+       if FCachedlibcPath='' then
+         begin
+           s:=GetDefaultLibGCCDir(Defaults.CPU, Defaults.OS,ErrS);
+-          if s='' then
++          if (s='') and (ErrS<>'') then
+             Log(vlWarning, SWarngcclibpath +' '+ErrS)
+           else
+             begin
+@@ -6857,7 +6857,8 @@
+           acts as a read/write barrier }
+         ReadBarrier;
+ 
+-      Args.Add('-Fl'+FCachedlibcPath);
++      if FCachedlibcPath<>'' then
++        Args.Add('-Fl'+FCachedlibcPath);
+     end;
+ 
+   // Custom options which are added by dependencies
+@@ -7175,7 +7176,9 @@
+                         tsNeutral :
+                           MaybeCompile(APackage,T);
+                         tsConsidering :
+-                          Log(vlWarning,SWarnCircularTargetDependency,[ATarget.Name,T.Name]);
++                          { Pascal implementation uses clauses may form valid unit cycles.
++                            The compiler still rejects illegal interface cycles. }
++                          Log(vlDebug,'Unit implementation dependency cycle: %s -> %s',[ATarget.Name,T.Name]);
+                       end;
+                     end;
+                 end
+--- a/packages/fcl-base/fpmake.pp
++++ b/packages/fcl-base/fpmake.pp
+@@ -146,7 +146,6 @@
+       T:=P.Targets.AddExampleProgram('base64decodingtestcase.pas');
+       T:=P.Targets.AddExampleProgram('cachetest.pp');
+       T:=P.Targets.AddExampleProgram('cfgtest.pp');
+-      T:=P.Targets.AddExampleProgram('dbugsrv.pp');
+       T:=P.Targets.AddExampleProgram('debugtest.pp');
+       T:=P.Targets.AddExampleProgram('doecho.pp');
+       T:=P.Targets.AddExampleProgram('dparser.pp');

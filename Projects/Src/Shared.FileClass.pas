@@ -16,7 +16,7 @@ unit Shared.FileClass;
 interface
 
 uses
-  Windows, SysUtils;
+  {$IFDEF UNIX} Shared.PlatformTypes, {$ELSE} Windows, {$ENDIF} SysUtils, Shared.FPCStringUtils;
 
 type
   TFileCreateDisposition = (fdCreateAlways, fdCreateNew, fdOpenExisting,
@@ -113,7 +113,7 @@ type
   private
     FSeekedToEnd: Boolean;
     FUTF8WithoutBOM: Boolean;
-    procedure DoWrite(const S: AnsiString; const UTF8: Boolean);
+    procedure DoWrite(const S: RawByteString; const UTF8: Boolean);
   protected
     function CreateHandle(const AFilename: String;
       ACreateDisposition: TFileCreateDisposition; AAccess: TFileAccess;
@@ -133,22 +133,102 @@ type
     property ErrorCode: DWORD read FErrorCode write FErrorCode;
   end;
 
+type
+  TDetectedEncoding = (etUSASCII, etUTF8, etOther);
+
+function DetectUTF8Encoding(const S: AnsiString): TDetectedEncoding;
+
 implementation
 
 uses
-  WideStrUtils,
-  UnsignedFunc,
-  Shared.CommonFunc;
+  {$IFDEF UNIX} BaseUnix, {$ENDIF}
+  UnsignedFunc;
+
+{$IF Defined(FPC) and Defined(MSWINDOWS)}
+function SetFilePointerEx(hFile: THandle; Distance: Int64; NewPosition: PInt64;
+  MoveMethod: DWORD): BOOL; stdcall; external kernel32 name 'SetFilePointerEx';
+function GetFileSizeEx(hFile: THandle; out FileSize: Int64): BOOL;
+  stdcall; external kernel32 name 'GetFileSizeEx';
+{$IFEND}
 
 const
   SGenericIOError = 'File I/O error %d';
+  {$IFDEF UNIX}
+  ERROR_HANDLE_EOF = 38;
+  ERROR_NEGATIVE_SEEK = 131;
+  ERROR_WRITE_FAULT = 29;
+  ERROR_NO_UNICODE_TRANSLATION = 1113;
+  CP_UTF8 = 65001;
+  {$ENDIF}
+
+function DetectUTF8Encoding(const S: AnsiString): TDetectedEncoding;
+var
+  I, J, Extra: Integer;
+  C, Minimum: Cardinal;
+begin
+  Result := etUSASCII;
+  I := 1;
+  while I <= Length(S) do begin
+    C := Byte(S[I]);
+    Inc(I);
+    if C < $80 then
+      Continue;
+    Result := etUTF8;
+    if (C >= $c2) and (C <= $df) then begin
+      Extra := 1; Minimum := $80; C := C and $1f;
+    end else if (C >= $e0) and (C <= $ef) then begin
+      Extra := 2; Minimum := $800; C := C and $f;
+    end else if (C >= $f0) and (C <= $f4) then begin
+      Extra := 3; Minimum := $10000; C := C and $7;
+    end else
+      Exit(etOther);
+    if Length(S) - I + 1 < Extra then
+      Exit(etOther);
+    for J := 1 to Extra do begin
+      if (Byte(S[I]) and $c0) <> $80 then
+        Exit(etOther);
+      C := (C shl 6) or (Byte(S[I]) and $3f);
+      Inc(I);
+    end;
+    if (C < Minimum) or (C > $10ffff) or ((C >= $d800) and (C <= $dfff)) then
+      Exit(etOther);
+  end;
+end;
+
+function FileErrorMessage(const ErrorCode: DWORD): String;
+{$IFNDEF UNIX}
+var
+  Buffer: array[0..1023] of Char;
+  Len: Cardinal;
+{$ENDIF}
+begin
+  {$IFDEF UNIX}
+  case ErrorCode of
+    ERROR_HANDLE_EOF: Result := 'Reached end of file';
+    ERROR_NEGATIVE_SEEK: Result := 'Cannot seek to a negative position';
+    ERROR_WRITE_FAULT: Result := 'Cannot write to the file';
+    ERROR_NO_UNICODE_TRANSLATION: Result := 'Invalid character encoding';
+  else
+    Result := InnoFormat(SGenericIOError, [ErrorCode]);
+  end;
+  {$ELSE}
+  Len := FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM or
+    FORMAT_MESSAGE_IGNORE_INSERTS or FORMAT_MESSAGE_ARGUMENT_ARRAY, nil,
+    ErrorCode, 0, PWideChar(@Buffer[0]), Length(Buffer), nil);
+  while (Len > 0) and ((Buffer[Len-1] <= ' ') or (Buffer[Len-1] = '.')) do
+    Dec(Len);
+  SetString(Result, Buffer, Len);
+  {$ENDIF}
+end;
 
 { TCustomFile }
 
 function TCustomFile.GetCappedSize: Cardinal;
 { Like GetSize, but capped at $7FFFFFFF }
+var
+  LSize: Int64;
 begin
-  const LSize = GetSize;
+  LSize := GetSize;
   if LSize > High(Int32) then
     Result := High(Int32)
   else
@@ -156,36 +236,73 @@ begin
 end;
 
 class procedure TCustomFile.RaiseError(ErrorCode: DWORD);
+var
+  S: String;
+  E: EFileError;
 begin
-  var S := Win32ErrorString(ErrorCode);
-  if S = '' then begin
+  S := FileErrorMessage(ErrorCode);
+  if Length(S) = 0 then begin
     { In case there was no text for the error code. Shouldn't get here under
       normal circumstances. }
-    S := Format(SGenericIOError, [ErrorCode]);
+    S := InnoFormat(SGenericIOError, [ErrorCode]);
   end;
-  const E = EFileError.Create(S);
+  E := EFileError.Create(ToNativeText(S));
   E.FErrorCode := ErrorCode;
   raise E;
 end;
 
 class procedure TCustomFile.RaiseLastError;
+{$IFDEF UNIX}
+var
+  Code: Integer;
+  E: EFileError;
+{$ENDIF}
 begin
+  {$IFDEF UNIX}
+  Code := fpGetErrNo;
+  E := EFileError.Create(SysErrorMessage(Code));
+  case Code of
+    ESysENOENT: E.ErrorCode := 2;
+    ESysENOTDIR: E.ErrorCode := 3;
+    ESysEACCES, ESysEPERM, ESysEISDIR: E.ErrorCode := 5;
+    ESysEBADF: E.ErrorCode := 6;
+    ESysEROFS: E.ErrorCode := 19;
+    ESysENOSPC: E.ErrorCode := 112;
+    ESysEEXIST: E.ErrorCode := 183;
+    ESysEBUSY, ESysETXTBSY, ESysEAGAIN: E.ErrorCode := 32;
+  else
+    E.ErrorCode := 31;
+  end;
+  raise E;
+  {$ELSE}
   RaiseError(GetLastError);
+  {$ENDIF}
 end;
 
 procedure TCustomFile.ReadBuffer(var Buffer; Count: Cardinal);
+var
+  Destination: PByte;
+  BytesRead: Cardinal;
 begin
-  if Read(Buffer, Count) <> Count then begin
-    { Raise localized "Reached end of file" error }
-    RaiseError(ERROR_HANDLE_EOF);
+  Destination := @Buffer;
+  while Count > 0 do begin
+    BytesRead := Read(Destination^, Count);
+    if BytesRead = 0 then
+      RaiseError(ERROR_HANDLE_EOF);
+    Inc(Destination, BytesRead);
+    Dec(Count, BytesRead);
   end;
 end;
 
 procedure TCustomFile.WriteAnsiString(const S: AnsiString);
 begin
-  WriteBuffer(S[1], ULength(S));
+  if Length(S) > 0 then
+    WriteBuffer(S[1], ULength(S));
 end;
 
+{$IFDEF UNIX}
+{$I Shared.FileClass.Native.inc}
+{$ELSE}
 { TFile }
 
 constructor TFile.Create(const AFilename: String;
@@ -200,9 +317,10 @@ begin
 end;
 
 constructor TFile.CreateDuplicate(const ASourceFile: TFile);
+var
+  LHandle: THandle;
 begin
   inherited Create;
-  var LHandle: THandle;
   if not DuplicateHandle(GetCurrentProcess, ASourceFile.Handle,
      GetCurrentProcess, @LHandle, 0, False, DUPLICATE_SAME_ACCESS) then
     RaiseLastError;
@@ -234,7 +352,7 @@ const
   Disps: array[TFileCreateDisposition] of DWORD =
     (CREATE_ALWAYS, CREATE_NEW, OPEN_EXISTING, OPEN_ALWAYS, TRUNCATE_EXISTING);
 begin
-  Result := CreateFile(PChar(AFilename), AccessFlags[AAccess],
+  Result := CreateFileW(PWideChar(AFilename), AccessFlags[AAccess],
     SharingFlags[ASharing], nil, Disps[ACreateDisposition],
     FILE_ATTRIBUTE_NORMAL, 0);
 end;
@@ -246,10 +364,12 @@ begin
 end;
 
 function TFile.GetCanSeek: Boolean;
+var
+  FileType: DWORD;
 begin
   { Seek/GetPosition use SetFilePointerEx, which requires a GetFileType check first, see
     https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfilepointerex }
-  const FileType = GetFileType(FHandle);
+  FileType := GetFileType(FHandle);
   if (FileType = FILE_TYPE_UNKNOWN) and (GetLastError <> NO_ERROR) then
     RaiseLastError;
   Result := (FileType = FILE_TYPE_DISK);
@@ -301,6 +421,8 @@ begin
   end;
 end;
 
+{$ENDIF}
+
 { TMemoryFile }
 
 constructor TMemoryFile.Create(const AFilename: String);
@@ -327,19 +449,24 @@ end;
 destructor TMemoryFile.Destroy;
 begin
   if Assigned(FMemory) then
-    LocalFree(HLOCAL(FMemory));
+    FreeMem(FMemory);
   inherited;
 end;
 
 procedure TMemoryFile.AllocMemory(const ASize: Cardinal);
 begin
-  FMemory := Pointer(LocalAlloc(LMEM_FIXED, ASize));
+  if ASize = 0 then
+    GetMem(FMemory, 1)
+  else
+    GetMem(FMemory, ASize);
   if FMemory = nil then
     OutOfMemoryError;
   FSize := ASize;
 end;
 
 function TMemoryFile.ClipCount(DesiredCount: Cardinal): Cardinal;
+var
+  BytesLeft: Cardinal;
 begin
   { First check if FPosition is already past FSize, so the subtraction below
     won't underflow. And to be extra safe, make sure FPosition isn't negative
@@ -351,7 +478,7 @@ begin
   if FPosition < 0 then
     RaiseError(ERROR_NEGATIVE_SEEK);
 
-  const BytesLeft: Cardinal = FSize - Cardinal(FPosition);
+  BytesLeft := FSize - Cardinal(FPosition);
   if DesiredCount > BytesLeft then
     Result := BytesLeft
   else
@@ -419,17 +546,29 @@ begin
 end;
 
 function TTextFileReader.ReadLine: String;
+var
+  SrcStr: AnsiString;
+  {$IFDEF UNIX}
+  Encoded: RawByteString;
+  {$ELSE}
+  MBFlags: DWORD;
+  DestLen, WrittenLen: Integer;
+  DestStr: UnicodeString;
+  {$ENDIF}
 
   function DoReadLine: AnsiString;
   var
     I, L: Cardinal;
-    S: AnsiString;
+    S, S2: AnsiString;
+    OldPosition: Int64;
+    CappedSize: Cardinal;
   begin
+    S := '';
     while True do begin
       FillBuffer;
       if FEof then begin
         { End of file reached }
-        if S = '' then begin
+        if Length(S) = 0 then begin
           { If nothing was read (i.e. we were already at EOF), raise localized
             "Reached end of file" error }
           RaiseError(ERROR_HANDLE_EOF);
@@ -447,7 +586,8 @@ function TTextFileReader.ReadLine: String;
       if Integer(L + (I - FBufferOffset)) < 0 then
         OutOfMemoryError;
       SetLength(S, L + (I - FBufferOffset));
-      UMove(FBuffer[FBufferOffset], S[L+1], I - FBufferOffset);
+      if I > FBufferOffset then
+        UMove(FBuffer[FBufferOffset], S[L+1], I - FBufferOffset);
       FBufferOffset := I;
 
       if FBufferOffset < FBufferSize then begin
@@ -465,16 +605,15 @@ function TTextFileReader.ReadLine: String;
 
     if not FSawFirstLine then begin
       { Check for a UTF8 BOM at the start and if not found then check entire file }
-      if (Length(S) > 2) and (S[1] = #$EF) and (S[2] = #$BB) and (S[3] = #$BF) then begin
+      if (Length(S) > 2) and (Ord(S[1]) = $EF) and (Ord(S[2]) = $BB) and (Ord(S[3]) = $BF) then begin
         Delete(S, 1, 3);
         FCodePage := CP_UTF8;
       end else if CanSeek then begin
         { Detect BOM-less UTF8, also see GetCanDetectUTF8WithoutBOM }
-        const OldPosition = GetPosition;
+        OldPosition := GetPosition;
         try
-          const CappedSize = GetCappedSize; //can't be 0
+          CappedSize := GetCappedSize; //can't be 0
           Seek(0);
-          var S2: AnsiString;
           SetLength(S2, CappedSize);
           SetLength(S2, Read(S2[1], CappedSize));
           if DetectUTF8Encoding(S2) in [etUSASCII, etUTF8] then
@@ -490,15 +629,29 @@ function TTextFileReader.ReadLine: String;
   end;
 
 begin
-  const SrcStr = DoReadLine;
-  if SrcStr = '' then
+  SrcStr := DoReadLine;
+  if Length(SrcStr) = 0 then
     Exit('');
 
-  var MBFlags: DWORD := MB_ERR_INVALID_CHARS;
+  {$IFDEF UNIX}
+  if FCodePage = CP_UTF8 then begin
+    if not FAllowInvalidChars and (DetectUTF8Encoding(SrcStr) = etOther) then
+      RaiseError(ERROR_NO_UNICODE_TRANSLATION);
+    Result := UTF8Decode(SrcStr);
+  end else begin
+    Encoded := SrcStr;
+    if FCodePage = 0 then
+      SetCodePage(Encoded, 1252, False)
+    else
+      SetCodePage(Encoded, FCodePage, False);
+    Result := UnicodeString(Encoded);
+  end;
+  {$ELSE}
+  MBFlags := MB_ERR_INVALID_CHARS;
   if FAllowInvalidChars then
     MBFlags := 0;
 
-  const DestLen = MultiByteToWideChar(FCodePage, MBFlags, Pointer(SrcStr),
+  DestLen := MultiByteToWideChar(FCodePage, MBFlags, Pointer(SrcStr),
     Length(SrcStr), nil, 0);
   if DestLen = 0 then
     RaiseLastError;
@@ -506,9 +659,8 @@ begin
   if DestLen < 0 then
     RaiseError(ERROR_NO_UNICODE_TRANSLATION);
 
-  var DestStr: UnicodeString;
   SetLength(DestStr, DestLen);
-  const WrittenLen = MultiByteToWideChar(FCodePage, MBFlags, Pointer(SrcStr),
+  WrittenLen := MultiByteToWideChar(FCodePage, MBFlags, Pointer(SrcStr),
     Length(SrcStr), Pointer(DestStr), DestLen);
   { Return value should always be the same as the first call }
   if WrittenLen = 0 then
@@ -517,6 +669,7 @@ begin
     RaiseError(ERROR_NO_UNICODE_TRANSLATION);
 
   Result := DestStr;
+  {$ENDIF}
 end;
 
 { TTextFileWriter }
@@ -534,16 +687,17 @@ begin
     ASharing);
 end;
 
-procedure TTextFileWriter.DoWrite(const S: AnsiString; const UTF8: Boolean);
+procedure TTextFileWriter.DoWrite(const S: RawByteString; const UTF8: Boolean);
 { Writes a string to the file, seeking to the end first if necessary }
 const
   CRLF: array[0..1] of AnsiChar = (#13, #10);
   UTF8BOM: array[0..2] of AnsiChar = (#$EF, #$BB, #$BF);
 var
   C: AnsiChar;
+  LSize: Int64;
 begin
   if not FSeekedToEnd then begin
-    const LSize = GetSize;
+    LSize := GetSize;
     if LSize <> 0 then begin
       { File is not empty. Figure out if we have to append a line break. }
       Seek(LSize - SizeOf(C));
@@ -563,7 +717,8 @@ begin
       WriteBuffer(UTF8BOM, SizeOf(UTF8BOM));
     FSeekedToEnd := True;
   end;
-  WriteBuffer(Pointer(S)^, ULength(S));
+  if Length(S) > 0 then
+    WriteBuffer(Pointer(S)^, ULength(S));
 end;
 
 procedure TTextFileWriter.Write(const S: String);
@@ -583,7 +738,8 @@ end;
 
 procedure TTextFileWriter.WriteAnsiLine(const S: AnsiString);
 begin
-  WriteAnsi(S + #13#10);
+  WriteAnsi(S);
+  WriteAnsi(#13#10);
 end;
 
 end.

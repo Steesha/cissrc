@@ -9,11 +9,68 @@ unit Compiler.HelperFunc;
   Additional compiler functions
 }
 
+{$IFDEF FPC}{$MODESWITCH NESTEDPROCVARS}{$ENDIF}
+
 interface
 
 uses
-  Windows, Classes, SysUtils, UITypes,
+  Classes, SysUtils, {$IFNDEF FPC}UITypes, {$ENDIF}
   Shared.FileClass;
+
+{$IFDEF FPC}
+type
+  TColor = type Integer;
+  TCheckedTrustProc = procedure(CheckedTrust: Boolean) of object;
+
+const
+  { Windows target color values used by the installer and Pascal Script }
+  clScrollBar = Integer($FF000000);
+  clBackground = Integer($FF000001);
+  clActiveCaption = Integer($FF000002);
+  clInactiveCaption = Integer($FF000003);
+  clMenu = Integer($FF000004);
+  clWindow = Integer($FF000005);
+  clWindowFrame = Integer($FF000006);
+  clMenuText = Integer($FF000007);
+  clWindowText = Integer($FF000008);
+  clCaptionText = Integer($FF000009);
+  clActiveBorder = Integer($FF00000A);
+  clInactiveBorder = Integer($FF00000B);
+  clAppWorkSpace = Integer($FF00000C);
+  clHighlight = Integer($FF00000D);
+  clHighlightText = Integer($FF00000E);
+  clBtnFace = Integer($FF00000F);
+  clBtnShadow = Integer($FF000010);
+  clGrayText = Integer($FF000011);
+  clBtnText = Integer($FF000012);
+  clInactiveCaptionText = Integer($FF000013);
+  clBtnHighlight = Integer($FF000014);
+  cl3DDkShadow = Integer($FF000015);
+  cl3DLight = Integer($FF000016);
+  clInfoText = Integer($FF000017);
+  clInfoBk = Integer($FF000018);
+  clBlack = $000000;
+  clMaroon = $000080;
+  clGreen = $008000;
+  clOlive = $008080;
+  clNavy = $800000;
+  clPurple = $800080;
+  clTeal = $808000;
+  clGray = $808080;
+  clSilver = $C0C0C0;
+  clRed = $0000FF;
+  clLime = $00FF00;
+  clYellow = $00FFFF;
+  clBlue = $FF0000;
+  clFuchsia = $FF00FF;
+  clAqua = $FFFF00;
+  clLtGray = $C0C0C0;
+  clDkGray = $808080;
+  clWhite = $FFFFFF;
+  clNone = $1FFFFFFF;
+{$ELSE}
+type
+  TCheckedTrustProc = TProc<Boolean>;
 
 const
   clScrollBar = TColors.SysScrollBar;
@@ -61,10 +118,11 @@ const
   clDkGray = TColors.DkGray;
   clWhite = TColors.White;
   clNone = TColors.SysNone;
+{$ENDIF}
 
 function StringToColor(const S: string): TColor;
 function CreateMemoryStreamFromFile(const Filename: String; const CheckTrust: Boolean = False;
-  const OnCheckedTrust: TProc<Boolean> = nil): TMemoryStream;
+  const OnCheckedTrust: TCheckedTrustProc = nil): TMemoryStream;
 function FileSizeAndCRCIs(const Filename: String; const Size: Cardinal;
   const CRC: Longint): Boolean;
 function IsX86OrX64Executable(const F: TFile): Boolean;
@@ -74,11 +132,13 @@ procedure SkipWhitespace(var S: PChar);
 function ExtractWords(var S: PChar; const Sep: Char): String;
 function UnescapeBraces(const S: String): String;
 
+function BuildLanguageMessageData(const Messages: array of String): AnsiString;
+
 implementation
 
 uses
-  PathFunc, TrustFunc, Shared.CommonFunc,
-  Compression.Base, Compiler.Messages;
+  PathFunc, TrustFunc,
+  Compression.Base, Compiler.Messages, Shared.CompilerSupport, Shared.Struct;
 
 type
   TColorEntry = record
@@ -136,47 +196,70 @@ const
 function StringToColor(const S: string): TColor;
 
   function IdentToColor(Ident: string; var Color: Integer): Boolean;
+  var
+    I: Integer;
   begin
     if not PathStartsWith(Ident, 'cl') then
       Ident := 'cl' + Ident;
-    for var I := Low(Colors) to High(Colors) do
-      if SameText(Colors[I].Name, Ident) then begin
+    for I := Low(Colors) to High(Colors) do
+      if PathSame(Colors[I].Name, Ident) then begin
         Color := Integer(Colors[I].Value);
         Exit(True);
       end;
     Result := False;
   end;
 
+var
+  Hex: String;
 begin
   if not IdentToColor(S, Integer(Result)) then begin
-    var Hex := S;
+    Hex := S;
     if (Length(Hex) = 7) and (Hex[1] = '#') then
       Hex := '$' + Copy(Hex, 6, 2)  + Copy(Hex, 4, 2) + Copy(Hex, 2, 2);
-    Result := TColor(StrToInt(Hex));
+    Result := TColor(StrToInt({$IFDEF FPC}UTF8Encode(Hex){$ELSE}Hex{$ENDIF}));
   end;
 end;
 
 function CreateMemoryStreamFromFile(const Filename: String; const CheckTrust: Boolean;
-  const OnCheckedTrust: TProc<Boolean>): TMemoryStream;
+  const OnCheckedTrust: TCheckedTrustProc): TMemoryStream;
 { Creates a TMemoryStream and loads the contents of the specified file into it }
 var
   F: TFile;
   SizeOfFile: Cardinal;
+  FS: TFileStream;
 begin
   Result := TMemoryStream.Create;
   try
-    var FS: TFileStream;
     if CheckTrust then begin
       try
         FS := CheckFileTrust(Filename, [cftoKeepOpen]);
       except
+        {$IFDEF FPC}
+        raise Exception.Create(UTF8Encode(UnicodeFormat(
+          SCompilerCheckPrecompiledFileTrustError, [GetExceptMessage])));
+        {$ELSE}
         raise Exception.CreateFmt(SCompilerCheckPrecompiledFileTrustError, [GetExceptMessage]);
+        {$ENDIF}
       end;
     end else
       FS := nil;
     try
       if Assigned(OnCheckedTrust) then
         OnCheckedTrust(CheckTrust);
+
+      {$IFNDEF MSWINDOWS}
+      { Read from the verified handle so a path replacement cannot redirect the read }
+      if Assigned(FS) then begin
+        FS.Position := 0;
+        SizeOfFile := High(Int32);
+        if FS.Size < SizeOfFile then
+          SizeOfFile := Cardinal(FS.Size);
+        Result.SetSize(SizeOfFile);
+        if SizeOfFile <> 0 then
+          FS.ReadBuffer(Result.Memory^, SizeOfFile);
+        Exit;
+      end;
+      {$ENDIF}
 
       { Why not use TMemoryStream.LoadFromFile here?
         1. On Delphi 2 it opens files for exclusive access (not good).
@@ -194,7 +277,11 @@ begin
     end;
   except
     Result.Free;
+    {$IFDEF FPC}
+    raise Exception.Create(UTF8Encode(UnicodeFormat(SCompilerReadError, [Filename, GetExceptMessage])));
+    {$ELSE}
     raise Exception.CreateFmt(SCompilerReadError, [Filename, GetExceptMessage]);
+    {$ENDIF}
   end;
 end;
 
@@ -232,7 +319,7 @@ var
   DosHeader: array[0..63] of Byte;
   PEHeaderOffset: Longint;
   PESigAndHeader: packed record
-    Sig: DWORD;
+    Sig: UInt32;
     Machine: Word;
   end;
 begin
@@ -270,8 +357,8 @@ var
 begin
   if S = '' then
     Result := False
-  else if not AllowOperators and ((CompareText(S, 'not') = 0) or
-     (CompareText(S, 'and') = 0) or (CompareText(S, 'or') = 0)) then
+  else if not AllowOperators and (PathSame(S, 'not') or
+     PathSame(S, 'and') or PathSame(S, 'or')) then
     Result := False
   else begin
     N := Length(S);
@@ -288,8 +375,7 @@ end;
 
 procedure SkipWhitespace(var S: PChar);
 begin
-  while CharInSet(S^, [#1..' ']) do
-    Inc(S);
+  Shared.CompilerSupport.SkipWhitespace(S);
 end;
 
 function ExtractWords(var S: PChar; const Sep: Char): String;
@@ -324,6 +410,43 @@ begin
     end
     else
       Inc(I);
+  end;
+end;
+
+function BuildLanguageMessageData(const Messages: array of String): AnsiString;
+const
+  Terminator: WideChar = #0;
+var
+  Stream: TMemoryStream;
+  Header: TMessagesHeader;
+  MessageText: String;
+  PayloadOffset: Integer;
+begin
+  Stream := TMemoryStream.Create;
+  try
+    Stream.WriteBuffer(MessagesHdrID, SizeOf(MessagesHdrID));
+    FillChar(Header, SizeOf(Header), 0);
+    Stream.WriteBuffer(Header, SizeOf(Header));
+    PayloadOffset := SizeOf(MessagesHdrID) + SizeOf(Header);
+
+    for MessageText in Messages do begin
+      if MessageText <> '' then
+        Stream.WriteBuffer(PWideChar(MessageText)^, Length(MessageText) * SizeOf(WideChar));
+      Stream.WriteBuffer(Terminator, SizeOf(Terminator));
+    end;
+
+    if Stream.Size > High(Cardinal) then
+      raise Exception.CreateFmt(SCompilerCompressInternalError, ['Unexpected message data size']);
+    Header.NumMessages := Length(Messages);
+    Header.TotalSize := Cardinal(Stream.Size);
+    Header.NotTotalSize := not Header.TotalSize;
+    Header.CRCMessages := GetCRC32((PByte(Stream.Memory) + PayloadOffset)^,
+      Header.TotalSize - Cardinal(PayloadOffset));
+    Stream.Position := SizeOf(MessagesHdrID);
+    Stream.WriteBuffer(Header, SizeOf(Header));
+    SetString(Result, PAnsiChar(Stream.Memory), Stream.Size);
+  finally
+    Stream.Free;
   end;
 end;
 

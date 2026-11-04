@@ -43,7 +43,12 @@ uses
   Shared.SetupMessageIDs, Shared.CommonFunc.Vcl, Shared.CommonFunc,
   SetupLdrAndSetup.Messages, Setup.MainFunc, Setup.WizardForm;
 
-{$R *.DFM}
+{$R *.dfm}
+
+{$IFDEF FPC}
+const
+  SIID_MEDIABLANKCD = 59;
+{$ENDIF}
 
 function SelectDisk(const DiskNumber: Integer; const AFilename: String;
   var Path: String): Boolean;
@@ -53,8 +58,8 @@ begin
   with TNewDiskForm.Create(Application) do
     try
       FFilename := AFilename;
-      SelectDiskLabel.Caption := FmtSetupMessage(msgSelectDiskLabel2, [IntToStr(DiskNumber)]);
-      PathEdit.Text := Path;
+      SelectDiskLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}FmtSetupMessage(msgSelectDiskLabel2, [IntToStr(DiskNumber)]){$IFDEF FPC}){$ENDIF};
+      PathEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}Path{$IFDEF FPC}){$ENDIF};
       ActiveControl := OKButton;
       Result := ShowModal = mrOK;
       if Result then
@@ -72,11 +77,11 @@ begin
 
   InitializeFont(False, True);
 
-  Caption := SetupMessages[msgChangeDiskTitle];
-  PathLabel.Caption := SetupMessages[msgPathLabel];
-  BrowseButton.Caption := SetupMessages[msgButtonBrowse];
-  OKButton.Caption := SetupMessages[msgButtonOK];
-  CancelButton.Caption := SetupMessages[msgButtonCancel];
+  Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgChangeDiskTitle]{$IFDEF FPC}){$ENDIF};
+  PathLabel.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgPathLabel]{$IFDEF FPC}){$ENDIF};
+  BrowseButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonBrowse]{$IFDEF FPC}){$ENDIF};
+  OKButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonOK]{$IFDEF FPC}){$ENDIF};
+  CancelButton.Caption := {$IFDEF FPC}UTF8Encode({$ENDIF}SetupMessages[msgButtonCancel]{$IFDEF FPC}){$ENDIF};
 
   DiskBitmapImage.InitializeFromStockIcon(SIID_MEDIABLANKCD, clNone, [48, 64]);
 
@@ -89,7 +94,7 @@ end;
 
 function TNewDiskForm.GetSanitizedPath: String;
 begin
-  Result := PathExpand(RemoveBackslashUnlessRoot(Trim(PathEdit.Text)));
+  Result := PathExpand(RemoveBackslashUnlessRoot(Trim({$IFDEF FPC}UTF8Decode(PathEdit.Text){$ELSE}PathEdit.Text{$ENDIF})));
 end;
 
 procedure TNewDiskForm.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
@@ -115,7 +120,7 @@ var
 begin
   Dir := GetSanitizedPath;
   if BrowseForFolder(SetupMessages[msgSelectDirectoryLabel], Dir, Handle) then
-    PathEdit.Text := Dir;
+    PathEdit.Text := {$IFDEF FPC}UTF8Encode({$ENDIF}Dir{$IFDEF FPC}){$ENDIF};
 end;
 
 end.

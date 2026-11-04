@@ -1179,10 +1179,13 @@ function InitThemeLibrary: Boolean;
 
   function GetSystemDir: String;
   var
-    Buf: array[0..MAX_PATH-1] of Char;
+    Buf: array[0..MAX_PATH-1] of WideChar;
+    Count: Cardinal;
   begin
-    GetSystemDirectory(Buf, SizeOf(Buf) div SizeOf(Buf[0]));
-    Result := StrPas(Buf);
+    Count := GetSystemDirectoryW(@Buf[0], Length(Buf));
+    if (Count = 0) or (Count >= Length(Buf)) then
+      Exit('');
+    SetString(Result, PWideChar(@Buf[0]), Count);
   end;
 
   function WindowsVersionAtLeast(const AMajor, AMinor: Byte; const ABuild: Word): Boolean;
@@ -1195,11 +1198,16 @@ function InitThemeLibrary: Boolean;
     Result := WindowsVersion <= Cardinal((AMajor shl 24) or (AMinor shl 16) or ABuild);
   end;
 
+var
+  SystemDir: String;
 begin
   Inc(ReferenceCount);
 
   if ThemeLibrary = 0 then begin
-    ThemeLibrary := LoadLibrary(PChar(AddBackslash(GetSystemDir) + themelib));
+    SystemDir := GetSystemDir;
+    if SystemDir = '' then
+      Exit(False);
+    ThemeLibrary := LoadLibraryW(PWideChar(AddBackslash(SystemDir) + themelib));
     if ThemeLibrary <> 0 then begin
       OpenThemeData := GetProcAddress(ThemeLibrary, 'OpenThemeData');
       CloseThemeData := GetProcAddress(ThemeLibrary, 'CloseThemeData');
@@ -1274,11 +1282,17 @@ end;
 //----------------------------------------------------------------------------------------------------------------------
 
 
-initialization
-  var OSVersionInfo: TOSVersionInfo;
+procedure InitWindowsVersion;
+var
+  OSVersionInfo: TOSVersionInfoW;
+begin
   OSVersionInfo.dwOSVersionInfoSize := SizeOf(OSVersionInfo);
-  GetVersionEx(OSVersionInfo);
-  WindowsVersion := (Byte(OSVersionInfo.dwMajorVersion) shl 24) or (Byte(OSVersionInfo.dwMinorVersion) shl 16) or Word(OSVersionInfo.dwBuildNumber);
+  if GetVersionExW(OSVersionInfo) then
+    WindowsVersion := (Byte(OSVersionInfo.dwMajorVersion) shl 24) or (Byte(OSVersionInfo.dwMinorVersion) shl 16) or Word(OSVersionInfo.dwBuildNumber);
+end;
+
+initialization
+  InitWindowsVersion;
 
 { Following commented out by JR. Depending on unit deinitialization order, the
   FreeThemeLibrary call below could be made while other units are still using

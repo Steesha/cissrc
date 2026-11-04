@@ -12,22 +12,25 @@ unit Compression.Zlib;
 interface
 
 uses
-  Windows, SysUtils, Compression.Base;
+  {$IFDEF MSWINDOWS} Windows, {$ELSE} CTypes, {$ENDIF} SysUtils, Compression.Base;
 
+{$IFDEF MSWINDOWS}
 function ZlibInitCompressFunctions(Module: HMODULE): Boolean;
 function ZlibInitDecompressFunctions(Module: HMODULE): Boolean;
+{$ENDIF}
 
 type
-  TZAlloc = function(AppData: Pointer; Items, Size: Cardinal): Pointer; stdcall;
-  TZFree = procedure(AppData, Block: Pointer); stdcall;
+  TZULong = {$IFDEF MSWINDOWS}Cardinal{$ELSE}culong{$ENDIF};
+  TZAlloc = function(AppData: Pointer; Items, Size: Cardinal): Pointer; {$IFDEF MSWINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
+  TZFree = procedure(AppData, Block: Pointer); {$IFDEF MSWINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
   TZStreamRec = record
     next_in: Pointer;     { next input byte }
     avail_in: Cardinal;   { number of bytes available at next_in }
-    total_in: Cardinal;   { total nb of input bytes read so far }
+    total_in: TZULong;   { total nb of input bytes read so far }
 
     next_out: Pointer;    { next output byte should be put here }
     avail_out: Cardinal;  { remaining free space at next_out }
-    total_out: Cardinal;  { total nb of bytes output so far }
+    total_out: TZULong;  { total nb of bytes output so far }
 
     msg: PAnsiChar;       { last error message, NULL if no error }
     internal: Pointer;    { not visible by applications }
@@ -37,8 +40,8 @@ type
     AppData: Pointer;     { private data object passed to zalloc and zfree }
 
     data_type: Integer;   { best guess about the data type: ascii or binary }
-    adler: Longint;       { adler32 value of the uncompressed data }
-    reserved: Longint;    { reserved for future use }
+    adler: TZULong;       { adler32 value of the uncompressed data }
+    reserved: TZULong;    { reserved for future use }
   end;
 
   TZCompressor = class(TCustomCompressor)
@@ -79,7 +82,9 @@ const
   SZlibDataError = 'zlib: Compressed data is corrupted';
   SZlibInternalError = 'zlib: Internal error. Code %d';
 
+  {$IFDEF MSWINDOWS}
   ZLIB_VERSION = '1.3.2';  { Do not change this! }
+  {$ENDIF}
 
   Z_NO_FLUSH      = 0;
   Z_PARTIAL_FLUSH = 1;
@@ -97,6 +102,7 @@ const
   Z_BUF_ERROR     = -5;
   Z_VERSION_ERROR = -6;
 
+{$IFDEF MSWINDOWS}
 var
   deflateInit_: function(var strm: TZStreamRec; level: Integer; version: PAnsiChar;
     stream_size: Integer): Integer; stdcall;
@@ -138,7 +144,21 @@ begin
   end;
 end;
 
-function zlibAllocMem(AppData: Pointer; Items, Size: Cardinal): Pointer; stdcall;
+{$ELSE}
+{$LINKLIB z}
+function deflateInit_(var strm: TZStreamRec; level: Integer; version: PAnsiChar;
+    stream_size: Integer): Integer; cdecl; external name 'deflateInit_';
+function deflate(var strm: TZStreamRec; flush: Integer): Integer; cdecl; external name 'deflate';
+function deflateEnd(var strm: TZStreamRec): Integer; cdecl; external name 'deflateEnd';
+function inflateInit_(var strm: TZStreamRec; version: PAnsiChar;
+    stream_size: Integer): Integer; cdecl; external name 'inflateInit_';
+function inflate(var strm: TZStreamRec; flush: Integer): Integer; cdecl; external name 'inflate';
+function inflateEnd(var strm: TZStreamRec): Integer; cdecl; external name 'inflateEnd';
+function inflateReset(var strm: TZStreamRec): Integer; cdecl; external name 'inflateReset';
+function zlibVersion: PAnsiChar; cdecl; external name 'zlibVersion';
+{$ENDIF}
+
+function zlibAllocMem(AppData: Pointer; Items, Size: Cardinal): Pointer; {$IFDEF MSWINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
 begin
   try
     GetMem(Result, Items * Size);
@@ -149,17 +169,19 @@ begin
   end;
 end;
 
-procedure zlibFreeMem(AppData, Block: Pointer); stdcall;
+procedure zlibFreeMem(AppData, Block: Pointer); {$IFDEF MSWINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
 begin
   FreeMem(Block);
 end;
 
 function Check(const Code: Integer; const ValidCodes: array of Integer): Integer;
+var
+  I: Integer;
 begin
   if Code = Z_MEM_ERROR then
     OutOfMemoryError;
   Result := Code;
-  for var I := Low(ValidCodes) to High(ValidCodes) do
+  for I := Low(ValidCodes) to High(ValidCodes) do
     if ValidCodes[I] = Code then
       Exit;
   raise ECompressInternalError.CreateFmt(SZlibInternalError, [Code]);
@@ -199,7 +221,7 @@ begin
     InitStream(FStrm);
     FStrm.next_out := @FBuffer;
     FStrm.avail_out := SizeOf(FBuffer);
-    Check(deflateInit_(FStrm, FCompressionLevel, zlib_version, SizeOf(FStrm)), [Z_OK]);
+    Check(deflateInit_(FStrm, FCompressionLevel, {$IFDEF MSWINDOWS}ZLIB_VERSION{$ELSE}zlibVersion{$ENDIF}, SizeOf(FStrm)), [Z_OK]);
     FInitialized := True;
   end;
 end;
@@ -256,7 +278,7 @@ begin
   InitStream(FStrm);
   FStrm.next_in := @FBuffer;
   FStrm.avail_in := 0;
-  Check(inflateInit_(FStrm, zlib_version, SizeOf(FStrm)), [Z_OK]);
+  Check(inflateInit_(FStrm, {$IFDEF MSWINDOWS}ZLIB_VERSION{$ELSE}zlibVersion{$ENDIF}, SizeOf(FStrm)), [Z_OK]);
   FInitialized := True;
 end;
 
