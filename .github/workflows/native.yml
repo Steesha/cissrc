@@ -111,8 +111,8 @@ jobs:
         with:
           name: compiler-${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            build/windows/iscc/iscc.exe
-            build/windows/iscc/islzma-native.dll
+            build/windows/iscc/
+            !build/windows/iscc/units/**
             build/windows/issigtool/issigtool.exe
             build/windows/compiler-assets/
             license.txt
