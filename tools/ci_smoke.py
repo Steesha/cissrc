@@ -1,17 +1,38 @@
 """Exercise the native compiler and source-built installers in CI."""
 
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import struct
 import subprocess
 import tempfile
+import time
 
 
 PAYLOAD = b"source-built installer payload\n" * 128
 PACKAGES = [f"{style}-{codec}" for style in ("light", "dark", "dynamic")
             for codec in ("lzma2", "zip", "bzip")]
+
+
+@contextmanager
+def temporary_directory():
+  directory = tempfile.TemporaryDirectory(prefix="inno-ci-")
+  try:
+    yield directory.name
+  finally:
+    # The uninstaller's cleanup process briefly retains its log handle after
+    # the process we launched has exited. Do not hide persistent cleanup errors.
+    deadline = time.monotonic() + 30
+    while True:
+      try:
+        directory.cleanup()
+        break
+      except PermissionError as error:
+        if getattr(error, "winerror", None) not in (32, 33) or time.monotonic() >= deadline:
+          raise
+        time.sleep(0.1)
 
 
 def run(command, expected=0, input=None):
@@ -155,7 +176,7 @@ def main():
     parser.error("Packaging requires --compiler, --assets, --arch and --output")
   if args.install and not args.arch:
     parser.error("Installation requires --arch")
-  with tempfile.TemporaryDirectory(prefix="inno-ci-") as temporary:
+  with temporary_directory() as temporary:
     root = Path(temporary).resolve()
     if args.compiler:
       compiler = args.compiler.resolve()
