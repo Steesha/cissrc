@@ -1,0 +1,167 @@
+name: native
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        arch: [x64, x86]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64 g++-mingw-w64 fp-compiler fp-units-base fp-units-fcl zlib1g-dev libbz2-dev libssl-dev
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install fpc mingw-w64 openssl@3 lld
+          echo "$(brew --prefix lld)/bin" >> "$GITHUB_PATH"
+      - name: Remove precompiled Windows inputs
+        run: |
+          find Files Projects Components -type f \( \
+            -iname '*.exe' -o -iname '*.dll' -o -iname '*.obj' -o \
+            -iname '*.e32' -o -iname '*.e64' -o -iname '*.res' \) -delete
+      - name: Build native compiler and signature tool
+        run: |
+          cmake -S . -B build/host -DCMAKE_BUILD_TYPE=Release -DINNO_BUILD_NATIVE_ISCC=ON
+          cmake --build build/host --parallel 4 > build-host.log 2>&1 || { tail -100 build-host.log; exit 1; }
+          python tools/ci_smoke.py --compiler build/host
+      - name: Build FPC cross compiler and RTL
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          linker=()
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            linker=(--host-linker "$(command -v ld64.lld)")
+          fi
+          python tools/build_fpc_cross.py build/fpc --arch "$TARGET_ARCH" --jobs 4 "${linker[@]}" > build-fpc.log 2>&1 || { tail -100 build-fpc.log; exit 1; }
+      - name: Build Lazarus Windows units
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          python tools/build_lcl_cross.py build/lcl build/fpc/install --arch "$TARGET_ARCH" > build-lcl.log 2>&1 || { tail -100 build-lcl.log; exit 1; }
+      - name: Check out archive codec source
+        uses: actions/checkout@v6
+        with:
+          repository: jrsoftware/is7z
+          ref: a58aea78afc3f109b56bd8bf36b62a5faab5d6eb
+          path: build/is7z-source
+          persist-credentials: false
+      - name: Check out compression codec source
+        uses: actions/checkout@v6
+        with:
+          repository: jrsoftware/iscompress
+          ref: 35f14fc3b6d6aeeb36cf22e8a6205c1ed4b3e4e5
+          path: build/iscompress-source
+          persist-credentials: false
+      - name: Cross-compile Windows compiler and installer templates
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          cmake -S . -B build/windows \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/mingw-w64.cmake \
+            -DCMAKE_BUILD_TYPE=Release -DINNO_WINDOWS_ARCH="$TARGET_ARCH" \
+            -DINNO_BUILD_NATIVE_ISCC=ON \
+            -DINNO_FPC_CROSS_ROOT="$PWD/build/fpc/install" \
+            -DINNO_LCL_CROSS_UNITS="$PWD/build/lcl/units" \
+            -DINNO_IS7Z_SOURCE_DIR="$PWD/build/is7z-source" \
+            -DINNO_ISCOMPRESS_SOURCE_DIR="$PWD/build/iscompress-source"
+          cmake --build build/windows --parallel 4 > build-windows.log 2>&1 || { tail -100 build-windows.log; exit 1; }
+      - name: Package installers with the native compiler
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          python tools/ci_smoke.py --compiler build/host \
+            --assets build/windows/compiler-assets --arch "$TARGET_ARCH" --output build/installers
+      - name: Upload installers
+        uses: actions/upload-artifact@v6
+        with:
+          name: installers-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            build/installers/*.exe
+            build/installers/license.txt
+          if-no-files-found: error
+      - name: Upload Windows compiler
+        uses: actions/upload-artifact@v6
+        with:
+          name: compiler-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            build/windows/iscc/iscc.exe
+            build/windows/iscc/islzma-native.dll
+            build/windows/issigtool/issigtool.exe
+            build/windows/compiler-assets/
+            license.txt
+          if-no-files-found: error
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-logs-${{ matrix.os }}-${{ matrix.arch }}
+          path: build-*.log
+          if-no-files-found: ignore
+
+  windows-smoke:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+        arch: [x64, x86]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v6
+        with:
+          name: compiler-${{ matrix.os }}-${{ matrix.arch }}
+          path: compiler
+      - uses: actions/download-artifact@v6
+        with:
+          name: compiler-${{ matrix.os }}-${{ matrix.arch == 'x64' && 'x86' || 'x64' }}
+          path: compiler-other
+      - uses: actions/download-artifact@v6
+        with:
+          name: installers-${{ matrix.os }}-${{ matrix.arch }}
+          path: installers
+      - name: Check native-built installers on Windows
+        run: python tools/ci_smoke.py --install installers --arch ${{ matrix.arch }}
+      - name: Check Windows compiler with both installer architectures
+        run: |
+          Copy-Item compiler-other/build/windows/compiler-assets/* compiler/build/windows/compiler-assets/ -Recurse -Force
+          python tools/ci_smoke.py --compiler compiler/build/windows --assets compiler/build/windows/compiler-assets --arch x86 --output windows-x86
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/ci_smoke.py --install windows-x86 --arch x86
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/ci_smoke.py --compiler compiler/build/windows --assets compiler/build/windows/compiler-assets --arch x64 --output windows-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/ci_smoke.py --install windows-x64 --arch x64

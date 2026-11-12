@@ -283,6 +283,14 @@ Inno Setup-specific editing guidelines for the help files
 Setting up Continuous Integration
 ---------------------------------
 
+This fork also includes **native.yml**, which runs on pushes, pull requests, and
+manual dispatch without Delphi secrets or repository topics. It builds native
+ISCC and ISSigTool on Linux and macOS, cross-compiles the Windows x86 and x64
+compiler and installer templates from source, and checks packaging, installation,
+and uninstallation on Windows. The workflow uploads Windows compilers, installer
+probes, and build logs as artifacts. The following setup applies to the optional
+Delphi workflows.
+
 Inno Setup's source code includes a GitHub workflow named **build.yml** that
 performs unattended builds upon `push` events, it requires some setting up, though.
 
