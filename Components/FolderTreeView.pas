@@ -31,6 +31,11 @@ type
     class constructor Create;
     class destructor Destroy;
     {$ENDIF}
+    {$IFDEF FPC}
+    procedure UpdateColors;
+    procedure CMColorChanged(var Message: TLMessage); message CM_COLORCHANGED;
+    procedure CMFontChanged(var Message: TLMessage); message CM_FONTCHANGED;
+    {$ENDIF}
     procedure Change;
     procedure DeleteObsoleteNewItems(const ParentItem, ItemToKeep: HTREEITEM);
     function FindItem(const ParentItem: HTREEITEM; const AName: String): HTREEITEM;
@@ -515,8 +520,12 @@ var
 begin
   FDestroyingHandle := False;
   inherited;
+  {$IFDEF FPC}
+  UpdateColors;
+  {$ELSE}
   TreeView_SetBkColor(Handle, TColorRef(ColorToRGB(Color)));
   TreeView_SetTextColor(Handle, TColorRef(ColorToRGB(Font.Color)));
+  {$ENDIF}
   FDirectory := '';
   if csDesigning in ComponentState then
     Exit;
@@ -553,6 +562,34 @@ begin
     SetCursor(SaveCursor);
   end;
 end;
+
+{$IFDEF FPC}
+procedure TCustomFolderTreeView.UpdateColors;
+var
+  TextColor: TColor;
+begin
+  if not HandleAllocated then
+    Exit;
+  { Resolve LCL default colors before passing them to the native control }
+  TreeView_SetBkColor(Handle, TColorRef(GetRGBColorResolvingParent));
+  TextColor := Font.Color;
+  if TextColor = clDefault then
+    TextColor := GetDefaultColor(dctFont);
+  TreeView_SetTextColor(Handle, TColorRef(ColorToRGB(TextColor)));
+end;
+
+procedure TCustomFolderTreeView.CMColorChanged(var Message: TLMessage);
+begin
+  inherited;
+  UpdateColors;
+end;
+
+procedure TCustomFolderTreeView.CMFontChanged(var Message: TLMessage);
+begin
+  inherited;
+  UpdateColors;
+end;
+{$ENDIF}
 
 {$IFNDEF FPC}
 class destructor TCustomFolderTreeView.Destroy;

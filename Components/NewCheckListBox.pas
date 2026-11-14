@@ -786,6 +786,8 @@ begin
         {$ENDIF}
     end;
     {$IFDEF FPC}
+    if NewTextColor = clDefault then
+      NewTextColor := GetDefaultColor(dctFont);
     if StylePalette then begin
       Brush.Color := ResolveCheckListStyleColor(Brush.Color);
       NewTextColor := ResolveCheckListStyleColor(NewTextColor);
